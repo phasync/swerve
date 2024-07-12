@@ -1,0 +1,27 @@
+global
+    maxconn 65536
+    tune.bufsize 8192
+
+defaults
+    log     global
+    timeout connect 5s
+    timeout client  50s
+    timeout server  50s
+
+frontend www
+    mode http
+    bind *:10089
+    default_backend phasync-backend
+
+backend phasync-backend
+    mode http
+    http-reuse always
+    use-fcgi-app phasync-server
+    server phasync1 127.0.0.1:10003 proto fcgi
+
+fcgi-app phasync-server
+    docroot /
+    option mpxs-conns
+    option keep-conn
+    option max-reqs 1000
+    no option get-values

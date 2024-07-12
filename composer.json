@@ -1,0 +1,32 @@
+{
+    "name": "phasync/swerve",
+    "description": "S(w)erve your long-running PHP applications from the CLI fast and efficiently.",
+    "type": "library",
+    "require": {
+        "phasync/phasync": "^1.1.0-rc0",
+        "charm/terminal": "^1.1.5",
+        "phasync/server": "^1.0",
+        "psr/log": "^3.0",
+        "psr/http-message": "^1.0 | ^2.0",
+        "charm/http": "^2.0",
+        "nyholm/psr7": "^1.8"
+    },
+    "license": "GPLv2",
+    "autoload": {
+        "psr-4": {
+            "Swerve\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Frode Børli",
+            "email": "frode@ennerd.com"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "dev-master",
+        "slim/slim": "^4.14",
+        "slim/psr7": "^1.7"
+    }
+}
