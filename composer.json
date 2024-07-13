@@ -11,7 +11,7 @@
         "charm/http": "^2.0",
         "nyholm/psr7": "^1.8"
     },
-    "license": "GPLv2",
+    "license": "GPL-2.0",
     "autoload": {
         "psr-4": {
             "Swerve\\": "src/"
