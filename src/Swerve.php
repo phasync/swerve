@@ -115,7 +115,6 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
 
                 while (true) {
                     while ($this->pendingConnections->isEmpty()) {
-                        $this->logger->debug('Waiting for connections');
                         \phasync::awaitFlag($this->pendingConnections, \PHP_FLOAT_MAX);
                     }
                     $connection = $this->pendingConnections->dequeue();

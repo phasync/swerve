@@ -2,16 +2,12 @@
 
 namespace Swerve\FastCGI;
 
-use InvalidArgumentException;
-use phasync;
-use phasync\CancelledException;
 use phasync\Server\Server;
 use phasync\TimeoutException;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
 use Swerve\ServerInterface;
 use Swerve\Swerve;
-use Throwable;
 
 class FastCGIServer implements ServerInterface, LoggerAwareInterface
 {
@@ -68,7 +64,7 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
             throw new \RuntimeException('Not attached');
         }
         $this->server = new Server($this->address);
-        $this->coroutine = \phasync::go($this->run(...), [ $addConnectionFunction ]);
+        $this->coroutine = \phasync::go($this->run(...), [$addConnectionFunction]);
         $this->logger->info('Opened TCP socket at {address}', ['address' => $this->address]);
     }
 
@@ -87,28 +83,25 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
                 while (true) {
                     try {
                         $socket = $this->server->accept($peerName);
-                    }
-                    catch (TimeoutException) {
+                    } catch (TimeoutException) {
                         break;
                     }
                     if (!$socket) {
                         break;
                     }
                     // $this->logger->debug("Connect from {peerName}", ['peerName' => $peerName]);
-                    $fcgiSocket = new FastCGISocket($addConnection, $socket, $peerName);
+                    $fcgiSocket = new FastCGISocket($addConnection, $socket, $peerName, $this->logger);
                     $fiberId = $this->nextFiberId++;
-                    $this->fibers[$fiberId] = \phasync::go(function() use ($fiberId, $fcgiSocket) {
+                    $this->fibers[$fiberId] = \phasync::go(function () use ($fiberId, $fcgiSocket) {
                         try {
                             $fcgiSocket->run();
-                        }
-                        catch (Throwable $e) {
-                            $this->logger->notice(\get_class($e).': ' . $e->getMessage() . "\n" . $e->getTraceAsString());
-                        }
-                        finally {
+                        } catch (\Throwable $e) {
+                            $this->logger->notice(\get_class($e).': '.$e->getMessage()."\n".$e->getTraceAsString());
+                        } finally {
                             unset($this->fibers[$fiberId]);
                         }
                     });
-                }    
+                }
             }
         } catch (\Throwable $e) {
             $this->logger->error('{exception}', ['exception' => $e]);

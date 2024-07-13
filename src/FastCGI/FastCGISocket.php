@@ -2,20 +2,17 @@
 
 namespace Swerve\FastCGI;
 
-use phasync;
 use phasync\CancelledException;
 use phasync\Debug;
+use phasync\IOException;
 use phasync\TimeoutException;
 use phasync\Util\FastCGI\Record;
 use phasync\Util\StringBuffer;
 use phasync\Util\WaitGroup;
 use Psr\Log\LoggerInterface;
-use Psr\Log\LogLevel;
-use Swerve\ClosedException;
 use Swerve\Connection;
 use Swerve\ProtocolErrorException;
 use Swerve\Util\Logger;
-use Throwable;
 
 final class FastCGISocket
 {
@@ -32,7 +29,7 @@ final class FastCGISocket
     private LoggerInterface $logger;
     private bool $keepRunning = true;
 
-    public function __construct(\Closure $addConnectionFunction, $socket, string $peerName)
+    public function __construct(\Closure $addConnectionFunction, $socket, string $peerName, LoggerInterface $logger)
     {
         $this->addConnectionFunction = $addConnectionFunction;
         $this->socket = $socket;
@@ -40,16 +37,21 @@ final class FastCGISocket
         $this->readBuffer = new StringBuffer();
         $this->writeBuffer = new StringBuffer();
         \stream_set_blocking($this->socket, false);
-        $this->logger = new Logger($peerName, LogLevel::INFO);
+        $this->logger = $logger;
     }
 
-    public function __destruct() {
+    public function __destruct()
+    {
         $this->keepRunning = false;
     }
 
-    public function write(Record $fcgiRecord): void
+    public function write(Record $record): void
     {
-        $this->writeBuffer->write($fcgiRecord->toString());
+        // fwrite(STDERR, '> '.Record::TYPES[$record->type].' requestId='.$record->requestId."\n");
+        $this->writeBuffer->write($record->toString());
+        // if ($record->type === Record::FCGI_STDOUT) {
+        // fwrite(STDERR, $record->content."\n");
+        // }
     }
 
     /**
@@ -61,9 +63,9 @@ final class FastCGISocket
         // $this->logger->debug("Socket running");
         /**
          * Writes anything that arrives in the write buffer to the socket.
-         */       
-        $wg = new WaitGroup(); 
-        $writer = phasync::go(function() use (&$reader, $wg) {
+         */
+        $wg = new WaitGroup();
+        $writer = \phasync::go(function () use (&$reader, $wg) {
             try {
                 $wg->add();
                 while ($this->keepRunning && \is_resource($this->socket)) {
@@ -71,24 +73,29 @@ final class FastCGISocket
                     if ($chunk === false) {
                         return;
                     }
-                    //$this->logger->info('Read {bytes} bytes from socket', ['bytes' => \strlen($chunk)]);
+                    // $this->logger->info('Read {bytes} bytes from socket', ['bytes' => \strlen($chunk)]);
                     if ($chunk !== '') {
                         $this->readBuffer->write($chunk);
-                        $this->dispatch();    
+                        $this->dispatch();
                     }
                 }
-            }
-            catch (CancelledException) {}
-            finally {
+            } catch (IOException) {
+            } catch (CancelledException) {
+            } finally {
                 $wg->done();
-                //echo "Stopping writer\n";
-                if (!$reader->isTerminated()) {
-                    phasync::cancel($reader);
+                if (\is_resource($this->socket)) {
+                    \fclose($this->socket);
                 }
+                // echo "Stopping writer\n";
+                /*
+                if (!$reader->isTerminated()) {
+                    \phasync::cancel($reader);
+                }
+                */
                 $this->keepRunning = false;
             }
         });
-        $reader = phasync::go(function() use ($writer, $wg) {
+        $reader = \phasync::go(function () use ($wg) {
             try {
                 $wg->add();
                 while ($this->keepRunning) {
@@ -97,37 +104,43 @@ final class FastCGISocket
                     } catch (TimeoutException) {
                         continue;
                     }
-                    $result = \fwrite(phasync::writable($this->socket, \PHP_FLOAT_MAX), $chunk);
+                    $result = \fwrite(\phasync::writable($this->socket, \PHP_FLOAT_MAX), $chunk);
                     if ($result === false) {
                         return;
                     }
                     if ($result < \strlen($chunk)) {
-                        $this->writeBuffer->unread(\substr($chunk, $result));
+                        try {
+                            $this->writeBuffer->unread(\substr($chunk, $result));
+                        } catch (\LogicException) {
+                        }
                     }
                 }
-            }
-            catch (CancelledException) {}
-            finally {
+            } catch (IOException) {
+            } catch (CancelledException) {
+            } finally {
                 $wg->done();
-                //echo "Stopping reader\n";
-                if (!$writer->isTerminated()) {
-                    phasync::cancel($writer);
+                if (\is_resource($this->socket)) {
+                    \fclose($this->socket);
                 }
+                // echo "Stopping reader\n";
+                /*
+                if (!$writer->isTerminated()) {
+                    \phasync::cancel($writer);
+                }
+                */
                 $this->keepRunning = false;
             }
         });
 
         $wg->await();
         try {
-            phasync::await($reader, \PHP_FLOAT_MAX);
-        }
-        catch (Throwable $e) {
+            \phasync::await($reader, \PHP_FLOAT_MAX);
+        } catch (\Throwable $e) {
             $this->logger->error($e);
-        }    
-        try {
-            phasync::await($writer, \PHP_FLOAT_MAX);
         }
-        catch (Throwable $e) {
+        try {
+            \phasync::await($writer, \PHP_FLOAT_MAX);
+        } catch (\Throwable $e) {
             $this->logger->error($e);
         }
 
@@ -136,12 +149,13 @@ final class FastCGISocket
         }
     }
 
-    public function endConnection(FastCGIConnection $connection): void {
+    public function endConnection(FastCGIConnection $connection): void
+    {
         if (!$this->keepConnection) {
             $this->writeBuffer->end();
             if (\is_resource($this->socket)) {
-                //echo "ENDING CONNECTION 1\n";
-                \fclose($this->socket);
+                // echo "ENDING CONNECTION 1\n";
+                \fflush($this->socket);
             }
         }
         unset($this->connections[$connection->requestId]);
@@ -150,13 +164,15 @@ final class FastCGISocket
     /**
      * Forward all full FCGI records in the read buffer as possible to
      * connections.
-     * 
-     * @throws Throwable 
+     *
+     * @throws \Throwable
      */
     private function dispatch(): void
     {
         try {
-            while (null !== ($record = Record::parse($this->readBuffer))) {                                
+            while (null !== ($record = Record::parse($this->readBuffer))) {
+                // fwrite(STDERR, '< '.Record::TYPES[$record->type].' requestId='.$record->requestId."\n");
+
                 if ($record->requestId === 0) {
                     // Management record (FCGI_GET_VALUES, FCGI_GET_VALUES_RESULT)
                     if ($record->type === Record::FCGI_GET_VALUES) {
@@ -170,7 +186,7 @@ final class FastCGISocket
                         $this->writeBuffer->write($record->toString());
                     }
                 } elseif ($record->type === Record::FCGI_BEGIN_REQUEST) {
-                    //echo "Request Count for Socket: " . count($this->connections) . "\n";
+                    // echo "Request Count for Socket: " . count($this->connections) . "\n";
                     // Start a new request
                     if (isset($this->connections[$record->requestId])) {
                         throw new ProtocolErrorException('FCGI_BEGIN_REQUEST with existing request id '.$record->requestId);

@@ -47,6 +47,7 @@ pcntl_async_signals(true);
     if (!$args->quiet) {
         $term->write("<!bold>[ SWERVE ] <!blue>Swerving your website...<!!>\n\n");
     }
+    $term->write("<!red> >>> <!bold>WARNING! THIS IS BETA SOFTWARE FOR PREVIEW ONLY<!> <<<<!>\n\n");
 
     /*
     * Validate arguments or display --help
@@ -239,7 +240,11 @@ pcntl_async_signals(true);
                     }
 
                     if ($process === null) {
-                        $process = Process::run(__DIR__.'/../t/caddy', ['run', '--config', $configFile, '--watch']);
+                        $process = Process::run(__DIR__.'/caddy', ['run', '--config', $configFile, '--watch']);
+
+                        $httpAddresses = implode(' ', $args->http);
+                        $logger->alert('Listening to {http}', ['http' => $httpAddresses]);
+
                         phasync::go(function () use ($process, &$keepRunning, $logger) {
                             $buffer = '';
                             while ($keepRunning) {
@@ -247,7 +252,6 @@ pcntl_async_signals(true);
                                 $buffer .= $chunk;
                                 [$line, $buffer] = explode("\n", $buffer, 2);
                                 $data = \json_decode($line, true);
-                                $level = $data['level'];
                                 $msg = $data['msg'];
                                 $logger->info('caddy: {msg}', ['msg' => $msg]);
                             }
