@@ -1,57 +1,54 @@
 # Swerve
 
-`swerve` is an application protocol pattern, and an implementation for serving long-running PHP applications.
+![SWERVE](swerve-logo.png)
 
-A `swerve.php` file on the application root must return a PSR-15 RequestHandlerInterface object. This request handler object will be used to serve HTTP requests to the server.
+> EARLY DEMO RELEASE, BUGS TO BE EXPECTED
 
-`phasync/swerve` is a fast web server written primarily in PHP, and it can be used to run PHP applications straight from the command line without needing any external web server implementation.
+## Getting started
 
-## Running the Server
+1. Create a file named `swerve.php` in your application root. This file must return
+   a PSR-15 RequestHandlerInterface. For example:
 
-The server supports running PSR-15 compliant applications. To start the server, you need to create a PHP file that returns an instance of `Psr\Http\Server\RequestHandlerInterface`. By default, this file should be named `swerve.php` and located in the directory from where you launch the server.
+```php
+<?php
 
-### Example
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+use Slim\Factory\AppFactory;
 
-To run the server, execute the following command:
+$app = AppFactory::create();
+$app->get('/', function (RequestInterface $request, ResponseInterface $response) {
+    $response->getBody()->write('Hello, World');
 
-```bash
-./vendor/bin/swerve
+    return $response;
+});
+
+return $app;
 ```
 
-## Command Line Arguments
+2. Install `swerve`: `composer require phasync/swerve`
 
-You can customize the server's behavior using the following command-line arguments:
+3. Run `./vendor/bin/swerve` to launch the web server.
 
-```bash
-phasync-server [-a <address>] [-p <port>] [path/to/swerve.php]
-```
-
-- `-a <address>`: Sets the IP address to bind the server (default: `0.0.0.0`).
-- `-p <port>`: Sets the port number for the server (default: `80`).
-- `[path/to/sapi.php]`: Specifies the path to your PSR-15 compliant application file if it differs from the default `sapi.php`.
-
-## Example Usage
-
-### Default Execution
+## Usage
 
 ```bash
-./vendor/bin/phasync-server
+> ./vendor/bin/swerve --help
+[ SWERVE ] Swerving your website...
+
+ >>> WARNING! THIS IS BETA SOFTWARE FOR PREVIEW ONLY <<<
+
+Usage: swerve [-mdhvq] [-w,--workers=<processes>] [--fastcgi=<ip:port>] [--http=<ip:port>] [--https=<ip:port>] [--log=<path>] [swerve.php]
+
+-m,--monitor              Monitor source code and reload automatically
+-d                        Run as daemon
+-w,--workers=<processes>  Number of worker processes (default: auto)
+--fastcgi=<ip:port>       IP and port for FastCGI server
+--http=<ip:port>          IP and port for HTTP server (default: 127.0.0.1:8080)
+--https=<ip:port>         IP and port for HTTPS server
+--log=<path>              Log errors to file
+-h,--help                 Display this help message
+-v,--verbose              Increase logging verbosity, repeat for higher verbosity
+-q,--quiet                Suppress all output
+[swerve.php]              Full path to application php file
 ```
-
-This will start the server on `0.0.0.0` at port `80` using the default `sapi.php` file in the current directory.
-
-### Custom Address and Port
-
-```bash
-./vendor/bin/swerve -a 127.0.0.1 -p 8080
-```
-
-This command starts the server on `127.0.0.1` at port `8080`.
-
-### Specifying a Custom `swerve.php` Path
-
-```bash
-./vendor/bin/swerve /path/to/swerve.php
-```
-
-This will start the server using the specified `swerve.php` file.
