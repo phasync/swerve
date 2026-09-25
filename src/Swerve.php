@@ -38,7 +38,7 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
         return $this->running && $this->pendingConnections->isEmpty();
     }
 
-    public function await(): void
+    public function await(float $timeout = \PHP_FLOAT_MAX): void
     {
         while (!$this->isReady()) {
             \phasync::awaitFlag($this->pendingConnections);
