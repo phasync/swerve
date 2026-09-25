@@ -34,21 +34,27 @@ return $app;
 
 ```bash
 > ./vendor/bin/swerve --help
-[ SWERVE ] Swerving your website...
-
- >>> WARNING! THIS IS BETA SOFTWARE FOR PREVIEW ONLY <<<
-
-Usage: swerve [-mdhvq] [-w,--workers=<processes>] [--fastcgi=<ip:port>] [--http=<ip:port>] [--https=<ip:port>] [--log=<path>] [swerve.php]
+Usage: swerve [-mdhvq] [-w,--workers=<processes>] [--fastcgi=<ip:port>] [--http=<ip:port>] [--log=<path>] [swerve.php]
 
 -m,--monitor              Monitor source code and reload automatically
 -d                        Run as daemon
 -w,--workers=<processes>  Number of worker processes (default: auto)
 --fastcgi=<ip:port>       IP and port for FastCGI server
---http=<ip:port>          IP and port for HTTP server (default: 127.0.0.1:8080)
---https=<ip:port>         IP and port for HTTPS server
+--http=<ip:port>          IP and port to serve HTTP on (default: 127.0.0.1:8080)
 --log=<path>              Log errors to file
 -h,--help                 Display this help message
 -v,--verbose              Increase logging verbosity, repeat for higher verbosity
 -q,--quiet                Suppress all output
 [swerve.php]              Full path to application php file
 ```
+
+## Modes
+
+**HTTP (the default).** swerve starts one worker process per CPU core, and every worker
+serves HTTP/1.1 itself on the `--http` address. The kernel spreads new connections over
+the workers. There is nothing else to install or run.
+
+**FastCGI (`--fastcgi`).** For running swerve behind a web server of your own, such as
+nginx or HAProxy, which speaks FastCGI to the workers. swerve supports several requests
+multiplexed over one FastCGI connection; `etc/haproxy.cnf` is an example HAProxy
+configuration that uses it.

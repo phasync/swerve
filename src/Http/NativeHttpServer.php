@@ -7,7 +7,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * --native-http: a worker serving HTTP/1.1 itself, with no proxy in front. Every worker
+ * HTTP mode (--http): a worker serving HTTP/1.1 itself, with no proxy in front. Every worker
  * listens on the same address (SO_REUSEPORT), and the kernel spreads new connections
  * over them.
  */

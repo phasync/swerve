@@ -60,23 +60,11 @@ return (function () {
         multiple: true
     ));
     $args->add('http', new Option(
-        '', 'http', 'IP and port for HTTP server',
+        '', 'http', 'IP and port to serve HTTP on',
         default: '127.0.0.1:8080',
         placeholder: 'ip:port',
         validator: $addr_validator,
         multiple: true
-    ));
-    $args->add('nativehttp', new Option(
-        '', 'native-http', 'IP and port for HTTP served by the workers themselves, without HAProxy',
-        placeholder: 'ip:port',
-        validator: $addr_validator,
-        multiple: true
-    ));
-    $args->add('https', new Option(
-        '', 'https', 'IP and port for HTTPS server',
-        placeholder: 'ip:port',
-        validator: $addr_validator,
-        multiple: true,
     ));
     $args->add('log', new Option(
         '', 'log', 'Log errors to file',

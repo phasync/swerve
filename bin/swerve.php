@@ -11,7 +11,6 @@ use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 use Swerve\CLI\Args;
 use Swerve\FastCGI\FastCGIServer;
-use Swerve\HAProxy;
 use Swerve\Http\NativeHttpServer;
 use Swerve\Runners\Psr15Runner;
 use Swerve\Swerve;
@@ -120,11 +119,7 @@ pcntl_async_signals(true);
      * Setup clustering to launch enough worker processes.
      */
     if ($args->workers === 'auto') {
-        // In web server mode HAProxy needs cores too: measured best on 56 cores was 32
-        // workers and 16 HAProxy threads, with wrk on another machine
-        $workerCount = empty($args->fastcgi) && empty($args->nativehttp)
-            ? \max(1, \intdiv(System::getCPUCount() * 4, 7))
-            : System::getCPUCount();
+        $workerCount = System::getCPUCount();
     } else {
         $workerCount = $args->workers;
     }
@@ -174,38 +169,15 @@ pcntl_async_signals(true);
      */
     $swerve = new Swerve($logger);
 
-    if (!empty($args->nativehttp)) {
-        /*
-         * Native HTTP mode
-         *
-         * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT); no HAProxy.
-         */
-        if (!empty($args->fastcgi) || !$args->isDefault('http') || !$args->isDefault('https')) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>Can't combine --native-http with --fastcgi, --http or --https<!>\n\n");
-            exit(2);
-        }
-        if (!$app instanceof RequestHandlerInterface) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>--native-http needs {$args->swervefile} to return a PSR-15 RequestHandlerInterface<!>\n\n");
-            exit(2);
-        }
-        $workerCallbacks[] = function () use ($args, $app, $logger) {
-            foreach ($args->nativehttp as $address) {
-                $server = new NativeHttpServer($address, $app, $logger);
-                phasync::go($server->run(...));
-            }
-        };
-        $masterCallbacks[] = function () use ($args, $logger) {
-            $logger->alert('Listening to {http}', ['http' => \implode(' ', $args->nativehttp)]);
-        };
-    } elseif (!empty($args->fastcgi)) {
+    if (!empty($args->fastcgi)) {
         /*
          * FastCGI mode
          *
-         * This mode is for running Swerve behind another web server like
-         * for example nginx.
+         * For running swerve behind another web server, such as nginx, which speaks FastCGI
+         * to the workers.
          */
-        if (!$args->isDefault('http') || !$args->isDefault('https')) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>Can't combine --fastcgi with --http or --https<!>\n\n");
+        if (!$args->isDefault('http')) {
+            $term->write("<!redBG white>ERROR:<!> <!bold>Can't combine --fastcgi with --http<!>\n\n");
             exit(2);
         }
         foreach ($args->fastcgi as $fastcgi) {
@@ -214,58 +186,24 @@ pcntl_async_signals(true);
             $swerve->add(new FastCGIServer("tcp://$ip:$port", $logger));
         }
     } else {
-        /**
-         * Web server mode.
+        /*
+         * HTTP mode
          *
-         * HAProxy listens for HTTP and passes requests to the workers over multiplexed
-         * FastCGI, one Unix socket per worker slot.
+         * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
+         * kernel spreads new connections over them.
          */
-        if (!$args->isDefault('https')) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>--https is not supported yet<!>\n\n");
+        if (!$app instanceof RequestHandlerInterface) {
+            $term->write("<!redBG white>ERROR:<!> <!bold>HTTP mode needs {$args->swervefile} to return a PSR-15 RequestHandlerInterface<!>\n\n");
             exit(2);
         }
-        $socketDir = \sys_get_temp_dir().'/swerve-'.\posix_getpid();
-        if (!\is_dir($socketDir) && !\mkdir($socketDir, 0700)) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>Can't create $socketDir<!>\n\n");
-            exit(1);
-        }
-        $socketPath = static fn (int $slot): string => "$socketDir/worker$slot.sock";
-
-        $workerCallbacks[] = function () use ($swerve, $logger, $cluster, $socketPath) {
-            $path = $socketPath($cluster->getSlot());
-            if (\file_exists($path)) {
-                // Left behind by the worker this one replaces
-                \unlink($path);
+        $workerCallbacks[] = function () use ($args, $app, $logger) {
+            foreach ($args->http as $address) {
+                $server = new NativeHttpServer($address, $app, $logger);
+                phasync::go($server->run(...));
             }
-            $logger->debug('Worker listening on {path}', ['path' => $path]);
-            $swerve->add(new FastCGIServer('unix://'.$path, $logger));
         };
-
-        $masterCallbacks[] = function () use (&$keepRunning, $cluster, $socketPath, $socketDir, $args, $logger) {
-            $sockets = \array_map($socketPath, \range(0, $cluster->getWorkerCount() - 1));
-            // One HAProxy thread per two workers; more than 16 was slower (each thread keeps
-            // its own FastCGI connections, so fewer requests share a connection)
-            $threads = (int) (\getenv('SWERVE_HAPROXY_THREADS') ?: \min(16, \max(1, \intdiv($cluster->getWorkerCount(), 2))));
-            $haproxy = new HAProxy($args->http, $sockets, $logger, $threads);
-            $haproxy->start(function () use (&$keepRunning, $logger) {
-                if ($keepRunning) {
-                    // Not stopped by us, for example a Ctrl+C that reached HAProxy too
-                    $logger->critical('HAProxy exited, stopping');
-                    $keepRunning = false;
-                }
-            });
+        $masterCallbacks[] = function () use ($args, $logger) {
             $logger->alert('Listening to {http}', ['http' => \implode(' ', $args->http)]);
-
-            phasync::go(function () use (&$keepRunning, $haproxy, $socketDir) {
-                while ($keepRunning) {
-                    phasync::sleep(0.5);
-                }
-                $haproxy->stop();
-                foreach (\glob("$socketDir/*.sock") ?: [] as $socket) {
-                    \unlink($socket);
-                }
-                @\rmdir($socketDir);
-            });
         };
     }
 

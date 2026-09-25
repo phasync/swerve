@@ -11,7 +11,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * One HTTP/1.1 client connection in --native-http mode: reads a request, calls the
+ * One HTTP/1.1 client connection in HTTP mode: reads a request, calls the
  * application, writes the response, and repeats while the connection is kept alive.
  *
  * Requests on a connection are handled one after another in this connection's coroutine

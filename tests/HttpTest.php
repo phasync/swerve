@@ -1,7 +1,7 @@
 <?php
 
 /*
- * swerve --native-http: every worker speaks HTTP/1.1 on the socket itself, no HAProxy.
+ * swerve --http: every worker speaks HTTP/1.1 on the socket itself.
  */
 
 beforeEach(function () {
@@ -10,7 +10,7 @@ beforeEach(function () {
     fclose($probe);
 
     $this->master = proc_open(
-        [PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--native-http={$this->addr}", '--workers=2', __DIR__ . '/Fixtures/app.php'],
+        [PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http={$this->addr}", '--workers=2', __DIR__ . '/Fixtures/app.php'],
         [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes
     );

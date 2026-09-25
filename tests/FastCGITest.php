@@ -1,7 +1,7 @@
 <?php
 
 /*
- * swerve's FastCGI worker, tested from the outside with raw FastCGI records, as HAProxy
+ * swerve's FastCGI worker, tested from the outside with raw FastCGI records, as a web server such as HAProxy or nginx
  * talks to it: several requests multiplexed on one connection, kept open between requests.
  */
 

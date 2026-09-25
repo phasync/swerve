@@ -5,7 +5,7 @@ namespace Swerve\Http;
 use Psr\Http\Message\StreamInterface;
 
 /**
- * The body of a request in --native-http mode, read straight from the connection as the
+ * The body of a request in HTTP mode, read straight from the connection as the
  * application reads it: a Content-Length body, or a chunked one decoded on the fly. Bytes
  * already in the connection's buffer are used first; nothing is copied ahead.
  */
