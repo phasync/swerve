@@ -2,9 +2,6 @@
 
 namespace Swerve\FastCGI;
 
-use phasync\Internal\ObjectPoolInterface;
-use phasync\Internal\ObjectPoolTrait;
-use phasync\Util\FastCGI\Record;
 use phasync\Util\StringBuffer;
 use Swerve\Connection;
 
@@ -76,7 +73,7 @@ final class FastCGIConnection extends Connection
 
     public function read(int $maxLength): string
     {
-        return $this->stdin->read($maxLength, true);
+        return $this->stdin->read($maxLength);
     }
 
     public function eof(): bool

@@ -6,7 +6,6 @@ use phasync\CancelledException;
 use phasync\Debug;
 use phasync\IOException;
 use phasync\TimeoutException;
-use phasync\Util\FastCGI\Record;
 use phasync\Util\StringBuffer;
 use phasync\Util\WaitGroup;
 use Psr\Log\LoggerInterface;
@@ -99,10 +98,10 @@ final class FastCGISocket
             try {
                 $wg->add();
                 while ($this->keepRunning) {
-                    try {
-                        $chunk = $this->writeBuffer->read(131072, true);
-                    } catch (TimeoutException) {
-                        continue;
+                    $chunk = $this->writeBuffer->read(131072);
+                    if ('' === $chunk) {
+                        // Ended by endConnection() without FCGI_KEEP_CONN, and all of it written
+                        return;
                     }
                     $result = \fwrite(\phasync::writable($this->socket, \PHP_FLOAT_MAX), $chunk);
                     if ($result === false) {

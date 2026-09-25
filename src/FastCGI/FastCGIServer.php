@@ -2,8 +2,7 @@
 
 namespace Swerve\FastCGI;
 
-use phasync\Server\Server;
-use phasync\TimeoutException;
+use phasync\Net\Listener;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
 use Swerve\ServerInterface;
@@ -13,7 +12,7 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
 {
     private ?Swerve $swerve = null;
     private string $address;
-    private ?Server $server = null;
+    private ?Listener $listener = null;
     private ?\Fiber $coroutine = null;
     private LoggerInterface $logger;
     /**
@@ -48,7 +47,7 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
 
     public function detach(): void
     {
-        if ($this->server !== null) {
+        if ($this->listener !== null) {
             $this->close();
         }
         $this->swerve = null;
@@ -57,13 +56,13 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
 
     public function open(\Closure $addConnectionFunction): void
     {
-        if ($this->server !== null) {
+        if ($this->listener !== null) {
             throw new \RuntimeException('Already open');
         }
         if ($this->swerve === null) {
             throw new \RuntimeException('Not attached');
         }
-        $this->server = new Server($this->address);
+        $this->listener = \phasync\Net\listen($this->address);
         $this->coroutine = \phasync::go($this->run(...), [$addConnectionFunction]);
         $this->logger->info('Opened TCP socket at {address}', ['address' => $this->address]);
     }
@@ -79,29 +78,18 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
     private function run(\Closure $addConnection): void
     {
         try {
-            while (!$this->server->isClosed()) {
-                while (true) {
+            foreach ($this->listener as $peerName => $socket) {
+                $fcgiSocket = new FastCGISocket($addConnection, $socket, $peerName, $this->logger);
+                $fiberId = $this->nextFiberId++;
+                $this->fibers[$fiberId] = \phasync::go(function () use ($fiberId, $fcgiSocket) {
                     try {
-                        $socket = $this->server->accept($peerName);
-                    } catch (TimeoutException) {
-                        break;
+                        $fcgiSocket->run();
+                    } catch (\Throwable $e) {
+                        $this->logger->notice(\get_class($e).': '.$e->getMessage()."\n".$e->getTraceAsString());
+                    } finally {
+                        unset($this->fibers[$fiberId]);
                     }
-                    if (!$socket) {
-                        break;
-                    }
-                    // $this->logger->debug("Connect from {peerName}", ['peerName' => $peerName]);
-                    $fcgiSocket = new FastCGISocket($addConnection, $socket, $peerName, $this->logger);
-                    $fiberId = $this->nextFiberId++;
-                    $this->fibers[$fiberId] = \phasync::go(function () use ($fiberId, $fcgiSocket) {
-                        try {
-                            $fcgiSocket->run();
-                        } catch (\Throwable $e) {
-                            $this->logger->notice(\get_class($e).': '.$e->getMessage()."\n".$e->getTraceAsString());
-                        } finally {
-                            unset($this->fibers[$fiberId]);
-                        }
-                    });
-                }
+                });
             }
         } catch (\Throwable $e) {
             $this->logger->error('{exception}', ['exception' => $e]);
@@ -109,13 +97,13 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
             foreach ($this->fibers as $key => $fiber) {
                 if (!$fiber->isTerminated()) {
                     // $this->logger->debug("Cancelling connection");
-                    \phasync::cancel($fiber, $e);
+                    \phasync::cancel($fiber);
                     unset($this->fibers[$key]);
                 }
             }
-            if ($this->server !== null) {
-                $this->server->close();
-                $this->server = null;
+            if ($this->listener !== null) {
+                $this->listener->close();
+                $this->listener = null;
                 $this->logger->info('Closed TCP socket at {address}', ['address' => $this->address]);
             }
             $this->coroutine = null;
