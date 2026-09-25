@@ -20,7 +20,10 @@ use Swerve\Util\Cluster;
 use Swerve\Util\Logger;
 use Swerve\Util\System;
 
-require realpath(__DIR__.'/../../../vendor/autoload.php') ?: realpath(__DIR__.'/../vendor/autoload.php') ?: 'vendor/autoload.php';
+// Composer's vendor/bin proxy says where the autoloader is. Otherwise: swerve's own vendor
+// directory in a checkout, or the project's when installed at vendor/phasync/swerve.
+require $GLOBALS['_composer_autoload_path']
+    ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
 require __DIR__.'/../inc/caddy.php';
 
 pcntl_async_signals(true);
