@@ -94,7 +94,9 @@ final class Record implements ObjectPoolInterface
      */
     public static function parse(StringBuffer $buffer): ?Record
     {
-        $chunk = $buffer->readFixed(8);
+        // A timeout of 0 only takes what is already buffered: parse() runs in the coroutine
+        // that fills the buffer, so waiting here would wait for itself
+        $chunk = $buffer->readFixed(8, 0);
         if (null === $chunk) {
             return null;
         }
@@ -107,7 +109,7 @@ final class Record implements ObjectPoolInterface
         $paddingLength       = $unpacked['paddingLength'];
         $payloadLength       = $contentLength + $paddingLength;
         if ($payloadLength > 0) {
-            $content = $buffer->readFixed($payloadLength);
+            $content = $buffer->readFixed($payloadLength, 0);
             if (null === $content) {
                 $buffer->unread($chunk);
 
@@ -323,6 +325,9 @@ final class Record implements ObjectPoolInterface
     public function toString(): string
     {
         $contentLength = \strlen($this->content);
+        if ($contentLength > 65535) {
+            return $this->toStrings($contentLength);
+        }
         $paddingLength = (8 - ($contentLength % 8)) % 8;
 
         return \pack(
@@ -333,6 +338,25 @@ final class Record implements ObjectPoolInterface
             $contentLength,
             $paddingLength
         ) . $this->content . self::PADDINGS[$paddingLength];
+    }
+
+    /**
+     * Content longer than a record can hold (its length field is 16 bits), such as a large
+     * STDOUT chunk, as several consecutive records of the same type in one string.
+     */
+    private function toStrings(int $contentLength): string
+    {
+        $result = '';
+        // 65528 is the largest multiple of 8 below 65536, so full pieces need no padding
+        for ($offset = 0; $offset < $contentLength; $offset += 65528) {
+            $piece         = \substr($this->content, $offset, 65528);
+            $pieceLength   = \strlen($piece);
+            $paddingLength = (8 - ($pieceLength % 8)) % 8;
+            $result .= \pack('CCnnCx', $this->version, $this->type, $this->requestId, $pieceLength, $paddingLength)
+                . $piece . self::PADDINGS[$paddingLength];
+        }
+
+        return $result;
     }
 
     private function assertNotPooled(): void

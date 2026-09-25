@@ -136,3 +136,15 @@ function fcgi_interleave(string $a, string $b): string
 
     return $out;
 }
+
+test('a response written in chunks larger than one FastCGI record is split into several records', function () {
+    // The body is echoed, and the application writes it in 64 KB chunks: one byte more than
+    // a record can hold. Whether a chunk is that large depends on how much has arrived, so
+    // try sizes around the limit.
+    $conn = fcgi_connect($this->addr);
+    foreach ([65535, 65536, 65537, 131072, 200000] as $id => $size) {
+        $body = substr(str_repeat('0123456789abcdef', intdiv($size, 16) + 1), 0, $size);
+        fwrite($conn, fcgi_request($id + 1, 'POST', '/echo', $body));
+        expect(fcgi_read_responses($conn, [$id + 1])[$id + 1]['body'])->toBe($body);
+    }
+});

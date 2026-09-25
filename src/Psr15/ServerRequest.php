@@ -4,6 +4,7 @@ namespace Swerve\Psr15;
 use Nyholm\Psr7\MessageTrait;
 use Nyholm\Psr7\RequestTrait;
 use Nyholm\Psr7\Uri;
+use phasync\Psr\ComposableStream;
 use phasync\Util\StringBuffer;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\MessageInterface;
@@ -27,9 +28,25 @@ final class ServerRequest implements ServerRequestInterface {
     private ?string $requestMethod = null;
     private $uri = null;
 
+    /**
+     * Waits until the connection has received the request head.
+     */
     public function __construct(ConnectionInterface $connection)
     {
         $this->connection = $connection;
+        $this->setHeaders($connection->getRequestHeaders());
+        $this->protocol = $connection->getProtocolVersion();
+    }
+
+    /**
+     * The request body, read from the connection as the application reads it.
+     */
+    public function getBody(): StreamInterface
+    {
+        return $this->stream ??= new ComposableStream(
+            readFunction: $this->connection->read(...),
+            eofFunction: $this->connection->eof(...),
+        );
     }
 
     public function getServerParams(): array {

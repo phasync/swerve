@@ -28,11 +28,17 @@ function fcgi_start_worker(): array
 
     $process = proc_open([PHP_BINARY, __DIR__ . '/Fixtures/worker.php', "tcp://$addr"], [1 => ['file', '/dev/null', 'w'], 2 => STDERR], $pipes);
     $deadline = microtime(true) + 10;
-    while (false === ($conn = @stream_socket_client("tcp://$addr", $errno, $errstr, 1))) {
-        if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
-            throw new RuntimeException("The worker did not start listening on $addr");
+    // Connection refused until the worker listens; Pest would report each attempt's warning
+    set_error_handler(static fn (): bool => true);
+    try {
+        while (false === ($conn = stream_socket_client("tcp://$addr", $errno, $errstr, 1))) {
+            if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
+                throw new RuntimeException("The worker did not start listening on $addr");
+            }
+            usleep(20000);
         }
-        usleep(20000);
+    } finally {
+        restore_error_handler();
     }
     fclose($conn);
 
