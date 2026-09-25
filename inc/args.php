@@ -66,6 +66,15 @@ return (function () {
         validator: $addr_validator,
         multiple: true
     ));
+    $args->add('bufferResponses', new Flag(
+        '', 'buffer-responses', 'HTTP mode: read each response body whole (up to 8 MiB) and send it in one write with a Content-Length'
+    ));
+    $args->add('maxBody', new Option(
+        '', 'max-body', 'HTTP mode: the largest request body in bytes (413), 0 for no limit',
+        default: (string) Swerve\Http\NativeHttpConnection::MAX_BODY,
+        placeholder: 'bytes',
+        validator: fn ($value) => \ctype_digit((string) $value) ? null : 'A number of bytes required',
+    ));
     $args->add('log', new Option(
         '', 'log', 'Log errors to file',
         placeholder: 'path',

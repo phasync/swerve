@@ -180,6 +180,10 @@ pcntl_async_signals(true);
             $term->write("<!redBG white>ERROR:<!> <!bold>Can't combine --fastcgi with --http<!>\n\n");
             exit(2);
         }
+        if ($args->bufferResponses || !$args->isDefault('maxBody')) {
+            $term->write("<!redBG white>ERROR:<!> <!bold>--buffer-responses and --max-body only apply to --http<!>\n\n");
+            exit(2);
+        }
         foreach ($args->fastcgi as $fastcgi) {
             $logger->debug('FastCGI server at {address}', ['address' => $fastcgi]);
             [$ip, $port] = \explode(':', $fastcgi);
@@ -197,9 +201,18 @@ pcntl_async_signals(true);
             exit(2);
         }
         $workerCallbacks[] = function () use ($args, $app, $logger) {
+            $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
             foreach ($args->http as $address) {
-                $server = new NativeHttpServer($address, $app, $logger);
-                phasync::go($server->run(...));
+                $server = new NativeHttpServer($address, $app, $logger, (bool) $args->bufferResponses, $maxBody);
+                phasync::go(static function () use ($server, $logger) {
+                    try {
+                        $server->run();
+                    } catch (\Throwable $e) {
+                        // A worker that no longer listens must end, so the master starts another
+                        $logger->critical('{exception}', ['exception' => $e]);
+                        exit(1);
+                    }
+                });
             }
         };
         $masterCallbacks[] = function () use ($args, $logger) {

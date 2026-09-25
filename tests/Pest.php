@@ -257,3 +257,209 @@ function http_get(string $addr, string $path): ?string
 
     return substr($response, strpos($response, "\r\n\r\n") + 4);
 }
+
+/*
+ * Helpers for testing swerve --http from the outside, with raw sockets.
+ */
+
+/**
+ * Start bin/swerve.php --http with two workers (or $workers) serving a fixture, on a free port,
+ * and wait until it answers.
+ *
+ * @param string[] $args more command line arguments
+ *
+ * @return array{0: resource, 1: string} the process and its address
+ */
+function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2): array
+{
+    $probe = stream_socket_server('tcp://127.0.0.1:0');
+    $addr  = stream_socket_get_name($probe, false);
+    fclose($probe);
+
+    $process = proc_open(
+        [PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", "--workers=$workers", ...$args, __DIR__ . "/Fixtures/$fixture"],
+        [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
+        $pipes
+    );
+    $deadline = microtime(true) + 10;
+    while (null === http_get($addr, '/hello')) {
+        if (microtime(true) > $deadline) {
+            throw new RuntimeException("swerve did not start serving on $addr");
+        }
+        usleep(50000);
+    }
+
+    return [$process, $addr];
+}
+
+function native_stop($process): void
+{
+    proc_terminate($process, SIGINT);
+    proc_close($process);
+}
+
+/**
+ * @return resource a blocking connection with a 5 s timeout
+ */
+function native_connect(string $addr)
+{
+    $conn = stream_socket_client("tcp://$addr", $errno, $errstr, 5);
+    stream_set_timeout($conn, 5);
+
+    return $conn;
+}
+
+/**
+ * Read a response head up to the empty line: status and headers (lower-cased names), or null
+ * when the connection ended first.
+ *
+ * @return array{status: int, headers: array<string, string>}|null
+ */
+function native_read_head($conn): ?array
+{
+    $head = '';
+    while (!str_contains($head, "\r\n\r\n")) {
+        $line = fgets($conn);
+        if (false === $line) {
+            return null;
+        }
+        $head .= $line;
+    }
+    $lines   = explode("\r\n", rtrim($head));
+    $status  = (int) explode(' ', array_shift($lines))[1];
+    $headers = [];
+    foreach ($lines as $line) {
+        [$name, $value]                   = explode(':', $line, 2);
+        $headers[strtolower(trim($name))] = trim($value);
+    }
+
+    return ['status' => $status, 'headers' => $headers];
+}
+
+/**
+ * One chunk's data of a chunked body, '' for the last chunk (reading the empty line after
+ * it), or null when the connection ended first.
+ */
+function native_read_chunk($conn): ?string
+{
+    $line = fgets($conn);
+    if (false === $line) {
+        return null;
+    }
+    $size = hexdec(trim($line));
+    if (0 === $size) {
+        return false === fgets($conn) ? null : '';
+    }
+    $chunk = '';
+    while (strlen($chunk) < $size) {
+        $data = fread($conn, $size - strlen($chunk));
+        if (false === $data || ('' === $data && feof($conn))) {
+            return null;
+        }
+        $chunk .= $data;
+    }
+    fgets($conn); // CRLF after the chunk
+
+    return $chunk;
+}
+
+/**
+ * Read one HTTP response: status, headers (lower-cased names) and body, by Content-Length,
+ * chunked, or up to the end of the connection; or null when the connection ended first. A
+ * 100 Continue is returned as a response of its own. `complete` is false when the body ended
+ * before its Content-Length or its last chunk.
+ *
+ * @param bool $head the response to a HEAD request, without body
+ *
+ * @return array{status: int, headers: array<string, string>, body: string, complete: bool}|null
+ */
+function native_read_response($conn, bool $head = false): ?array
+{
+    $response = native_read_head($conn);
+    if (null === $response) {
+        return null;
+    }
+    $headers  = $response['headers'];
+    $body     = '';
+    $complete = true;
+    if ($head || $response['status'] < 200 || 204 === $response['status'] || 304 === $response['status']) {
+        // no body
+    } elseif (isset($headers['content-length'])) {
+        $length = (int) $headers['content-length'];
+        while (strlen($body) < $length) {
+            $data = fread($conn, $length - strlen($body));
+            if (false === $data || ('' === $data && feof($conn))) {
+                $complete = false;
+                break;
+            }
+            $body .= $data;
+        }
+    } elseif ('chunked' === strtolower($headers['transfer-encoding'] ?? '')) {
+        while (true) {
+            $chunk = native_read_chunk($conn);
+            if (null === $chunk) {
+                $complete = false;
+                break;
+            }
+            if ('' === $chunk) {
+                break;
+            }
+            $body .= $chunk;
+        }
+    } else {
+        $body = stream_get_contents($conn);
+    }
+
+    return $response + ['body' => $body, 'complete' => $complete];
+}
+
+/**
+ * The server closed the connection without sending anything more (within the 5 s timeout).
+ */
+function native_closed($conn): bool
+{
+    $data = @fread($conn, 1);
+
+    return false === $data || ('' === $data && feof($conn));
+}
+
+/**
+ * Serve requests in this process with a NativeHttpConnection over a SEQPACKET socket pair, so
+ * each of the server's writes arrives as one packet: the packets of the responses, up to the
+ * end of the connection. Each of $requests is sent as one packet, and a read shorter than a
+ * packet loses the rest of it, so a test sees whether the server reads a packet whole.
+ *
+ * @param string|string[] $requests
+ * @param bool            $close    close the client's sending side after the requests
+ *
+ * @return string[]
+ */
+function native_serve_packets(Psr\Http\Server\RequestHandlerInterface $handler, string|array $requests, bool $close = false): array
+{
+    return phasync::run(function () use ($handler, $requests, $close) {
+        [$server, $client] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_SEQPACKET, 0);
+        stream_set_blocking($server, false);
+        stream_set_blocking($client, false);
+        stream_set_read_buffer($client, 0);
+        $connection = new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger());
+        phasync::go($connection->serve(...));
+
+        foreach ((array) $requests as $packet) {
+            fwrite($client, $packet);
+        }
+        if ($close) {
+            stream_socket_shutdown($client, STREAM_SHUT_WR);
+        }
+        $packets = [];
+        while (true) {
+            $packet = fread(phasync::readable($client, 5), 1 << 20);
+            if (false === $packet || ('' === $packet && feof($client))) {
+                break;
+            }
+            $packets[] = $packet;
+        }
+        fclose($client);
+
+        return $packets;
+    });
+}
