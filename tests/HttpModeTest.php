@@ -62,28 +62,3 @@ test('concurrent requests share one multiplexed FastCGI connection per worker', 
     expect($connections)->toBeGreaterThanOrEqual(1)->toBeLessThanOrEqual(2); // not one per request
     expect($elapsed)->toBeLessThan(1.0);           // concurrent, not 40 x 0.4 s
 })->skip(!is_executable('/usr/bin/ss') && !is_executable('/bin/ss'), 'needs ss');
-
-/**
- * The body of a GET request, or null when nothing answers.
- */
-function http_get(string $addr, string $path): ?string
-{
-    set_error_handler(static fn (): bool => true);
-    try {
-        $conn = stream_socket_client("tcp://$addr", $errno, $errstr, 1);
-    } finally {
-        restore_error_handler();
-    }
-    if (false === $conn) {
-        return null;
-    }
-    stream_set_timeout($conn, 5);
-    fwrite($conn, "GET $path HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
-    $response = stream_get_contents($conn);
-    fclose($conn);
-    if (!str_starts_with((string) $response, 'HTTP/1.1 200')) {
-        return null;
-    }
-
-    return substr($response, strpos($response, "\r\n\r\n") + 4);
-}

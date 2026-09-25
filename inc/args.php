@@ -66,6 +66,12 @@ return (function () {
         validator: $addr_validator,
         multiple: true
     ));
+    $args->add('nativehttp', new Option(
+        '', 'native-http', 'IP and port for HTTP served by the workers themselves, without HAProxy',
+        placeholder: 'ip:port',
+        validator: $addr_validator,
+        multiple: true
+    ));
     $args->add('https', new Option(
         '', 'https', 'IP and port for HTTPS server',
         placeholder: 'ip:port',

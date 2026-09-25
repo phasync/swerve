@@ -12,6 +12,7 @@ use Psr\Log\NullLogger;
 use Swerve\CLI\Args;
 use Swerve\FastCGI\FastCGIServer;
 use Swerve\HAProxy;
+use Swerve\Http\NativeHttpServer;
 use Swerve\Runners\Psr15Runner;
 use Swerve\Swerve;
 use Swerve\SwerveInterface;
@@ -121,7 +122,7 @@ pcntl_async_signals(true);
     if ($args->workers === 'auto') {
         // In web server mode HAProxy needs cores too: measured best on 56 cores was 32
         // workers and 16 HAProxy threads, with wrk on another machine
-        $workerCount = empty($args->fastcgi)
+        $workerCount = empty($args->fastcgi) && empty($args->nativehttp)
             ? \max(1, \intdiv(System::getCPUCount() * 4, 7))
             : System::getCPUCount();
     } else {
@@ -173,7 +174,30 @@ pcntl_async_signals(true);
      */
     $swerve = new Swerve($logger);
 
-    if (!empty($args->fastcgi)) {
+    if (!empty($args->nativehttp)) {
+        /*
+         * Native HTTP mode
+         *
+         * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT); no HAProxy.
+         */
+        if (!empty($args->fastcgi) || !$args->isDefault('http') || !$args->isDefault('https')) {
+            $term->write("<!redBG white>ERROR:<!> <!bold>Can't combine --native-http with --fastcgi, --http or --https<!>\n\n");
+            exit(2);
+        }
+        if (!$app instanceof RequestHandlerInterface) {
+            $term->write("<!redBG white>ERROR:<!> <!bold>--native-http needs {$args->swervefile} to return a PSR-15 RequestHandlerInterface<!>\n\n");
+            exit(2);
+        }
+        $workerCallbacks[] = function () use ($args, $app, $logger) {
+            foreach ($args->nativehttp as $address) {
+                $server = new NativeHttpServer($address, $app, $logger);
+                phasync::go($server->run(...));
+            }
+        };
+        $masterCallbacks[] = function () use ($args, $logger) {
+            $logger->alert('Listening to {http}', ['http' => \implode(' ', $args->nativehttp)]);
+        };
+    } elseif (!empty($args->fastcgi)) {
         /*
          * FastCGI mode
          *

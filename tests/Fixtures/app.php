@@ -26,7 +26,7 @@ return new class implements RequestHandlerInterface {
             '/params' => new Response(200, ['Content-Type' => 'application/json'], \json_encode([
                 'method'  => $request->getMethod(),
                 'target'  => $request->getRequestTarget(),
-                'headers' => \array_map(static fn (array $v) => \implode(', ', $v), $request->getHeaders()),
+                'headers' => \array_change_key_case(\array_map(static fn (array $v) => \implode(', ', $v), $request->getHeaders())),
             ])),
             default   => new Response(404, ['Content-Type' => 'text/plain'], 'Not found'),
         };

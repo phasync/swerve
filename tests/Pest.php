@@ -232,3 +232,28 @@ function fcgi_read_responses($conn, array $requestIds): array
 
     return $responses;
 }
+
+/**
+ * The body of a GET request, or null when nothing answers.
+ */
+function http_get(string $addr, string $path): ?string
+{
+    set_error_handler(static fn (): bool => true);
+    try {
+        $conn = stream_socket_client("tcp://$addr", $errno, $errstr, 1);
+    } finally {
+        restore_error_handler();
+    }
+    if (false === $conn) {
+        return null;
+    }
+    stream_set_timeout($conn, 5);
+    fwrite($conn, "GET $path HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+    $response = stream_get_contents($conn);
+    fclose($conn);
+    if (!str_starts_with((string) $response, 'HTTP/1.1 200')) {
+        return null;
+    }
+
+    return substr($response, strpos($response, "\r\n\r\n") + 4);
+}
