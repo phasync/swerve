@@ -119,7 +119,11 @@ pcntl_async_signals(true);
      * Setup clustering to launch enough worker processes.
      */
     if ($args->workers === 'auto') {
-        $workerCount = System::getCPUCount();
+        // In web server mode HAProxy needs cores too: measured best on 56 cores was 32
+        // workers and 16 HAProxy threads, with wrk on another machine
+        $workerCount = empty($args->fastcgi)
+            ? \max(1, \intdiv(System::getCPUCount() * 4, 7))
+            : System::getCPUCount();
     } else {
         $workerCount = $args->workers;
     }
@@ -215,10 +219,16 @@ pcntl_async_signals(true);
 
         $masterCallbacks[] = function () use (&$keepRunning, $cluster, $socketPath, $socketDir, $args, $logger) {
             $sockets = \array_map($socketPath, \range(0, $cluster->getWorkerCount() - 1));
-            $haproxy = new HAProxy($args->http, $sockets, $logger);
+            // One HAProxy thread per two workers; more than 16 was slower (each thread keeps
+            // its own FastCGI connections, so fewer requests share a connection)
+            $threads = (int) (\getenv('SWERVE_HAPROXY_THREADS') ?: \min(16, \max(1, \intdiv($cluster->getWorkerCount(), 2))));
+            $haproxy = new HAProxy($args->http, $sockets, $logger, $threads);
             $haproxy->start(function () use (&$keepRunning, $logger) {
-                $logger->critical('HAProxy exited, stopping');
-                $keepRunning = false;
+                if ($keepRunning) {
+                    // Not stopped by us, for example a Ctrl+C that reached HAProxy too
+                    $logger->critical('HAProxy exited, stopping');
+                    $keepRunning = false;
+                }
             });
             $logger->alert('Listening to {http}', ['http' => \implode(' ', $args->http)]);
 
