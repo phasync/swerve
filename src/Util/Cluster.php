@@ -8,7 +8,18 @@ use Psr\Log\LoggerInterface;
 class Cluster {
     private $numWorkers;
     private $masterPid;
+    /**
+     * Worker slot (0 to numWorkers-1) per worker PID. A restarted worker takes over the
+     * slot of the one it replaces, so per-slot resources such as socket paths stay the same.
+     *
+     * @var array<int, int>
+     */
     private $workerPids = [];
+
+    /**
+     * In a worker process: its slot.
+     */
+    private ?int $slot = null;
     private $stop = false;
     private LoggerInterface $logger;
 
@@ -29,7 +40,7 @@ class Cluster {
         $this->logger->debug('Launching {numWorkers} worker processes', ['numWorkers' => $this->numWorkers]);;
         $this->stop = false; // Reset stopping flag on launch
         for ($i = 0; $i < $this->numWorkers; $i++) {
-            $pid = $this->forkWorker();
+            $pid = $this->forkWorker($i);
             if ($pid === 0) {
                 $this->logger->debug('Worker process {pid} started', ['pid' => posix_getpid()]);
                 // This is a worker
@@ -39,18 +50,31 @@ class Cluster {
         return $this->isMaster();
     }
 
-    private function forkWorker() {        
+    private function forkWorker(int $slot) {
         $pid = pcntl_fork();
         if ($pid == -1) {
             throw new Exception("Could not fork worker");
         } elseif ($pid) {
             // This is the master process
-            $this->workerPids[$pid] = true;
+            $this->workerPids[$pid] = $slot;
             return $pid;
         } else {
-            return 0;
             // This is a worker process
+            $this->slot = $slot;
+            return 0;
         }
+    }
+
+    /**
+     * The slot of this worker process, from 0 to the number of workers minus one; null in
+     * the master process.
+     */
+    public function getSlot(): ?int {
+        return $this->slot;
+    }
+
+    public function getWorkerCount(): int {
+        return $this->numWorkers;
     }
 
     public function isWorker() {
@@ -68,17 +92,15 @@ class Cluster {
     public function relaunchChildren(): bool {
         $this->assertIsMaster();
         if (!$this->stop) {
-            foreach ($this->workerPids as $pid => $active) {
-                if ($active) {
-                    $res = pcntl_waitpid($pid, $status, WNOHANG);
-                    if ($res == -1 || $res > 0) {
-                        $this->logger->notice("Worker {pid} exited", ['pid' => $pid]);
-                        unset($this->workerPids[$pid]);
-                        if (!$this->stop) { // Only restart if not stopping
-                            if ($this->forkWorker() === 0) {
-                                // A child was launched
-                                return true;
-                            }
+            foreach ($this->workerPids as $pid => $slot) {
+                $res = pcntl_waitpid($pid, $status, WNOHANG);
+                if ($res == -1 || $res > 0) {
+                    $this->logger->notice("Worker {pid} exited", ['pid' => $pid]);
+                    unset($this->workerPids[$pid]);
+                    if (!$this->stop) { // Only restart if not stopping
+                        if ($this->forkWorker($slot) === 0) {
+                            // A child was launched
+                            return true;
                         }
                     }
                 }
@@ -90,13 +112,11 @@ class Cluster {
     public function stop() {
         $this->assertIsMaster();
         $this->stop = true; // Set flag to stop restarting workers
-        foreach ($this->workerPids as $pid => $active) {
-            if ($active) {
-                posix_kill($pid, SIGTERM); // Send termination signal
-                pcntl_waitpid($pid, $status); // Wait for the process to exit
-                $this->logger->info("Stopped worker {pid}", ['pid' => $pid]);
-                unset($this->workerPids[$pid]);
-            }
+        foreach ($this->workerPids as $pid => $slot) {
+            posix_kill($pid, SIGTERM); // Send termination signal
+            pcntl_waitpid($pid, $status); // Wait for the process to exit
+            $this->logger->info("Stopped worker {pid}", ['pid' => $pid]);
+            unset($this->workerPids[$pid]);
         }
     }
 

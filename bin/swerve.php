@@ -6,13 +6,12 @@
 
 use Charm\Terminal;
 use phasync\Debug;
-use phasync\Process\Process;
-use phasync\Process\ProcessInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 use Swerve\CLI\Args;
 use Swerve\FastCGI\FastCGIServer;
+use Swerve\HAProxy;
 use Swerve\Runners\Psr15Runner;
 use Swerve\Swerve;
 use Swerve\SwerveInterface;
@@ -24,7 +23,6 @@ use Swerve\Util\System;
 // directory in a checkout, or the project's when installed at vendor/phasync/swerve.
 require $GLOBALS['_composer_autoload_path']
     ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
-require __DIR__.'/../inc/caddy.php';
 
 pcntl_async_signals(true);
 
@@ -189,93 +187,52 @@ pcntl_async_signals(true);
         }
     } else {
         /**
-         * Web Server mode.
+         * Web server mode.
          *
-         * This mode launches workers using unix domain socket files, and configures
-         * the web server to load balance between the worker processes.
+         * HAProxy listens for HTTP and passes requests to the workers over multiplexed
+         * FastCGI, one Unix socket per worker slot.
          */
-        $unixSocket = tempnam(\sys_get_temp_dir(), 'swerve-');
-        unlink($unixSocket);
+        if (!$args->isDefault('https')) {
+            $term->write("<!redBG white>ERROR:<!> <!bold>--https is not supported yet<!>\n\n");
+            exit(2);
+        }
+        $socketDir = \sys_get_temp_dir().'/swerve-'.\posix_getpid();
+        if (!\is_dir($socketDir) && !\mkdir($socketDir, 0700)) {
+            $term->write("<!redBG white>ERROR:<!> <!bold>Can't create $socketDir<!>\n\n");
+            exit(1);
+        }
+        $socketPath = static fn (int $slot): string => "$socketDir/worker$slot.sock";
 
-        /*
-         * Configure each worker to have a custom socket file name
-         * based on their PID number and ensure the socket file is
-         * deleted when the process terminates.
-         */
-        $workerCallbacks[] = function () use ($swerve, $logger, $unixSocket) {
-            $filename = "$unixSocket.".posix_getpid().'.sock';
-            $logger->debug('Worker listening on {filename}', ['filename' => $filename]);
-            $swerve->add(new FastCGIServer('unix://'.$filename, $logger));
-            register_shutdown_function(function () use ($filename) {
-                unlink($filename);
-            });
+        $workerCallbacks[] = function () use ($swerve, $logger, $cluster, $socketPath) {
+            $path = $socketPath($cluster->getSlot());
+            if (\file_exists($path)) {
+                // Left behind by the worker this one replaces
+                \unlink($path);
+            }
+            $logger->debug('Worker listening on {path}', ['path' => $path]);
+            $swerve->add(new FastCGIServer('unix://'.$path, $logger));
         };
 
-        /*
-         * Setup Caddy to be launched by the master process
-         */
-        $masterCallbacks[] = function () use (&$keepRunning, $cluster, $unixSocket, $args, $logger) {
-            phasync::go(function () use (&$keepRunning, $cluster, $unixSocket, $args, $logger) {
-                $configFile = tempnam(sys_get_temp_dir(), 'caddy-');
-                register_shutdown_function(function () use ($configFile) {
-                    unlink($configFile);
-                });
-                $oldConfig = null;
-                $process = null;
+        $masterCallbacks[] = function () use (&$keepRunning, $cluster, $socketPath, $socketDir, $args, $logger) {
+            $sockets = \array_map($socketPath, \range(0, $cluster->getWorkerCount() - 1));
+            $haproxy = new HAProxy($args->http, $sockets, $logger);
+            $haproxy->start(function () use (&$keepRunning, $logger) {
+                $logger->critical('HAProxy exited, stopping');
+                $keepRunning = false;
+            });
+            $logger->alert('Listening to {http}', ['http' => \implode(' ', $args->http)]);
 
+            phasync::go(function () use (&$keepRunning, $haproxy, $socketDir) {
                 while ($keepRunning) {
-                    /**
-                     * Update the list of unix domain sockets.
-                     */
-                    $unixSockets = [];
-                    foreach ($cluster->getWorkerPids() as $pid) {
-                        $unixSockets[] = $unixSocket.'.'.$pid.'.sock';
-                    }
-
-                    /**
-                     * Build a new config and update the config file if the config
-                     * differs. Caddy will automatically reload the configuration.
-                     */
-                    $config = buildCaddyConfig($unixSockets, $args->http, $args->https);
-                    if (serialize($config) !== serialize($oldConfig)) {
-                        $oldConfig = $config;
-                        file_put_contents($configFile, json_encode($config));
-                    }
-
-                    if ($process === null) {
-                        $process = Process::run(__DIR__.'/caddy', ['run', '--config', $configFile, '--watch']);
-
-                        $httpAddresses = implode(' ', $args->http);
-                        $logger->alert('Listening to {http}', ['http' => $httpAddresses]);
-
-                        phasync::go(function () use ($process, &$keepRunning, $logger) {
-                            $buffer = '';
-                            while ($keepRunning) {
-                                $chunk = $process->read(ProcessInterface::STDERR);
-                                $buffer .= $chunk;
-                                [$line, $buffer] = explode("\n", $buffer, 2);
-                                $data = \json_decode($line, true);
-                                $msg = $data['msg'];
-                                $logger->info('caddy: {msg}', ['msg' => $msg]);
-                            }
-                        });
-                    }
-
                     phasync::sleep(0.5);
                 }
-                $process->stop();
+                $haproxy->stop();
+                foreach (\glob("$socketDir/*.sock") ?: [] as $socket) {
+                    \unlink($socket);
+                }
+                @\rmdir($socketDir);
             });
         };
-    }
-
-    function caddy_cmd()
-    {
-        global $cluster, $unixSocket, $args;
-        $unixSockets = [];
-        foreach ($cluster->getWorkerPids() as $pid) {
-            $unixSockets[] = $unixSocket.'.'.$pid.'.sock';
-        }
-        $config = buildCaddyConfig($unixSockets, $args->http, $args->https);
     }
 
     if ($cluster->launch()) {
