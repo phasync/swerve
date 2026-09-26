@@ -2,6 +2,7 @@
 
 namespace Swerve;
 
+use phasync\Context\ContextInterface;
 use phasync\SelectableInterface;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
@@ -24,7 +25,13 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
 
     private bool $running = false;
 
+    /** stop() was called: run() returns once the servers are drained. */
+    private bool $stopping = false;
+
     private ?LoggerInterface $logger = null;
+
+    /** The application run() serves. */
+    private ?SwerveInterface $app = null;
 
     public function __construct(LoggerInterface $logger)
     {
@@ -98,12 +105,19 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
         $this->logger->log(LogLevel::INFO, 'Detached module {module}', ['module' => $module->getName()]);
     }
 
-    public function run(SwerveInterface $app): void
+    /**
+     * Serve until stopped. Returns after stop(), once every request and connection ended.
+     *
+     * @param \Closure|null         $opened  called once every server listens
+     * @param ContextInterface|null $context the phasync context of the coroutines serving requests
+     */
+    public function run(SwerveInterface $app, ?\Closure $opened = null, ?ContextInterface $context = null): void
     {
         if ($this->running) {
             throw new \RuntimeException('Already running');
         }
-        \phasync::run(function () use ($app) {
+        $this->app = $app;
+        \phasync::run(function () use ($app, $opened) {
             try {
                 $this->running = true;
                 foreach ($this->modules as $module) {
@@ -113,35 +127,89 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
                     }
                 }
 
-                while (true) {
-                    while ($this->pendingConnections->isEmpty()) {
+                if ($opened) {
+                    $opened();
+                }
+
+                while (!$this->stopping) {
+                    while (!$this->stopping && $this->pendingConnections->isEmpty()) {
                         \phasync::awaitFlag($this->pendingConnections, \PHP_FLOAT_MAX);
                     }
-                    $connection = $this->pendingConnections->dequeue();
-                    \phasync::go(function () use ($app, $connection) {
-                        $app->handleConnection($connection);
-                    });
+                    while (!$this->pendingConnections->isEmpty()) {
+                        $connection = $this->pendingConnections->dequeue();
+                        \phasync::go(function () use ($app, $connection) {
+                            $this->handle($app, $connection);
+                        });
+                    }
                 }
             } catch (\Throwable $e) {
                 $this->logger->critical($e);
             } finally {
                 $this->running = false;
-                foreach ($this->modules as $module) {
-                    if ($module instanceof ServerInterface) {
-                        $this->logger->info('Closing module {module}', ['module' => $module->getName()]);
-                        $module->close();
+                // Drained servers close themselves as their connections end
+                if (!$this->stopping) {
+                    foreach ($this->modules as $module) {
+                        if ($module instanceof ServerInterface) {
+                            $this->logger->info('Closing module {module}', ['module' => $module->getName()]);
+                            $module->close();
+                        }
                     }
                 }
             }
-        });
+        }, [], $context);
+    }
+
+    /**
+     * Stop accepting, let the requests in flight finish, and make run() return once they did.
+     */
+    public function stop(): void
+    {
+        $this->stopping = true;
+        foreach ($this->modules as $module) {
+            if ($module instanceof ServerInterface) {
+                $module->drain();
+            }
+        }
+        \phasync::raiseFlag($this->pendingConnections);
+    }
+
+    /**
+     * An application that throws gets a 500 when nothing was sent yet, and the request is
+     * ended either way, so the front server is never left waiting for it.
+     */
+    private function handle(SwerveInterface $app, ConnectionInterface $connection): void
+    {
+        try {
+            $app->handleConnection($connection);
+        } catch (\Throwable $e) {
+            // Not waiting for a request head that never came
+            $request = $connection->getState() > Connection::STATE_REQUEST_HEAD ? $connection->getRequestMethod() . ' ' . $connection->getRequestTarget() : 'A request';
+            $this->logger->error('{request} failed: {exception}', ['request' => $request, 'exception' => $e]);
+            if (Connection::STATE_RESPONSE_HEAD === $connection->getState()) {
+                $connection->sendHead(['Content-Type: text/plain'], 500);
+                $connection->write('Internal Server Error');
+            }
+            if (Connection::STATE_BODY === $connection->getState()) {
+                $connection->end();
+            }
+        }
     }
 
     /**
      * Register a newly received request with Swerve, so that the request can
-     * be processed by a runner.
+     * be processed by a runner. While stopping, run() no longer takes requests from the queue,
+     * yet one can still arrive on a connection that stays open for the requests in flight
+     * (multiplexed, or kept); the front server sent it, so it is served.
      */
     private function addConnection(ConnectionInterface $connection): void
     {
+        if ($this->stopping) {
+            \phasync::go(function () use ($connection) {
+                $this->handle($this->app, $connection);
+            });
+
+            return;
+        }
         $this->pendingConnections->enqueue($connection);
         \phasync::raiseFlag($this->pendingConnections);
     }

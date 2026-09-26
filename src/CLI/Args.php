@@ -40,11 +40,12 @@ final class Args
             }
         }
 
-        $restIndex += count($args);
+        // getopt() stops at the first word that is not an option: what follows the arguments
+        // would be ignored
+        if ($restIndex < count($_SERVER['argv'])) {
+            $rest = $_SERVER['argv'][$restIndex];
 
-        // Check for unknown arguments using $rest_index
-        if ($restIndex !== null && $restIndex < count($_SERVER['argv'])) {
-            return 'Unknown argument: '.$_SERVER['argv'][$restIndex];
+            return 'Unknown argument: ' . $rest . (\str_starts_with($rest, '-') && $args ? ' (options go before ' . \reset($args)->name . ')' : '');
         }
 
         foreach ($_SERVER['argv'] as $argv) {
@@ -57,6 +58,10 @@ final class Args
                         continue;
                     }
                     if ($v->long === $parts[0]) {
+                        // getopt() leaves out `--log=` without a word
+                        if ($v instanceof Option && '' === ($parts[1] ?? null)) {
+                            return "Value required for option: --{$v->long}=<{$v->placeholder}>";
+                        }
                         $found = true;
                         break;
                     }

@@ -26,4 +26,10 @@ interface ServerInterface extends ModuleInterface {
      * Stop serving
      */
     public function close(): void;
+
+    /**
+     * Stop accepting; let the requests in flight finish, and close connections as they go
+     * idle. Serving coroutines end on their own, so the Swerve::run() around them returns.
+     */
+    public function drain(): void;
 }

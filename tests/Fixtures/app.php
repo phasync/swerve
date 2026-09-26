@@ -10,6 +10,21 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
+/*
+ * Supervision tests control how the application loads through the directory in
+ * SWERVE_TEST_DIR: a file `crash` there makes every load fail (exit 3), `load-ms` makes it
+ * take that long, and `version.php` returns what /version answers; a parse error in it makes
+ * the load fail.
+ */
+$testDir = \getenv('SWERVE_TEST_DIR') ?: null;
+if ($testDir && \file_exists("$testDir/crash")) {
+    exit(3);
+}
+if ($testDir && \file_exists("$testDir/load-ms")) {
+    \usleep((int) \file_get_contents("$testDir/load-ms") * 1000);
+}
+$version = $testDir && \file_exists("$testDir/version.php") ? require "$testDir/version.php" : 'none';
+
 /**
  * A non-seekable body of $n pieces of 10 bytes ("piece 000\n", ...), sleeping $ms before every
  * piece but the first, as an application streaming from a slow source. It can't be read whole:
@@ -214,9 +229,16 @@ function fixture_raw_headers(array $headers): ResponseInterface
     return $response;
 }
 
-return new class implements RequestHandlerInterface {
+return new class($version) implements RequestHandlerInterface {
     /** How often a /stalled body was read, see /stalled-reads. */
     private int $stalledReads = 0;
+
+    /** @var string[] what /leak keeps */
+    private array $leaked = [];
+
+    public function __construct(private string $version)
+    {
+    }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
@@ -309,6 +331,59 @@ return new class implements RequestHandlerInterface {
             })(),
             '/status'      => new Response((int) $query['code'], [], 'x'),
             '/throw'       => throw new RuntimeException('boom'),
+            // Faults for the supervision tests
+            '/pid'         => new Response(200, [], (string) \getmypid()),
+            '/version'     => new Response(200, [], $this->version),
+            '/exit'        => exit((int) ($query['code'] ?? 3)),
+            // With ?small=1, in many small pieces, which makes PHP's shutdown after it slow
+            '/oom'         => (function () use ($query) {
+                for ($i = 0; isset($query['small']); ++$i) {
+                    $this->leaked[] = "x$i";
+                }
+                $s = 'x';
+                while (true) {
+                    $s .= $s;
+                }
+            })(),
+            // Keeps ?kb= KiB for good, after sleeping ?ms=: a steady leak
+            '/leak'        => (function () use ($query) {
+                phasync::sleep(((int) ($query['ms'] ?? 0)) / 1000);
+                $this->leaked[] = \str_repeat('x', (int) $query['kb'] * 1024);
+
+                return new Response(200, [], (string) \memory_get_usage(true));
+            })(),
+            '/spin'        => (static function () {
+                while (true) {
+                }
+            })(),
+            // Looped, because a signal ends sleep() early
+            '/block'       => (static function () {
+                while (true) {
+                    \sleep(1000);
+                }
+            })(),
+            // A blocking sleep of ?ms=, answering how long it took: a signal would end it early
+            '/usleep'      => (static function () use ($query) {
+                $start = \microtime(true);
+                \usleep((int) $query['ms'] * 1000);
+
+                return new Response(200, [], \sprintf('%.2f', \microtime(true) - $start));
+            })(),
+            // A background job that outlives the request (and the worker), for ?s= seconds
+            '/spawn'       => (static function () use ($query) {
+                \exec('sleep ' . (int) ($query['s'] ?? 30) . ' > /dev/null 2>&1 &');
+
+                return new Response(200, [], 'spawned');
+            })(),
+            // A background coroutine that fails after the response was sent
+            '/bgthrow'     => (static function () {
+                phasync::go(static function () {
+                    phasync::sleep(0.2);
+                    throw new RuntimeException('background boom');
+                });
+
+                return new Response(200, [], 'ok');
+            })(),
             '/bad'         => match ($query['kind']) {
                 'reason' => new Response(200, [], 'x', '1.1', "OK\r\nX-Evil: 1"),
                 'value'  => fixture_raw_headers(['X-A' => ["a\r\nX-Evil: 1"]]),

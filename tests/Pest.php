@@ -262,25 +262,84 @@ function http_get(string $addr, string $path): ?string
  * Helpers for testing swerve --http from the outside, with raw sockets.
  */
 
-/**
- * Start bin/swerve.php --http with two workers (or $workers) serving a fixture, on a free port,
- * and wait until it answers.
- *
- * @param string[] $args more command line arguments
- *
- * @return array{0: resource, 1: string} the process and its address
+/*
+ * Every swerve started by a test runs in its own process group (setsid), which is SIGKILLed
+ * after the test: that reaches replacement workers and orphans too, and can't hang.
  */
-function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2): array
+uses()->afterEach(function () {
+    foreach ($GLOBALS['swerve_groups'] ?? [] as $pgid) {
+        @posix_kill(-$pgid, SIGKILL);
+    }
+    foreach ($GLOBALS['swerve_temp'] ?? [] as $path) {
+        exec('rm -rf ' . escapeshellarg($path));
+    }
+    $GLOBALS['swerve_groups'] = $GLOBALS['swerve_temp'] = [];
+})->in(__DIR__);
+
+/**
+ * A new temporary file (or with $dir, directory), removed after the test.
+ */
+function temp_path(bool $dir = false): string
+{
+    $path = tempnam(sys_get_temp_dir(), 'swerve-test-');
+    if ($dir) {
+        unlink($path);
+        mkdir($path);
+    }
+    $GLOBALS['swerve_temp'][] = $path;
+
+    return $path;
+}
+
+/**
+ * Start bin/swerve.php in a process group of its own, and register the group to be killed
+ * after the test. $fixture is a file in tests/Fixtures, or a path when it has a slash.
+ *
+ * @param string[]              $php  arguments for PHP itself, such as ['-d', 'memory_limit=32M']
+ * @param array<string, string> $env  more environment variables
+ * @param array<int, mixed>     $out  descriptors for stdout and stderr
+ *
+ * @return resource the process; its pid is the master's, and the process group's
+ */
+function swerve_spawn(array $args, string $fixture, array $php = [], array $env = [], array $out = [])
+{
+    $path    = str_contains($fixture, '/') ? $fixture : __DIR__ . "/Fixtures/$fixture";
+    $process = proc_open(
+        ['setsid', PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args, $path],
+        $out + [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
+        $pipes,
+        null,
+        $env + getenv(),
+    );
+    $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
+
+    return $process;
+}
+
+function free_address(): string
 {
     $probe = stream_socket_server('tcp://127.0.0.1:0');
     $addr  = stream_socket_get_name($probe, false);
     fclose($probe);
 
-    $process = proc_open(
-        [PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", "--workers=$workers", ...$args, __DIR__ . "/Fixtures/$fixture"],
-        [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-        $pipes
-    );
+    return $addr;
+}
+
+/**
+ * Start bin/swerve.php --http with two workers (or $workers) serving a fixture, on a free port,
+ * and wait until it answers. --grace=2 unless $args has one, so stopping stays fast.
+ *
+ * @param string[] $args more command line arguments
+ *
+ * @return array{0: resource, 1: string} the process and its address
+ */
+function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2, array $php = [], array $env = []): array
+{
+    $addr = free_address();
+    if (!preg_grep('/^--grace=/', $args)) {
+        $args[] = '--grace=2';
+    }
+    $process  = swerve_spawn(["--http=$addr", "--workers=$workers", ...$args], $fixture, $php, $env);
     $deadline = microtime(true) + 10;
     while (null === http_get($addr, '/hello')) {
         if (microtime(true) > $deadline) {
@@ -292,10 +351,25 @@ function native_start(string $fixture = 'app.php', array $args = [], int $worker
     return [$process, $addr];
 }
 
-function native_stop($process): void
+/**
+ * Stop swerve with SIGINT, as Ctrl+C does, and wait for it; past the timeout, kill its whole
+ * process group. Returns the seconds it took.
+ */
+function native_stop($process, float $timeout = 10): float
 {
-    proc_terminate($process, SIGINT);
+    $start = microtime(true);
+    $pid   = proc_get_status($process)['pid'];
+    posix_kill($pid, SIGINT);
+    while (proc_get_status($process)['running']) {
+        if (microtime(true) - $start > $timeout) {
+            posix_kill(-$pid, SIGKILL);
+            break;
+        }
+        usleep(20000);
+    }
     proc_close($process);
+
+    return microtime(true) - $start;
 }
 
 /**
@@ -462,4 +536,324 @@ function native_serve_packets(Psr\Http\Server\RequestHandlerInterface $handler, 
 
         return $packets;
     });
+}
+
+/*
+ * Helpers for the supervision tests: swerve as operators run it, with a log file, and faults
+ * injected through the fixture's routes.
+ */
+
+/**
+ * Start swerve with a log file at INFO level, --grace=3 and --watchdog=3 (unless $args sets
+ * them), and wait until it answers /hello; with $wait false, don't wait.
+ *
+ * @param 'http'|'fastcgi' $mode
+ *
+ * @return array{0: resource, 1: string, 2: string, 3: int} the process, its address, the log file, the master's pid
+ */
+function swerve_start(array $args = [], int $workers = 2, array $php = [], array $env = [], string $mode = 'http', string $fixture = 'app.php', bool $wait = true): array
+{
+    $addr = free_address();
+    $log  = temp_path();
+    foreach (['--grace=3', '--watchdog=3'] as $default) {
+        if (!preg_grep('/^' . strstr($default, '=', true) . '=/', $args)) {
+            $args[] = $default;
+        }
+    }
+    $process = swerve_spawn(["--$mode=$addr", "--workers=$workers", "--log=$log", '-vv', ...$args], $fixture, $php, $env);
+    $deadline = microtime(true) + 10;
+    while ($wait && null === ('http' === $mode ? probe($addr, '/hello') : fcgi_get($addr, '/hello'))) {
+        if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
+            throw new RuntimeException("swerve did not start serving on $addr:\n" . file_get_contents($log));
+        }
+        usleep(20000);
+    }
+
+    return [$process, $addr, $log, proc_get_status($process)['pid']];
+}
+
+function swerve_signal($process, int $signal): void
+{
+    posix_kill(proc_get_status($process)['pid'], $signal);
+}
+
+/**
+ * Wait for swerve to exit: its exit code, and how long that took.
+ *
+ * @return array{0: int, 1: float}
+ */
+function swerve_wait($process, float $timeout): array
+{
+    $start = microtime(true);
+    while (($status = proc_get_status($process))['running']) {
+        if (microtime(true) - $start > $timeout) {
+            throw new RuntimeException("swerve did not exit within $timeout s");
+        }
+        usleep(10000);
+    }
+    proc_close($process);
+
+    return [$status['exitcode'], microtime(true) - $start];
+}
+
+/**
+ * Wait until the log has a line matching $regex; returns every match so far. The log may not
+ * exist yet, after log rotation.
+ *
+ * @return array<int, array<int|string, string>>
+ */
+function log_wait(string $log, string $regex, float $timeout = 5): array
+{
+    $deadline = microtime(true) + $timeout;
+    while (!preg_match_all($regex, is_file($log) ? file_get_contents($log) : '', $matches, PREG_SET_ORDER)) {
+        if (microtime(true) > $deadline) {
+            throw new RuntimeException("No $regex in the log within $timeout s:\n" . file_get_contents($log));
+        }
+        usleep(50000);
+    }
+
+    return $matches;
+}
+
+function log_count(string $log, string $regex): int
+{
+    return preg_match_all($regex, (string) file_get_contents($log));
+}
+
+/**
+ * The body of a GET request with status 200, on a fresh connection, or null when it failed or
+ * took longer than $timeout.
+ */
+function probe(string $addr, string $path, float $timeout = 1.0): ?string
+{
+    set_error_handler(static fn (): bool => true);
+    try {
+        $conn = stream_socket_client("tcp://$addr", $errno, $errstr, $timeout);
+    } finally {
+        restore_error_handler();
+    }
+    if (false === $conn) {
+        return null;
+    }
+    stream_set_timeout($conn, (int) $timeout, (int) (fmod($timeout, 1) * 1_000_000));
+    fwrite($conn, "GET $path HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+    $response = @native_read_response($conn);
+    fclose($conn);
+
+    return null !== $response && 200 === $response['status'] && $response['complete'] ? $response['body'] : null;
+}
+
+/**
+ * The pids of $n different workers, asking /pid on fresh connections.
+ *
+ * @return int[]
+ */
+function worker_pids(string $addr, int $n, float $timeout = 5): array
+{
+    $pids     = [];
+    $deadline = microtime(true) + $timeout;
+    while (count($pids) < $n) {
+        if (microtime(true) > $deadline) {
+            throw new RuntimeException('Saw only ' . count($pids) . " of $n workers");
+        }
+        if (null !== $pid = probe($addr, '/pid')) {
+            $pids[(int) $pid] = (int) $pid;
+        }
+    }
+
+    return array_values($pids);
+}
+
+/**
+ * The live processes in a process group.
+ *
+ * @return int[]
+ */
+function group_pids(int $pgid): array
+{
+    $pids = [];
+    set_error_handler(static fn (): bool => true); // a process may end while it is read
+    foreach (glob('/proc/[0-9]*/stat') as $file) {
+        $stat = file_get_contents($file);
+        // The fields after the command name, which is in parentheses: state, ppid, pgrp. A
+        // zombie has ended; only its parent (for an orphan, init) has yet to reap it.
+        $fields = $stat ? explode(' ', substr($stat, strrpos($stat, ')') + 2)) : [];
+        if ($fields && 'Z' !== $fields[0] && (int) $fields[2] === $pgid) {
+            $pids[] = (int) basename(dirname($file));
+        }
+    }
+    restore_error_handler();
+
+    return $pids;
+}
+
+/**
+ * Wait until a process group is empty; returns whether it is.
+ */
+function group_gone(int $pgid, float $timeout = 2): bool
+{
+    $deadline = microtime(true) + $timeout;
+    while (group_pids($pgid)) {
+        if (microtime(true) > $deadline) {
+            return false;
+        }
+        usleep(20000);
+    }
+
+    return true;
+}
+
+/**
+ * Connection resets a handover may cause: none when the kernel moves connections queued on a
+ * closing listener to another one (net.ipv4.tcp_migrate_req=1), a few otherwise.
+ */
+function resets_allowed(): int
+{
+    return '1' === trim((string) @file_get_contents('/proc/sys/net/ipv4/tcp_migrate_req')) ? 0 : 3;
+}
+
+/**
+ * GET $path over and over for $seconds from $concurrency clients at once, each on a fresh
+ * connection (Connection: close), and count the outcomes: `ok` (complete 200), `status5xx`,
+ * `truncated` (a head, but not all of the body), `reset` (connected, but not a byte of a
+ * response), `refused` (not connected). $at runs [seconds, closure] pairs once the load ran
+ * that long. `requests` lists each request's [start, end, outcome, body], in seconds since the
+ * start.
+ *
+ * @param array<int, array{0: float, 1: Closure}> $at
+ *
+ * @return array{ok: int, status5xx: int, truncated: int, reset: int, refused: int, bodies: array<string, int>, requests: array<int, array{0: float, 1: float, 2: string, 3: string}>}
+ */
+function http_load(string $addr, string $path, float $seconds, int $concurrency = 8, array $at = []): array
+{
+    // Refused and reset connections warn; Pest would report each one
+    set_error_handler(static fn (): bool => true);
+    try {
+        return http_load_run($addr, $path, $seconds, $concurrency, $at);
+    } finally {
+        restore_error_handler();
+    }
+}
+
+function http_load_run(string $addr, string $path, float $seconds, int $concurrency, array $at): array
+{
+    $result  = ['ok' => 0, 'status5xx' => 0, 'truncated' => 0, 'reset' => 0, 'refused' => 0, 'bodies' => [], 'requests' => []];
+    $clients = array_fill(0, $concurrency, null);
+    $start   = microtime(true);
+    $finish  = static function (array $client, string $outcome, string $body = '') use (&$result, $start) {
+        @fclose($client['socket']);
+        ++$result[$outcome];
+        if ('ok' === $outcome) {
+            $result['bodies'][$body] = ($result['bodies'][$body] ?? 0) + 1;
+        }
+        $result['requests'][] = [$client['start'], microtime(true) - $start, $outcome, $body];
+    };
+    while (true) {
+        $now = microtime(true) - $start;
+        foreach ($at as $i => [$t, $fn]) {
+            if ($now >= $t) {
+                unset($at[$i]);
+                $fn();
+            }
+        }
+        foreach ($clients as $i => $client) {
+            if (null === $client && $now < $seconds) {
+                $socket = @stream_socket_client("tcp://$addr", $errno, $errstr, 1, STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT);
+                if (false === $socket) {
+                    ++$result['refused'];
+                    continue;
+                }
+                stream_set_blocking($socket, false);
+                $clients[$i] = ['socket' => $socket, 'start' => $now, 'sent' => false, 'data' => ''];
+            }
+        }
+        if (!array_filter($clients)) {
+            if ($now >= $seconds) {
+                break;
+            }
+            usleep(1000);
+            continue;
+        }
+        $read = $write = [];
+        foreach ($clients as $i => $client) {
+            if (null !== $client) {
+                $client['sent'] ? $read[$i] = $client['socket'] : $write[$i] = $client['socket'];
+            }
+        }
+        $except = null;
+        if (!@stream_select($read, $write, $except, 0, 20000)) {
+            foreach ($clients as $i => $client) {
+                if (null !== $client && $now - $client['start'] > 10) {
+                    $finish($client, 'reset');
+                    $clients[$i] = null;
+                }
+            }
+            continue;
+        }
+        foreach ($write as $i => $socket) {
+            if (!@fwrite($socket, "GET $path HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")) {
+                $finish($clients[$i], 'refused'); // the connect failed
+                $clients[$i] = null;
+                continue;
+            }
+            $clients[$i]['sent'] = true;
+        }
+        foreach ($read as $i => $socket) {
+            $data = @fread($socket, 65536);
+            if (false !== $data && '' !== $data) {
+                $clients[$i]['data'] .= $data;
+                continue;
+            }
+            if (false !== $data && !feof($socket)) {
+                continue;
+            }
+            // The end of the response, or of the connection
+            $response = $clients[$i]['data'];
+            if ('' === $response) {
+                $finish($clients[$i], 'reset');
+            } elseif (false === $end = strpos($response, "\r\n\r\n")) {
+                $finish($clients[$i], 'truncated');
+            } else {
+                $status = (int) substr($response, 9, 3);
+                $body   = substr($response, $end + 4);
+                preg_match('/\r\ncontent-length: *(\d+)/i', substr($response, 0, $end), $m);
+                if (isset($m[1]) && strlen($body) < (int) $m[1]) {
+                    $finish($clients[$i], 'truncated');
+                } else {
+                    $finish($clients[$i], $status >= 500 ? 'status5xx' : (200 === $status ? 'ok' : 'truncated'), $body);
+                }
+            }
+            $clients[$i] = null;
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * The response to a GET over FastCGI on a fresh connection, or null when it failed or took
+ * longer than $timeout.
+ *
+ * @return array{status: int, headers: array<string, string>, body: string}|null
+ */
+function fcgi_get(string $addr, string $path, float $timeout = 1.0): ?array
+{
+    set_error_handler(static fn (): bool => true);
+    try {
+        $conn = stream_socket_client("tcp://$addr", $errno, $errstr, $timeout);
+        if (false === $conn) {
+            return null;
+        }
+        stream_set_timeout($conn, (int) ceil($timeout));
+        fwrite($conn, fcgi_request(1, 'GET', $path, keepConn: false));
+
+        return fcgi_read_responses($conn, [1])[1];
+    } catch (RuntimeException) {
+        return null;
+    } finally {
+        restore_error_handler();
+        if ($conn) {
+            fclose($conn);
+        }
+    }
 }

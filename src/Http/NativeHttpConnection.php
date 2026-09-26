@@ -75,6 +75,9 @@ final class NativeHttpConnection
     /** Seconds to keep reading (and discarding) after an error response, see serve(). */
     private const LINGER_TIMEOUT = 2.0;
 
+    /** While draining, how long a new connection may take to start its request, see drain(). */
+    private const DRAIN_NEW_WAIT = 1.0;
+
     /** An unread request body up to this is skipped to keep the connection; a larger one closes it. */
     private const DISCARD_LIMIT = 65536;
 
@@ -154,6 +157,12 @@ final class NativeHttpConnection
      */
     private int $reclaimable = 0;
 
+    /** The current request's method and target, for the log. */
+    private string $request = '';
+
+    /** The server is draining: this connection closes after its current request, see drain(). */
+    private bool $draining = false;
+
     /** While skipping an unread request body: when that must be done by. */
     private ?float $discardUntil = null;
 
@@ -208,7 +217,11 @@ final class NativeHttpConnection
                 if ($keepAlive && \strlen($this->buffer) !== $this->offset && 0 === ++$pipelined % self::BURST) {
                     phasync::sleep();
                 }
-            } while ($keepAlive);
+            } while ($keepAlive && !$this->draining);
+            if ($keepAlive) {
+                // Drained after the response said keep-alive: close as if it had said close
+                $this->linger = true;
+            }
         } catch (HttpError $e) {
             // After the head was sent (an echoed request body turned out malformed), just close
             if (!$this->headSent) {
@@ -217,7 +230,7 @@ final class NativeHttpConnection
         } catch (\Throwable $e) {
             if (null === $this->ioError) {
                 // Not a lost or stalled client: a real error
-                $this->logger->error('{exception}', ['exception' => $e]);
+                $this->logger->error('{request} failed: {exception}', ['request' => $this->request, 'exception' => $e]);
                 if (!$this->headSent) {
                     $this->writeError(500, 'Internal Server Error');
                 }
@@ -237,8 +250,37 @@ final class NativeHttpConnection
                 } catch (IOException|TimeoutException) {
                 }
             }
+            $this->reclaimable = 0;
             \fclose($this->socket);
         }
+    }
+
+    /**
+     * Stop keeping the connection alive, see NativeHttpServer::drain(). A request in flight is
+     * answered with `Connection: close`. An idle kept-alive connection is closed now: a client
+     * must expect that of a kept-alive connection, and retries. A new connection that sent
+     * nothing yet gets DRAIN_NEW_WAIT to send its request first, since its client has no
+     * reason to expect the close. Idle means nothing received: a request in the kernel's
+     * buffer, not yet read, arrived before the drain, and is answered.
+     */
+    public function drain(): void
+    {
+        $this->draining = true;
+        if (self::KEPT_ALIVE === $this->reclaimable && $this->nothingReceived()) {
+            $this->reclaim(self::KEPT_ALIVE);
+        } elseif (self::NEW === $this->reclaimable) {
+            phasync::go(function () {
+                phasync::sleep(self::DRAIN_NEW_WAIT);
+                if (self::NEW === $this->reclaimable && $this->nothingReceived()) {
+                    $this->reclaim(self::NEW);
+                }
+            });
+        }
+    }
+
+    private function nothingReceived(): bool
+    {
+        return \strlen($this->buffer) === $this->offset && '' === (string) @\stream_socket_recvfrom($this->socket, 1, \STREAM_PEEK);
     }
 
     /**
@@ -508,6 +550,7 @@ final class NativeHttpConnection
             throw new HttpError('Bad Request', 400);
         }
         [$method, $target, $protocol] = $parts;
+        $this->request                = "$method $target";
         if ('HTTP/1.1' === $protocol) {
             $version = '1.1';
         } elseif ('HTTP/1.0' === $protocol) {
@@ -822,6 +865,9 @@ final class NativeHttpConnection
             }
         }
         if (!$request->eof() && ($request->continuePending() || (!$echo && !$request->discardable(self::DISCARD_LIMIT)))) {
+            $keepAlive = false;
+        }
+        if ($this->draining) {
             $keepAlive = false;
         }
         $head .= $keepAlive ? ('1.0' === $version ? "Connection: keep-alive\r\n" : '') : "Connection: close\r\n";
