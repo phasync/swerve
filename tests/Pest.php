@@ -498,6 +498,92 @@ function native_closed($conn): bool
 }
 
 /**
+ * Read from a blocking connection until what arrived contains $needle, it ends, or $timeout
+ * seconds passed; returns what arrived.
+ */
+function read_until($conn, string $needle, float $timeout = 5): string
+{
+    $data     = '';
+    $deadline = microtime(true) + $timeout;
+    stream_set_blocking($conn, false);
+    try {
+        while (!str_contains($data, $needle) && ($left = $deadline - microtime(true)) > 0) {
+            $read  = [$conn];
+            $write = $except = null;
+            if (stream_select($read, $write, $except, (int) $left, (int) (fmod($left, 1) * 1_000_000))) {
+                $chunk = @fread($conn, 65536);
+                if (false === $chunk || ('' === $chunk && feof($conn))) {
+                    break;
+                }
+                $data .= $chunk;
+            }
+        }
+    } finally {
+        stream_set_blocking($conn, true);
+    }
+
+    return $data;
+}
+
+/*
+ * A WebSocket client (RFC 6455), minimal and written from the specification: the server side
+ * is the fixture's /ws, an application like any other; swerve has no WebSocket code.
+ */
+
+/**
+ * Open a WebSocket: the handshake, checking the 101 and its Sec-WebSocket-Accept.
+ *
+ * @return resource the blocking connection, with a 5 s timeout
+ */
+function ws_connect(string $addr, string $path = '/ws')
+{
+    $conn = native_connect($addr);
+    $key  = base64_encode(random_bytes(16));
+    fwrite($conn, "GET $path HTTP/1.1\r\nHost: test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: $key\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    $head = native_read_head($conn);
+    expect($head['status'] ?? null)->toBe(101);
+    expect($head['headers']['sec-websocket-accept'] ?? null)->toBe(base64_encode(sha1($key . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true)));
+
+    return $conn;
+}
+
+/**
+ * Send one frame, masked as a client must.
+ */
+function ws_send($conn, int $opcode, string $payload, bool $fin = true): void
+{
+    $n    = strlen($payload);
+    $mask = random_bytes(4);
+    $head = chr(($fin ? 0x80 : 0) | $opcode) . match (true) {
+        $n < 126   => chr(0x80 | $n),
+        $n < 65536 => chr(0x80 | 126) . pack('n', $n),
+        default    => chr(0x80 | 127) . pack('J', $n),
+    };
+    fwrite($conn, $head . $mask . ($payload ^ substr(str_repeat($mask, intdiv($n, 4) + 1), 0, $n)));
+}
+
+/**
+ * The next frame from the server: [opcode, payload], or null when the connection ended.
+ *
+ * @return array{0: int, 1: string}|null
+ */
+function ws_read($conn): ?array
+{
+    $head = fcgi_read_exactly($conn, 2);
+    if (null === $head) {
+        return null;
+    }
+    $length = ord($head[1]) & 0x7F;
+    if (126 === $length) {
+        $length = unpack('n', fcgi_read_exactly($conn, 2))[1];
+    } elseif (127 === $length) {
+        $length = unpack('J', fcgi_read_exactly($conn, 8))[1];
+    }
+
+    return [ord($head[0]) & 0x0F, $length > 0 ? fcgi_read_exactly($conn, $length) : ''];
+}
+
+/**
  * Serve requests in this process with a NativeHttpConnection over a SEQPACKET socket pair, so
  * each of the server's writes arrives as one packet: the packets of the responses, up to the
  * end of the connection. Each of $requests is sent as one packet, and a read shorter than a
@@ -856,4 +942,32 @@ function fcgi_get(string $addr, string $path, float $timeout = 1.0): ?array
             fclose($conn);
         }
     }
+}
+
+/**
+ * What arrives on a non-blocking connection within $timeout seconds, until its end: [data,
+ * whether the connection was reset instead of ending cleanly].
+ *
+ * @return array{0: string, 1: bool}
+ */
+function read_to_end($conn, float $timeout = 5): array
+{
+    $data     = '';
+    $deadline = microtime(true) + $timeout;
+    while (microtime(true) < $deadline) {
+        $r = [$conn];
+        $w = $e = null;
+        if (stream_select($r, $w, $e, 0, 100_000)) {
+            $chunk = @fread($conn, 65536);
+            if (false === $chunk) {
+                return [$data, true];
+            }
+            if ('' === $chunk && feof($conn)) {
+                return [$data, false];
+            }
+            $data .= $chunk;
+        }
+    }
+
+    return [$data, false];
 }

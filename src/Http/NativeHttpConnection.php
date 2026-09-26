@@ -5,6 +5,7 @@ namespace Swerve\Http;
 use Nyholm\Psr7\ServerRequest;
 use Nyholm\Psr7\Uri;
 use phasync;
+use phasync\CancelledException;
 use phasync\IOException;
 use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
@@ -18,8 +19,11 @@ use Psr\Log\LoggerInterface;
  *
  * Requests on a connection are handled one after another in this connection's coroutine
  * (pipelined requests wait in the read buffer), so there is no coroutine per request. This
- * coroutine does every read and write of the socket, also those made through the request
- * body while the application reads it.
+ * coroutine writes every response. The request body is read by whoever reads it: from the end
+ * of a request head until that body ends, only its reader touches the socket's reading side,
+ * in whatever coroutine it runs, also after the response (see settle()). The next request
+ * starts once the response is written and its request body was read to its end or released.
+ * Request bodies read after the response, upgrade requests and 101: see RequestBody.
  *
  * Nothing is buffered by default. The request body streams to the application (RequestBody),
  * and the response body streams to the socket as it is read from its StreamInterface: the
@@ -78,12 +82,17 @@ final class NativeHttpConnection
     /** While draining, how long a new connection may take to start its request, see drain(). */
     private const DRAIN_NEW_WAIT = 1.0;
 
-    /** An unread request body up to this is skipped to keep the connection; a larger one closes it. */
+    /**
+     * An unread request body rest up to this is skipped to keep the connection, or read into the
+     * body for the application when it still holds it (see settle()); a larger one closes it.
+     */
     private const DISCARD_LIMIT = 65536;
 
     /**
-     * Seconds skipping an unread body may take in all. Each wait is bounded by IO_TIMEOUT, but a
-     * client sending a byte now and then would otherwise hold the connection for days.
+     * Seconds skipping a released body's rest may take in all. Each wait is bounded by
+     * IO_TIMEOUT, but a client sending a byte now and then would otherwise hold the connection
+     * for days. Not for a body the application still holds (see settle()): that one may still
+     * be read, and gets the client's allowance (BODY_TIMEOUT), whenever it is read.
      */
     private const DISCARD_TIMEOUT = 5.0;
 
@@ -125,6 +134,15 @@ final class NativeHttpConnection
     private static string $date  = '';
 
     /**
+     * PHP's shutdown began, after an exit() (in a request, or the worker's at its drain
+     * deadline) or a fatal error: the suspended coroutines are destroyed, which runs their
+     * finally blocks, and the event loop can no longer take a raised flag or a suspension;
+     * trying turns the exit into a PHP fatal error (exit 255). Set by a shutdown function
+     * (NativeHttpServer::listen()), which PHP calls before it destroys them.
+     */
+    public static bool $exiting = false;
+
+    /**
      * Data read from the socket; the unconsumed part is $buffer from $offset on: the next
      * request head, or the start of the current request's body. An offset instead of cutting
      * the string on every read avoids copying the rest of the buffer each time.
@@ -151,17 +169,21 @@ final class NativeHttpConnection
 
     /**
      * While this connection's coroutine waits, the server may close the connection to make
-     * room, see reclaim(): ANSWERED while it lingers or skips an unread body after the
-     * response, NEW or KEPT_ALIVE while it waits for a request head, BODY while it waits for
-     * more of a request body; 0 while it runs, or waits for the application or to write.
+     * room, see reclaim(): ANSWERED while it lingers, or skips or absorbs an unread body after
+     * the response, NEW or KEPT_ALIVE while it waits for a request head, BODY while it waits for
+     * more of a request body; 0 while it runs, or waits for the application or to write, or
+     * once upgraded.
      */
     private int $reclaimable = 0;
 
     /** The current request's method and target, for the log. */
     private string $request = '';
 
-    /** The server is draining: this connection closes after its current request, see drain(). */
-    private bool $draining = false;
+    /**
+     * The server is draining: this connection closes after its current request, see drain().
+     * Read by RequestBody: a tunnel's input ends.
+     */
+    public bool $draining = false;
 
     /** While skipping an unread request body: when that must be done by. */
     private ?float $discardUntil = null;
@@ -181,6 +203,41 @@ final class NativeHttpConnection
 
     private readonly string $remoteAddr;
     private readonly int $remotePort;
+
+    /** The current request body, as far as the connection knows, see settle(). */
+    private const BODY_OPEN     = 0;
+    private const BODY_DONE     = 1;
+    private const BODY_FAILED   = 2;
+    private const BODY_RELEASED = 3;
+
+    /** The current request body's state, see settle(); reset for each request. */
+    private int $bodyState = self::BODY_OPEN;
+
+    /** A request body released unfinished, kept alive until its rest is skipped, see settle(). */
+    private ?RequestBody $released = null;
+
+    /** settle() waits on the flag $this: the body's reports raise it only then. */
+    private bool $settling = false;
+
+    /**
+     * The coroutine of a read of the request body waiting on the socket (awaitBody(), readRaw()):
+     * the socket is never closed under it (serve()), settle() leaves the body to it, and in a
+     * tunnel, drain() wakes it. Also a wait that began before the 101, for the upgrade request's
+     * own framed body.
+     */
+    private ?\Fiber $reader = null;
+
+    /**
+     * A 101 was sent: the socket carries the application's protocol, to which no HTTP limit or
+     * timeout applies (see tunnel()).
+     */
+    private bool $upgraded = false;
+
+    /** serve() ended. Read by RequestBody: later reads throw (a switched body's give EOF). */
+    public bool $closed = false;
+
+    /** This connection's coroutine, which runs handle(); read by RequestBody. */
+    public ?\Fiber $fiber = null;
 
     /**
      * @param resource $socket      a connected, non-blocking stream
@@ -205,6 +262,7 @@ final class NativeHttpConnection
 
     public function serve(): void
     {
+        $this->fiber = \Fiber::getCurrent();
         try {
             $first     = true;
             $pipelined = 0;
@@ -238,7 +296,23 @@ final class NativeHttpConnection
                 // last chunk, so the client sees the response is truncated.
             }
         } finally {
-            if ($this->linger && null === $this->ioError) {
+            $this->closed   = true; // a body the application still holds: its reads throw (a tunnel's: EOF)
+            $this->released = null; // released while an exception unwound handleRequest()
+            // While PHP shuts down nothing runs any more: no reader to wait for, nor to wake
+            if (null !== $this->reader && !self::$exiting) {
+                // One of the application's reads waits on the socket: wake it, never close the
+                // socket under it. A tunnel's input just ends, as on a drain, and the socket
+                // stays readable for the linger below; any other read fails.
+                if ($this->upgraded) {
+                    phasync::cancel($this->reader);
+                } else {
+                    @\stream_socket_shutdown($this->socket, \STREAM_SHUT_RDWR);
+                }
+                do {
+                    phasync::awaitFlag($this);
+                } while (null !== $this->reader);
+            }
+            if ($this->linger && null === $this->ioError && !self::$exiting) {
                 @\stream_socket_shutdown($this->socket, \STREAM_SHUT_WR);
                 $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
                 $this->reclaimable = self::ANSWERED;
@@ -252,6 +326,9 @@ final class NativeHttpConnection
             }
             $this->reclaimable = 0;
             \fclose($this->socket);
+            if (!self::$exiting) {
+                phasync::raiseFlag($this); // a read waiting for an upgrade's status learns there will be none
+            }
         }
     }
 
@@ -261,11 +338,31 @@ final class NativeHttpConnection
      * must expect that of a kept-alive connection, and retries. A new connection that sent
      * nothing yet gets DRAIN_NEW_WAIT to send its request first, since its client has no
      * reason to expect the close. Idle means nothing received: a request in the kernel's
-     * buffer, not yet read, arrived before the drain, and is answered.
+     * buffer, not yet read, arrived before the drain, and is answered. A request body the
+     * application reads after the response is left to it, as a request in flight is: the
+     * worker's drain deadline bounds both.
+     *
+     * Returns whether the connection is upgraded (101).
      */
-    public function drain(): void
+    public function drain(): bool
     {
         $this->draining = true;
+        if ($this->upgraded) {
+            // The application's protocol can only be ended by the application: its input ends,
+            // as if the client had closed its side, after what swerve already took off the
+            // socket (see readRaw(), awaitBody()), also within the upgrade request's own framed
+            // body. It is expected to end its response then; one that doesn't
+            // is dropped at the worker's drain deadline, which is logged. Not by shutting the
+            // socket's reading side: the kernel would still take what the client sends, and
+            // the closing linger (serve()) would find the end of the stream at once, closing
+            // with that unread, which resets the connection and destroys what the application
+            // wrote last, such as its goodbye.
+            if (null !== $this->reader) {
+                phasync::cancel($this->reader);
+            }
+
+            return true;
+        }
         if (self::KEPT_ALIVE === $this->reclaimable && $this->nothingReceived()) {
             $this->reclaim(self::KEPT_ALIVE);
         } elseif (self::NEW === $this->reclaimable) {
@@ -276,6 +373,8 @@ final class NativeHttpConnection
                 }
             });
         }
+
+        return false;
     }
 
     private function nothingReceived(): bool
@@ -293,8 +392,10 @@ final class NativeHttpConnection
             return false;
         }
         $this->reclaimable = 0;
-        // Wakes this connection's own coroutine, which finds the end of the stream and closes
+        // Wakes this connection's own coroutine, which finds the end of the stream and closes,
+        // or a read waiting for an upgrade's status (awaitStatus()), which gives the upgrade up
         \stream_socket_shutdown($this->socket, \STREAM_SHUT_RDWR);
+        phasync::raiseFlag($this);
 
         return true;
     }
@@ -402,32 +503,180 @@ final class NativeHttpConnection
      */
     public function sendContinue(): void
     {
+        // Written from the reader's coroutine, which may not be this connection's: it could
+        // overlap a response head being written, but a head is only written after handle()
+        // returned, and a client that waits for 100 Continue sends nothing before it
         if (!$this->headSent && \strlen($this->buffer) === $this->offset) {
             $this->write("HTTP/1.1 100 Continue\r\n\r\n");
         }
     }
 
     /**
+     * The current request body ended (read to its end, or failed), see settle().
+     */
+    public function bodyEnded(bool $failed): void
+    {
+        $this->bodyState = $failed ? self::BODY_FAILED : self::BODY_DONE;
+        if ($this->settling) {
+            phasync::raiseFlag($this);
+        }
+    }
+
+    /**
+     * A request body was released unfinished, see RequestBody::__destruct(). Only the current
+     * request's body can be: the next request starts after its body ended or was released, and
+     * any other outcome closes the connection. After the close, nothing keeps it: that would
+     * make a cycle (body, connection, body) that phasync never collects.
+     */
+    public function release(RequestBody $body): void
+    {
+        if (self::BODY_OPEN === $this->bodyState && !$this->closed) {
+            $this->released  = $body;
+            $this->bodyState = self::BODY_RELEASED;
+            if ($this->settling) {
+                phasync::raiseFlag($this);
+            }
+        }
+    }
+
+    /**
+     * A tunnel's next bytes (after a 101): the buffer first (bytes the client sent right behind
+     * the upgrade head), then the socket, waiting without a timeout. '' at the end: the client
+     * closed its side, or the server drains. Once draining, the socket is not read any more:
+     * a client that keeps sending would otherwise keep the end from ever coming.
+     *
+     * @throws IOException when the connection was reset
+     */
+    public function readRaw(int $max): string
+    {
+        if (\strlen($this->buffer) !== $this->offset) {
+            return $this->readBody($max, \PHP_INT_MAX); // from the buffer only
+        }
+        while (!$this->draining && !$this->closed) {
+            $chunk = @\fread($this->socket, \min($max, self::READ_SIZE));
+            if (false === $chunk) {
+                throw $this->ioError = new IOException('Connection reset by the client');
+            }
+            if ('' !== $chunk) {
+                return $chunk;
+            }
+            if (\feof($this->socket)) {
+                break;
+            }
+            $this->reader = \Fiber::getCurrent();
+            try {
+                phasync::readable($this->socket, \PHP_FLOAT_MAX);
+            } catch (CancelledException $e) {
+                if (!$this->draining && !$this->closed) {
+                    throw $e; // not drain()'s, nor serve()'s
+                }
+            } finally {
+                $this->reader = null;
+                if ($this->closed && !self::$exiting) {
+                    phasync::raiseFlag($this); // serve() waits to close the socket
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * The application gave its tunnel up (see RequestBody::close()): end the connection now,
+     * also when a write waits on a client that stopped reading, which nothing else would end.
+     */
+    public function abort(): void
+    {
+        if (!$this->closed) {
+            $this->ioError ??= new IOException('The application closed the connection');
+            @\stream_socket_shutdown($this->socket, \STREAM_SHUT_RDWR);
+        }
+    }
+
+    /**
+     * Wait up to $wait seconds for the response status of an upgrade request whose body was read
+     * past its framing (RequestBody::readOn()); respond() and the connection's end raise the flag.
+     * Until a 101 the HTTP limits apply: the wait is one for more of the body, taken from the
+     * client's allowance (BODY_TIMEOUT), and the connection may be closed to make room meanwhile.
+     * Returns false when the status can't be waited for any more: the allowance is used up, or
+     * the connection was closed to make room. Most likely handle() waits for this very read, as
+     * middleware running the rest of the stack in a coroutine of its own does, which swerve can't
+     * tell (curl sends `Upgrade: h2c` on plain requests).
+     */
+    public function awaitStatus(RequestBody $body, float $wait): bool
+    {
+        if ($this->bodyAllowance <= 0) {
+            return false;
+        }
+        $start             = \microtime(true);
+        $this->reclaimable = self::BODY;
+        try {
+            phasync::awaitFlag($this, \min($wait, $this->bodyAllowance));
+        } catch (TimeoutException) {
+        }
+        if (!$body->switchable()) {
+            return true; // the status is known: the connection's own coroutine has moved on
+        }
+        $this->bodyAllowance -= \microtime(true) - $start;
+        if (self::BODY !== $this->reclaimable) {
+            return false; // closed to make room
+        }
+        $this->reclaimable = 0;
+
+        return true;
+    }
+
+    /**
+     * The client closed its side, and neither swerve nor the kernel holds anything more from it.
+     * For a read that waits for an upgrade's response status (RequestBody::readOn()): the body
+     * has nothing more to give, whatever the status.
+     */
+    public function clientClosed(): bool
+    {
+        return \strlen($this->buffer) === $this->offset && '' === @\stream_socket_recvfrom($this->socket, 1, \STREAM_PEEK);
+    }
+
+    /**
      * Wait until more of a request body can be read: within the client's allowance (see
-     * BODY_TIMEOUT), and when skipping an unread body, by its deadline.
+     * BODY_TIMEOUT), and when skipping an unread body, by its deadline. After a 101 (the
+     * upgrade request's own body, sent after it) without either, and never closed to make room;
+     * like readRaw(), drain() wakes that wait, also one that began before the 101 (the timeout
+     * it began with then just starts it again), and once draining the socket is not waited on:
+     * the tunnel's input ends (RequestBody::take()).
      *
      * @throws IOException|TimeoutException
+     * @throws CancelledException after a 101, when the server drains
      */
     private function awaitBody(): void
     {
         $start   = \microtime(true);
         $timeout = $this->bodyAllowance;
-        if (null === $this->discardUntil) {
+        if ($this->upgraded) {
+            if ($this->draining) {
+                throw new CancelledException('The server drains');
+            }
+            $timeout = \PHP_FLOAT_MAX;
+        } elseif (null === $this->discardUntil) {
             $this->reclaimable = self::BODY;
         } else {
             $this->reclaimable = self::ANSWERED;
             $timeout           = \min($timeout, $this->discardUntil - $start);
         }
+        $this->reader = \Fiber::getCurrent();
         try {
             phasync::readable($this->socket, \max(0.0, $timeout));
+        } catch (TimeoutException $e) {
+            if (!$this->upgraded) {
+                throw $e;
+            }
+            // The 101 went out during the wait: no HTTP timeout applies any more
         } finally {
             $this->reclaimable    = 0;
             $this->bodyAllowance -= \microtime(true) - $start;
+            $this->reader         = null;
+            if ($this->closed && !self::$exiting) {
+                phasync::raiseFlag($this); // serve() waits to close the socket
+            }
         }
     }
 
@@ -477,6 +726,7 @@ final class NativeHttpConnection
     private function handleRequest(bool $first): bool
     {
         $this->headSent    = false;
+        $this->bodyState   = self::BODY_OPEN;
         $this->reclaimable = $first ? self::NEW : self::KEPT_ALIVE;
 
         // The request head: request line and headers, up to the empty line. The idle wait for
@@ -582,6 +832,7 @@ final class NativeHttpConnection
         $te         = null;
         $connection = '';
         $expect     = null;
+        $upgrade    = false;
         for ($i = 1, $n = \count($lines); $i < $n; ++$i) {
             $colon = \strpos($lines[$i], ':');
             if (false === $colon) {
@@ -619,6 +870,9 @@ final class NativeHttpConnection
                 case 'expect':
                     $expect = $value;
                     break;
+                case 'upgrade':
+                    $upgrade = true;
+                    break;
             }
         }
         if (('1.1' === $version ? 1 !== $hosts : $hosts > 1) || \strspn($host, self::HOST) !== \strlen($host)) {
@@ -642,6 +896,9 @@ final class NativeHttpConnection
             $options   = 'close' === $connection || 'keep-alive' === $connection ? [$connection] : \array_map('trim', \explode(',', $connection));
             $keepAlive = !\in_array('close', $options, true) && ('1.1' === $version || \in_array('keep-alive', $options, true));
         }
+        // An upgrade request (RFC 9110 7.8): only in HTTP/1.1, and only when Connection names it
+        // (a lone "upgrade" takes the explode above too)
+        $upgrade = $upgrade && '1.1' === $version && isset($options) && \in_array('upgrade', $options, true);
 
         $continue = false;
         if (null !== $expect && '1.1' === $version) {
@@ -689,7 +946,7 @@ final class NativeHttpConnection
             }
         }
 
-        $body = new RequestBody($this, null !== $te ? null : ($length ?? 0), $continue, $this->maxBodySize);
+        $body = new RequestBody($this, null !== $te ? null : ($length ?? 0), $continue, $this->maxBodySize, $upgrade);
         $now  = \microtime(true);
         try {
             // Nyholm validates header names and values: this is what rejects obs-fold,
@@ -729,17 +986,89 @@ final class NativeHttpConnection
         }
 
         $keepAlive = $this->writeResponse($response, $method, $version, $keepAlive, $body);
+        if (!$body->eof()) {
+            // The body is still the application's: it may be read later, from any coroutine.
+            // Our references go; when nothing else holds it, it is released right here.
+            $held = \WeakReference::create($body);
+            unset($body, $request, $response);
 
-        // Skip what the application didn't read, after the response, which may have been
-        // streaming the request body
-        if ($keepAlive && !$body->eof()) {
-            $this->discardUntil = \microtime(true) + self::DISCARD_TIMEOUT;
-            $keepAlive          = $body->discard(self::DISCARD_LIMIT);
-            $this->discardUntil = null;
+            return $this->settle($keepAlive, $held);
         }
-        $body->finish();
 
         // Closing: the client may have sent more (a pipelined request, the rest of a body)
+        $this->linger = !$keepAlive;
+
+        return $keepAlive;
+    }
+
+    /**
+     * After the response, until the request body is read to its end, fails, or is released:
+     * returns whether the next request may start. A released body's rest is skipped, within
+     * DISCARD_LIMIT and DISCARD_TIMEOUT, or the connection closes. The client isn't waited for
+     * here: the body's reader reads the socket, whenever the application gets to it.
+     *
+     * A body the application holds but hasn't read, or read only inside handle(), whose rest is
+     * no larger than DISCARD_LIMIT, is read into the body (RequestBody::absorb()): the
+     * application still reads
+     * all of it, whenever it likes, and the connection goes on. A framework holding on to the
+     * last request it answered (Slim's error handler does, also when the handler read the start
+     * of the body and threw) would otherwise hold the connection. The client gets the time it
+     * would have if the application read the body itself (BODY_TIMEOUT): swerve can't tell a
+     * body that will be read in a moment, by a coroutine that hasn't started yet, from one just
+     * held. The connection is then done with it: a drain doesn't wait for the application to
+     * read it. A body read after the response is the application's, at its own pace, and the
+     * drain waits for it. A larger body read, if at all, only inside handle() closes the
+     * connection after KEEP_ALIVE_TIMEOUT, as an idle kept-alive one would. A tunnel whose response ended gives the application
+     * LINGER_TIMEOUT in all to read the client's last bytes. Either close lingers (serve()).
+     *
+     * @param \WeakReference<RequestBody> $held the body, not kept alive by this
+     */
+    private function settle(bool $keepAlive, \WeakReference $held): bool
+    {
+        if (!$keepAlive) {
+            // No next request: the client sees the response end now, not once the body is read
+            @\stream_socket_shutdown($this->socket, \STREAM_SHUT_WR);
+        }
+        $until = $this->upgraded ? \microtime(true) + self::LINGER_TIMEOUT : null;
+        // A body released already is still there (its destructor keeps it for the skip below)
+        if (null === $until && self::BODY_OPEN === $this->bodyState && null === $this->reader && ($body = $held->get())?->absorbable(self::DISCARD_LIMIT)) {
+            $body->absorb(self::DISCARD_LIMIT);
+        }
+        unset($body);
+        $this->settling = true;
+        try {
+            while (self::BODY_OPEN === $this->bodyState) {
+                try {
+                    phasync::awaitFlag($this, null !== $until ? \max(0.0, $until - \microtime(true)) : self::KEEP_ALIVE_TIMEOUT);
+                } catch (TimeoutException) {
+                    if (null === $until) {
+                        if (null !== $this->reader || $held->get()->readElsewhere) {
+                            continue; // read by another coroutine: the application's, at its own pace
+                        }
+                        $this->logger->warning('{request}: the request body was held unread after the response; closing', ['request' => $this->request]);
+                    }
+                    // Closing, lingering: the held body can't be read any more, and what the
+                    // client sent is read and dropped, or the kernel would reset the connection,
+                    // destroying the response before the client read it (serve()). A read that
+                    // waits in a tunnel reaches its input's end first.
+                    $keepAlive = false;
+                    break;
+                }
+            }
+        } finally {
+            $this->settling = false;
+        }
+        if (self::BODY_RELEASED === $this->bodyState) {
+            $body           = $this->released;
+            $this->released = null;
+            if ($keepAlive) {
+                $this->discardUntil = \microtime(true) + self::DISCARD_TIMEOUT;
+                $keepAlive          = $body->discard(self::DISCARD_LIMIT);
+                $this->discardUntil = null;
+            }
+        } elseif (self::BODY_FAILED === $this->bodyState) {
+            $keepAlive = false;
+        }
         $this->linger = !$keepAlive;
 
         return $keepAlive;
@@ -758,18 +1087,28 @@ final class NativeHttpConnection
      *                             known once the response body's first piece is read (which may
      *                             be this request body, echoed): a client that still waits for
      *                             `100 Continue` may never send it, and too large a rest, or one
-     *                             found malformed, isn't read
+     *                             found malformed, isn't read. A body the application started
+     *                             reading counts as being read on (it may be, from another
+     *                             coroutine, after the response); if it is released instead,
+     *                             the connection closes after the response all the same.
      */
     private function writeResponse(ResponseInterface $response, string $method, string $version, bool $keepAlive, RequestBody $request): bool
     {
         $status = $response->getStatusCode();
+        $tunnel = false;
         if ($status < 200) {
-            throw new \UnexpectedValueException("A final response can't have status $status");
+            if (101 !== $status || !$request->switchable()) {
+                throw new \UnexpectedValueException(101 === $status
+                    ? '101 answers only an HTTP/1.1 upgrade request whose body handle() did not read past its framing'
+                    : "A final response can't have status $status");
+            }
+            $tunnel = true;
         }
-        $head      = "HTTP/1.1 $status " . $response->getReasonPhrase() . "\r\n";
-        $lines     = 1;
-        $appLength = null;
-        $addDate   = true;
+        $head       = "HTTP/1.1 $status " . $response->getReasonPhrase() . "\r\n";
+        $lines      = 1;
+        $appLength  = null;
+        $addDate    = true;
+        $connection = ''; // the application's Connection options, each after ", "
         foreach ($response->getHeaders() as $name => $values) {
             switch (\strtolower($name)) {
                 case 'content-length':
@@ -779,14 +1118,31 @@ final class NativeHttpConnection
                     }
                     continue 2;
                 case 'connection':
-                    if (\str_contains(\strtolower(\implode(',', $values)), 'close')) {
-                        $keepAlive = false;
+                    if ($tunnel) {
+                        break; // as the application sets it: the connection is its protocol's now
+                    }
+                    // Its options are passed on (an Upgrade needs "upgrade" among them, RFC 9110
+                    // 7.8), but close and keep-alive are decided below. Only tokens: the line is
+                    // added after the head's check for CR, LF and NUL.
+                    foreach ($values as $value) {
+                        foreach (\explode(',', (string) $value) as $option) {
+                            $option = \trim($option, " \t");
+                            if (0 === \strcasecmp($option, 'close')) {
+                                $keepAlive = false;
+                            } elseif ('' !== $option && 0 !== \strcasecmp($option, 'keep-alive')) {
+                                if (\strspn($option, self::TOKEN) !== \strlen($option)) {
+                                    throw new \UnexpectedValueException("Response Connection option '$option' is not a token");
+                                }
+                                $connection .= ", $option";
+                            }
+                        }
                     }
                     continue 2;
+                case 'upgrade':
+                    break; // on a 101 the protocol switched to; on another status one offered (RFC 9110 7.8), which a 426 must name
                 case 'transfer-encoding':
                 case 'keep-alive':
-                case 'upgrade':
-                    continue 2; // this connection's framing is decided here
+                    continue 2; // this connection's framing is decided here (a 1xx has none)
                 case 'date':
                     $addDate = false;
             }
@@ -813,6 +1169,13 @@ final class NativeHttpConnection
         // PSR-7 implementation (or reason phrase, which Nyholm doesn't check) produced it.
         if (\substr_count($head, "\n") !== $lines || \substr_count($head, "\r") !== $lines || \str_contains($head, "\0")) {
             throw new \UnexpectedValueException('CR, LF or NUL in a response header or reason phrase');
+        }
+        if ($request->upgrade) {
+            // Before any read of the response body, which may be this request body
+            $request->respond($status);
+        }
+        if ($tunnel) {
+            return $this->tunnel($head, $response->getBody(), $request);
         }
 
         $body    = $response->getBody();
@@ -864,13 +1227,16 @@ final class NativeHttpConnection
                 $keepAlive = false; // HTTP/1.0 and unknown size: the body ends at the close
             }
         }
-        if (!$request->eof() && ($request->continuePending() || (!$echo && !$request->discardable(self::DISCARD_LIMIT)))) {
+        if (!$request->eof() && ($request->continuePending() || (!$echo && 0 === $request->tell() && !$request->discardable(self::DISCARD_LIMIT)))) {
             $keepAlive = false;
         }
         if ($this->draining) {
             $keepAlive = false;
         }
-        $head .= $keepAlive ? ('1.0' === $version ? "Connection: keep-alive\r\n" : '') : "Connection: close\r\n";
+        $connection .= $keepAlive ? ('1.0' === $version ? ', keep-alive' : '') : ', close';
+        if ('' !== $connection) {
+            $head .= 'Connection: ' . \substr($connection, 2) . "\r\n";
+        }
 
         $this->headSent = true;
         if ($chunked) {
@@ -910,6 +1276,31 @@ final class NativeHttpConnection
     }
 
     /**
+     * Switch protocols (101): the head goes out at once, alone, since the client sends nothing
+     * more until it has it (waiting for the body's first piece would deadlock). A client still
+     * waiting for `100 Continue` gets it first (RFC 9110 7.8). Then the body goes out unframed
+     * as it is read, until it ends; the connection then closes (settle(), serve()). No HTTP
+     * limit or timeout applies from here on, and $bufferResponses never does: the connection is
+     * the application's protocol's, and it alone knows how long a silence may last.
+     */
+    private function tunnel(string $head, StreamInterface $body, RequestBody $request): bool
+    {
+        $this->upgraded    = true;
+        $this->headSent    = true;
+        $this->reclaimable = 0; // a read of the body's framed part may wait, since before the 101
+        $this->write(($request->continuePending() ? "HTTP/1.1 100 Continue\r\n\r\n" : '') . "$head\r\n");
+        $seekable = $body->isSeekable();
+        if ($seekable) {
+            $body->rewind();
+        }
+        while ('' !== ($piece = $this->readPiece($body, self::READ_SIZE, $seekable))) {
+            $this->write($piece);
+        }
+
+        return false;
+    }
+
+    /**
      * The response body's next piece: at most $max bytes, and '' only at its end.
      *
      * A seekable body (in memory or a file, where a read never waits for a slow source) is read
@@ -921,7 +1312,8 @@ final class NativeHttpConnection
      * time: reading again at once would spin, and keep every other coroutine of the worker
      * (maybe the one producing the data) from running. Since nothing is written meanwhile, a
      * client that left would never be noticed, so the socket is checked each time: a client
-     * that closed (or half-closed: it sends nothing more either) ends the response.
+     * that closed (or half-closed: it sends nothing more either) ends the response. In a tunnel
+     * a client's half-close is the request body's EOF, for the application to act on.
      *
      * @param ?string $piece what a first read($max) already returned
      *
@@ -934,7 +1326,7 @@ final class NativeHttpConnection
         $piece ??= $body->read($max);
         for ($wait = 0.001; '' === $piece && !$body->eof(); $wait = \min($wait * 2, 0.05)) {
             phasync::sleep($wait);
-            if (\feof($this->socket)) {
+            if (!$this->upgraded && \feof($this->socket)) {
                 throw $this->ioError = new IOException('Connection closed by the client');
             }
             $piece = $body->read($max);
@@ -975,7 +1367,7 @@ final class NativeHttpConnection
                     return;
                 }
                 $data = \substr($data, $written);
-                phasync::writable($this->socket, self::IO_TIMEOUT);
+                phasync::writable($this->socket, $this->upgraded ? \PHP_FLOAT_MAX : self::IO_TIMEOUT);
             }
         } catch (IOException|TimeoutException $e) {
             throw $this->ioError = $e;

@@ -45,6 +45,9 @@ final class NativeHttpServer
     /** The most connections served at once, see listen(). */
     private int $max = 0;
 
+    /** What serves more connections, for the log, see listen(). */
+    private string $remedy = 'raise the open-file limit (ulimit -n) or add workers';
+
     private bool $draining = false;
 
     /** run() has not returned, see adopt(). */
@@ -88,9 +91,11 @@ final class NativeHttpServer
             if (!\posix_setrlimit(\POSIX_RLIMIT_NOFILE, self::FD_SETSIZE, $hard)) {
                 throw new \RuntimeException('Could not lower the open-file limit to ' . self::FD_SETSIZE);
             }
-            $limit = self::FD_SETSIZE;
+            $limit        = self::FD_SETSIZE;
+            $this->remedy = 'add workers, or install the phasync extension: without it a worker serves no more, whatever the open-file limit';
         }
         $this->max = $limit - self::RESERVED_FDS;
+        \register_shutdown_function(static function () { NativeHttpConnection::$exiting = true; });
 
         // Not phasync\Net\listen(): its accept loop retries at once, forever, when accepting
         // fails for lack of descriptors; and its listener is inherited by processes the
@@ -135,7 +140,7 @@ final class NativeHttpServer
                     }
                     if (\count($this->connections) >= $this->max) {
                         $this->reclaim();
-                        $this->logShort('At the limit of {max} connections; {n} waiting on their clients closed to make room since the last warning; raise the open-file limit (ulimit -n) or add workers', ['max' => $this->max, 'n' => $this->reclaimed]);
+                        $this->logShort('At the limit of {max} connections; {n} waiting on their clients closed to make room since the last warning; {remedy}', ['max' => $this->max, 'n' => $this->reclaimed, 'remedy' => $this->remedy]);
                         phasync::awaitFlag($this);
                         if ($this->draining) {
                             break 2;
@@ -159,7 +164,8 @@ final class NativeHttpServer
     /**
      * Stop accepting, and let the connections finish: requests in flight are answered with
      * `Connection: close`, idle keep-alive connections are closed at once, new ones that sent
-     * nothing yet soon after. run() then returns once the last connection ended.
+     * nothing yet soon after. An upgraded connection's request body reaches EOF, which tells
+     * the application to end it. run() then returns once the last connection ended.
      *
      * The connections already waiting in the kernel's accept queue are accepted and served
      * first; shutting the listener down then removes it from the SO_REUSEPORT group at once,
@@ -175,11 +181,12 @@ final class NativeHttpServer
         // From here on nothing suspends until run() is woken by the shutdown
         $this->draining = true;
         \stream_socket_shutdown($this->listener, \STREAM_SHUT_RD);
+        $upgraded = 0;
         foreach ($this->connections as $connection) {
-            $connection->drain();
+            $upgraded += (int) $connection->drain();
         }
         phasync::raiseFlag($this); // run() may wait for a free place
-        $this->logger->info('Draining HTTP at {address}: {n} connections open', ['address' => $this->address, 'n' => \count($this->connections)]);
+        $this->logger->info('Draining HTTP at {address}: {n} connections open, {upgraded} upgraded', ['address' => $this->address, 'n' => \count($this->connections), 'upgraded' => $upgraded]);
     }
 
     /**
@@ -212,7 +219,8 @@ final class NativeHttpServer
      * out. The oldest first of: those already answered (lingering before the close, or skipping
      * an unread body), then those that never completed a request (a new connection that sent
      * nothing yet, a slow head), then the kept-alive ones, and last those waiting for more of a
-     * request body.
+     * request body. Upgraded connections (101), and connections waiting for the application to
+     * read its request body after the response, are never closed to make room.
      */
     private function reclaim(): void
     {

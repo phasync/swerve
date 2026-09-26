@@ -9,6 +9,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Factory\AppFactory;
 
 $app = AppFactory::create();
+$app->addRoutingMiddleware();
+// Its error handler keeps the last request it answered, and with it that request's body
+$app->addErrorMiddleware(false, false, false);
 
 $app->get('/hello', function (Request $request, Response $response) {
     $response->getBody()->write('Hello');

@@ -67,6 +67,87 @@ nginx or HAProxy, which speaks FastCGI to the workers. swerve supports several r
 multiplexed over one FastCGI connection; `etc/haproxy.cnf` is an example HAProxy
 configuration that uses it.
 
+## Streams: request bodies after the response, upgrades, SSE
+
+In HTTP mode swerve deals in two streams, and nothing else. The request's body is the unread
+request body, still connected to the socket. The response's body is read piece by piece and
+sent as it comes. swerve doesn't care when or where either is read or written, so WebSocket,
+Server-Sent Events and other protocols are ordinary PSR-7 responses that the application builds
+on the two streams. swerve itself has no WebSocket or SSE code.
+
+- **Reading after the response.** The request body may be read after `handle()` returned, from
+  any coroutine, also while the response is being written. The next request on the connection
+  waits until the body is read to its end, or released (its last reference dropped); so does a
+  drain, up to its deadline. A released body's rest is skipped, up to 64 KiB within 5 s, or the
+  connection closes. A reference held by a container, a cycle or an exception trace holds the
+  body too.
+- **Bodies held, not read.** A body the application still holds after the response but hasn't
+  read, or read only inside `handle()` (Slim's error handler keeps the last request it
+  answered), is read into memory for it when its rest is at most 64 KiB, the client getting as
+  long as if the application read it: it can still be read whenever the application likes, and
+  the connection goes on at once. A larger one that is never read after that closes the
+  connection after 30 s, which is logged. A body another coroutine reads is never cut off,
+  however long it takes between reads.
+- **Upgrade requests** (HTTP/1.1, an `Upgrade` header, and `upgrade` in `Connection`) have a
+  body of unknown size. Past its framing (usually at once), a read from another coroutine
+  waits for the response. After a 101 it is what the client sends, until the client closes its
+  side, the server drains, or the connection closes. After any other status the body ends at
+  its framing, the connection is kept alive, and the response's `Upgrade` and `Connection`
+  options go out as given (a 426 must name the protocol it wants). Reading the body past its
+  framing inside `handle()` itself declines the upgrade: the read returns `''`, and a 101
+  becomes a 500. A client closing its side while a read waits for the response ends the body
+  there, after what it sent before; a 101 still goes out. Until the status is known the HTTP
+  limits apply: that wait counts against the client's time for the body (10 s, more as it
+  sends), after which the upgrade is declined in the same way. So `handle()` waiting for a
+  coroutine that reads the whole body (curl sends `Upgrade: h2c` on plain requests) is stuck
+  for that long; read the body in `handle()` itself where you can.
+- **Answering 101.** Set `Upgrade` and `Connection: Upgrade` yourself. The head goes out as
+  soon as `handle()` returns, and the body goes out raw until it ends, which closes the
+  connection: the request body gets the client's last bytes for 2 s more, then the connection
+  closes lingering, so the client gets all of the response, also when the request body is held
+  unread. No HTTP timeout or size limit applies to it, and `--buffer-responses` doesn't
+  either, so use your protocol's own, such as pings; to give up on a client, `close()` the
+  request body, which ends the connection at once, even while a write to a client that stopped
+  reading waits. Give it a body whose `read()` waits: `new UnbufferedStream(65536,
+  PHP_FLOAT_MAX)` (the default 60 s deadlock timeout would end an idle connection with an
+  error).
+- **Shutdown, reload and recycle.** An upgraded connection's request body reaches EOF at once,
+  also within the upgrade request's own framed body (even a read of it that began before the
+  101), however much more the client sends. End the response then, for example with a
+  WebSocket close frame: it reaches the client, since the connection closes lingering. Past the drain deadline
+  the worker exits and drops the connection, which is logged. Upgraded connections are never
+  closed to make room at the connection limit. Without the phasync extension that limit is 960
+  connections per worker, whatever `ulimit -n` says: add workers or install the extension for
+  many of them.
+- **Server-Sent Events** are an ordinary streamed 200 with an `UnbufferedStream` body: every
+  read goes out as a chunk at once. When the client leaves, swerve stops reading the body, and
+  that is all a producer can learn of it: give the stream a small buffer and a finite deadlock
+  timeout, and send a comment line (`: keep-alive`) more often than that timeout, for example
+  `new UnbufferedStream(1, 60)` and one every 15 s. `append()` then throws a minute after the
+  client left, which ends the producer; with `PHP_FLOAT_MAX` it would wait forever, a coroutine
+  and its buffer for every client that left. A drain doesn't signal them either, but the drain
+  deadline bounds them.
+
+```php
+use phasync\Psr\UnbufferedStream;
+
+// A WebSocket handler: check the handshake, answer 101, speak the protocol on the two streams
+$out = new UnbufferedStream(65536, PHP_FLOAT_MAX);
+phasync::go(function () use ($request, $out) {
+    $in = $request->getBody();
+    while ('' !== ($bytes = $in->read(65536))) {
+        // parse frames from $bytes, $out->append() the answers
+    }
+    $out->append($closeFrame); // EOF: the client left, or the server drains
+    $out->end();
+});
+
+return new Response(101, ['Upgrade' => 'websocket', 'Connection' => 'Upgrade', 'Sec-WebSocket-Accept' => $accept], $out);
+```
+
+`tests/Fixtures/app.php` has a complete minimal WebSocket server (`fixture_ws()`) written this
+way.
+
 ## Supervision
 
 A master process starts the workers and looks after them. It never loads the application
