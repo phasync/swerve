@@ -148,6 +148,35 @@ return new Response(101, ['Upgrade' => 'websocket', 'Connection' => 'Upgrade', '
 `tests/Fixtures/app.php` has a complete minimal WebSocket server (`fixture_ws()`) written this
 way.
 
+## Publish and subscribe
+
+A message published in any worker reaches the subscribers of its topic in every worker, the
+publishing one included: a chat room, a live dashboard, cache invalidation.
+
+```php
+use Swerve\Swerve;
+
+Swerve::publish('chat', $message);
+
+foreach (Swerve::subscribe('chat') as $message) {
+    // every message published to 'chat' from the moment subscribe() returned
+}
+```
+
+- Messages pass through the master process, which sends each to every worker in the order it
+  read them, so every subscriber sees a topic's messages in the same order. Without the master
+  (swerve embedded in your own process), they are delivered in that process.
+- Delivery is at most once, to the subscriptions that exist when a message reaches their
+  worker. There is no history: a worker started after a reload, a recycle or a crash sees
+  nothing sent before it. Swerve is one machine; across machines, use Redis, NATS or the like.
+- A subscription ends when its last reference goes: a `break`, the variable going out of scope,
+  the request's coroutine ending. A topic costs nothing in a worker without subscribers.
+- A message is kept once per worker, however many subscribe, until the slowest subscriber
+  read it. One falling more than `maxLag` seconds behind (30 by default,
+  `Swerve::subscribe('prices', maxLag: 5)`) gets a `SubscriberLagException` from its loop.
+- Topics are 1 to 255 bytes, messages at most 1 MiB. A worker that leaves messages unread for
+  30 s (its event loop stuck) is killed, also with `--watchdog=0`.
+
 ## Supervision
 
 A master process starts the workers and looks after them. It never loads the application

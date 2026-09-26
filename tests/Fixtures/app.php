@@ -10,6 +10,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\Swerve;
 
 /*
  * Supervision tests control how the application loads through the directory in
@@ -662,6 +663,39 @@ return new class($version) implements RequestHandlerInterface {
                 return new Response(200, ['Content-Type' => 'text/event-stream'], $out);
             })(),
             '/sse-live'       => new Response(200, [], (string) $this->sseLive),
+            // Swerve::subscribe() as Server-Sent Events: "ready <pid>" once subscribed, then ?n=
+            // messages of ?topic=
+            '/subscribe'      => (static function () use ($query) {
+                $subscription = Swerve::subscribe($query['topic']);
+                $out          = new UnbufferedStream(65536, PHP_FLOAT_MAX);
+                $out->append('data: ready ' . \getmypid() . "\n\n");
+                phasync::go(static function () use ($subscription, $out, $query) {
+                    $i = 0;
+                    foreach ($subscription as $message) {
+                        $out->append("data: $message\n\n");
+                        if (++$i >= (int) $query['n']) {
+                            break;
+                        }
+                    }
+                    $out->end();
+                });
+
+                return new Response(200, ['Content-Type' => 'text/event-stream'], $out);
+            })(),
+            '/publish'        => (static function () use ($query) {
+                Swerve::publish($query['topic'], \str_repeat($query['m'], (int) ($query['times'] ?? 1)));
+
+                return new Response(200, [], 'published');
+            })(),
+            '/topics'         => new Response(200, [], \implode(',', Swerve\Util\Topics::active())),
+            // Stalls this worker's event loop for ?s= seconds
+            '/busy'           => (static function () use ($query) {
+                $until = \microtime(true) + (float) $query['s'];
+                while (\microtime(true) < $until) {
+                }
+
+                return new Response(200, [], 'done');
+            })(),
             default   => new Response(404, ['Content-Type' => 'text/plain'], 'Not found: ' . $request->getUri()),
         };
     }

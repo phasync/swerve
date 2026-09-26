@@ -56,6 +56,8 @@ final class Worker
     /** @var resource awaitTerm() waits on it */
     private $wake;
     private float $lastTick = 0.0;
+    /** Bytes for the master that the pipe did not take yet, see send(). */
+    private string $out = '';
     /** Seconds without a tick after which SIGALRM checks whether the master is alive; 0 = never. */
     private readonly int $stallCheck;
 
@@ -129,7 +131,9 @@ final class Worker
         \register_shutdown_function(function () {
             $error = \error_get_last();
             if (($error['type'] ?? 0) & (\E_ERROR | \E_CORE_ERROR | \E_COMPILE_ERROR | \E_PARSE)) {
-                @\fwrite($this->pipe, 'F');
+                // Blocking: the process is ending, and a frame half sent must not swallow the 'F'
+                \stream_set_blocking($this->pipe, true);
+                @\fwrite($this->pipe, $this->out . 'F');
                 \ini_set('memory_limit', '-1');
                 $this->logger->critical('PHP fatal error: {message} in {file}:{line}; in flight: {requests}', $error + ['requests' => $this->describeInFlight()]);
             }
@@ -137,6 +141,7 @@ final class Worker
         // Blocked by the master around the fork: a signal that came meanwhile arrives now
         \pcntl_sigprocmask(\SIG_UNBLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
         \stream_set_blocking($pipe, false);
+        Topics::$toMaster = fn (string $topic, string $message) => $this->send(Topics::frame($topic, $message));
     }
 
     /**
@@ -240,7 +245,7 @@ final class Worker
     /** Tell the master this worker listens: it may now retire the worker this one replaces. */
     public function ready(): void
     {
-        @\fwrite($this->pipe, 'R');
+        $this->send('R');
     }
 
     /**
@@ -254,7 +259,7 @@ final class Worker
     {
         $this->inFlight[++$this->requests] = $describe;
         if (1 === $this->requests) {
-            @\fwrite($this->pipe, 'Q');
+            $this->send('Q');
         }
         $this->heartbeat();
 
@@ -297,7 +302,7 @@ final class Worker
         }
         $this->recycleSent = true;
         $this->logger->notice('Recycling: {why}; asking the master for a replacement', ['why' => $why]);
-        @\fwrite($this->pipe, 'C');
+        $this->send('C');
     }
 
     /**
@@ -346,29 +351,62 @@ final class Worker
         if ($this->stallCheck) {
             \pcntl_alarm($this->stallCheck);
         }
-        @\fwrite($this->pipe, '.'); // a full pipe (a slow master) must never block us
+        $this->send('.');
     }
 
     /**
      * Act on what the master sends: 'T' to drain, 'L' to reopen the log file after log
-     * rotation. Bytes, not signals: a signal cuts short the blocking calls (sleep(),
-     * stream_select()) of the requests in flight, which a drain is there to let finish. Ends at
-     * the end of the pipe, when the master died; tick() acts on that.
+     * rotation, and published messages, see Topics. Bytes, not signals: a signal cuts short the
+     * blocking calls (sleep(), stream_select()) of the requests in flight, which a drain is there
+     * to let finish. Ends at the end of the pipe, when the master died; tick() acts on that.
      */
     private function awaitMaster(): void
     {
+        $buffer = '';
         while (true) {
-            $bytes = (string) \fread(phasync::readable($this->pipe, \PHP_FLOAT_MAX), 256);
+            $bytes = (string) \fread(phasync::readable($this->pipe, \PHP_FLOAT_MAX), 65536);
             if ('' === $bytes && \feof($this->pipe)) {
                 return;
             }
-            if (\str_contains($bytes, 'L') && $this->logger instanceof Logger) {
+            $buffer .= $bytes;
+            $status = Topics::parse($buffer, static fn (string $topic, string $message) => Topics::deliver($topic, $message));
+            if (\str_contains($status, 'L') && $this->logger instanceof Logger) {
                 $this->logger->reopen();
             }
-            if (\str_contains($bytes, 'T') && !$this->draining) {
+            if (\str_contains($status, 'T') && !$this->draining) {
                 $this->drain('the master asked');
             }
         }
+    }
+
+    /**
+     * Send bytes to the master, in order: a status byte, or a published message's frame. What
+     * the pipe doesn't take at once (a slow master, a large message) is sent by a coroutine as
+     * the pipe takes it, never blocking the caller.
+     */
+    private function send(string $bytes): void
+    {
+        if ('' !== $this->out) {
+            $this->out .= $bytes;
+
+            return;
+        }
+        $written = @\fwrite($this->pipe, $bytes);
+        if (false === $written || \strlen($bytes) === $written) {
+            return; // false: the master is gone, and tick() acts on that
+        }
+        $this->out = \substr($bytes, $written);
+        phasync::go(function () {
+            while ('' !== $this->out) {
+                $written = @\fwrite(phasync::writable($this->pipe, \PHP_FLOAT_MAX), $this->out);
+                if (false === $written) {
+                    $this->out = '';
+
+                    return;
+                }
+                $this->out = \substr($this->out, $written);
+            }
+        });
     }
 
     /** "GET /a, GET /b", or "none". */
@@ -402,7 +440,7 @@ final class Worker
         $this->drainStarted = \microtime(true);
         $this->deadline     = $this->drainStarted + \max($this->grace - 1.0, $this->grace / 2);
         $this->logger->notice('Draining ({why})', ['why' => $why]);
-        @\fwrite($this->pipe, 'D'); // the master may not know: a SIGTERM from someone else, or its death
+        $this->send('D'); // the master may not know: a SIGTERM from someone else, or its death
         foreach ($this->drains as $drain) {
             $drain();
         }

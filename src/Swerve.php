@@ -8,6 +8,7 @@ use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
 use swerve\ServerInterface;
+use Swerve\Util\Topics;
 
 final class Swerve implements SelectableInterface, LoggerAwareInterface
 {
@@ -212,6 +213,38 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
         }
         $this->pendingConnections->enqueue($connection);
         \phasync::raiseFlag($this->pendingConnections);
+    }
+
+    /**
+     * Send a message to every subscriber of $topic, in every worker process of this swerve,
+     * this one included. Returns once the message is on its way, not once delivered.
+     *
+     * Delivery is at most once, to the subscriptions that exist when the message reaches their
+     * worker: there is no history, and a worker starting later (after a reload, a recycle, a
+     * crash) sees nothing sent before. Every subscriber sees the messages of a topic in the
+     * same order. Swerve embedded without its master process delivers in this process only.
+     *
+     * @param string $topic   1 to 255 bytes
+     * @param string $message at most 1 MiB
+     *
+     * @throws \InvalidArgumentException for a topic or message outside those sizes
+     */
+    public static function publish(string $topic, string $message): void
+    {
+        Topics::publish($topic, $message);
+    }
+
+    /**
+     * Receive what is published to $topic from now on:
+     *
+     *     foreach (Swerve::subscribe('chat') as $message) { ... }
+     *
+     * The subscription ends when its last reference goes, see Subscription. One falling more
+     * than $maxLag seconds behind gets a SubscriberLagException from the loop.
+     */
+    public static function subscribe(string $topic, float $maxLag = 30.0): Subscription
+    {
+        return new Subscription($topic, $maxLag);
     }
 
     public static function getVersion(): string

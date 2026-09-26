@@ -15,7 +15,10 @@ use Psr\Log\LoggerInterface;
  * times a second, from its event loop, 'R' once it listens, 'Q' when its first request starts,
  * 'C' to ask to be recycled, and 'D' when it drains; the end of the pair tells the master the
  * worker is gone. The master writes 'T' to make a worker drain and 'L' to make it reopen the
- * log file: not signals, which would cut short the blocking calls of the requests in flight. A
+ * log file: not signals, which would cut short the blocking calls of the requests in flight.
+ * Among these bytes go the messages of Swerve::publish(), framed (see Topics::frame()): the
+ * master sends each one it reads to every worker ready or draining, the sender included, in
+ * the order it read them. A worker that leaves them unread for PUBLISH_LAG is killed. A
  * worker that stays silent longer than the watchdog timeout is stuck (a busy loop or a
  * blocking call stalls its whole event loop): it is sent SIGQUIT, to log what it is stuck in,
  * and SIGKILLed a moment later.
@@ -84,6 +87,11 @@ final class Cluster
      * run (the process group stopped and continued, a suspended VM): see deadlines().
      */
     public const PAUSED = 1.0;
+    /**
+     * A worker that leaves a published message unread this long is stuck, even with the
+     * watchdog off, and killed: the master would keep every message for it meanwhile.
+     */
+    public const PUBLISH_LAG = 30.0;
 
     /** @var array<int, WorkerProcess> by pid */
     private array $workers = [];
@@ -283,23 +291,38 @@ final class Cluster
 
             return;
         }
-        $write = $except = null;
+        $write = [];
+        foreach ($this->workers as $pid => $w) {
+            if ($w->pipe && '' !== $w->out) {
+                $write[$pid] = $w->pipe;
+            }
+        }
+        $except = null;
         if (!@\stream_select($read, $write, $except, 0, (int) ($timeout * 1_000_000))) {
             return;
+        }
+        foreach ($write as $pid => $pipe) {
+            $this->flush($this->workers[$pid]);
         }
         $now                  = self::now();
         $this->onlyHeartbeats = true;
         foreach ($read as $pid => $pipe) {
             $w     = $this->workers[$pid];
-            $bytes = (string) @\fread($pipe, 256);
+            $bytes = (string) @\fread($pipe, 65536);
             if ('' === $bytes && \feof($pipe)) {
                 \fclose($pipe);
                 $w->pipe              = null;
                 $this->onlyHeartbeats = false;
                 continue;
             }
-            $w->lastSeen          = $now;
-            $this->onlyHeartbeats = $this->onlyHeartbeats && '' === \trim($bytes, '.');
+            $w->lastSeen = $now;
+            $w->in .= $bytes;
+            $published = false;
+            $bytes     = Topics::parse($w->in, function (string $topic, string $message, string $frame) use (&$published) {
+                $published = true;
+                $this->publish($frame);
+            });
+            $this->onlyHeartbeats = $this->onlyHeartbeats && !$published && '' === \trim($bytes, '.');
             if (\str_contains($bytes, 'R') && WorkerProcess::STARTING === $w->state) {
                 $this->onReady($w);
             }
@@ -367,7 +390,8 @@ final class Cluster
         if ($w->pipe) {
             // Its last bytes may not have been read yet: a 'Q' right before a request killed it,
             // an 'F' from its shutdown
-            $bytes     = (string) @\fread($w->pipe, 4096);
+            $w->in .= (string) @\fread($w->pipe, 1 << 20);
+            $bytes     = Topics::parse($w->in, fn (string $topic, string $message, string $frame) => $this->publish($frame));
             $w->served = $w->served || \str_contains($bytes, 'Q');
             $w->fatal  = $w->fatal || \str_contains($bytes, 'F');
             \fclose($w->pipe);
@@ -460,6 +484,8 @@ final class Cluster
                 $this->logger->error('Worker {pid} (slot {slot}) sent no heartbeat for {s} s: killing it (busy loop or blocking call)', ['pid' => $w->pid, 'slot' => $w->slot, 's' => $silent]);
             } elseif (WorkerProcess::DRAINING === $w->state && $now - $w->drainingSince > $this->grace) {
                 $this->kill($w, 'grace expired', 'warning');
+            } elseif (!$w->pending->isEmpty() && $now - $w->pending->bottom()[1] > self::PUBLISH_LAG) {
+                $this->kill($w, 'published messages unread for ' . self::seconds(self::PUBLISH_LAG) . ' s', 'error');
             }
             // Only a worker started since the failures proves the slot starts again: not the one
             // a failing replacement was to take over from, which serves on
@@ -474,6 +500,47 @@ final class Cluster
             foreach ($stuck as [$w, $silent]) {
                 $this->kill($w, "watchdog: silent $silent s", null);
             }
+        }
+    }
+
+    /**
+     * A message a worker published, for every worker that serves or drains, in the order the
+     * master read them. Not for one still starting: its application doesn't subscribe yet, and
+     * it reads the pipe only once it serves.
+     */
+    private function publish(string $frame): void
+    {
+        $now = self::now();
+        foreach ($this->workers as $w) {
+            if (WorkerProcess::STARTING !== $w->state && $this->send($w, $frame)) {
+                $w->pending->enqueue([$w->queued, $now]);
+            }
+        }
+    }
+
+    /**
+     * Queue bytes for a worker, and write what its pipe takes; the rest goes as readPipes()
+     * sees the pipe writable. Returns whether any are left for later.
+     */
+    private function send(WorkerProcess $w, string $bytes): bool
+    {
+        if (!$w->pipe) {
+            return false;
+        }
+        $w->out .= $bytes;
+        $w->queued += \strlen($bytes);
+        $this->flush($w);
+
+        return '' !== $w->out;
+    }
+
+    private function flush(WorkerProcess $w): void
+    {
+        $written = (int) @\fwrite($w->pipe, $w->out);
+        $w->out = \substr($w->out, $written);
+        $w->written += $written;
+        while (!$w->pending->isEmpty() && $w->pending->bottom()[0] <= $w->written) {
+            $w->pending->dequeue();
         }
     }
 
@@ -524,18 +591,14 @@ final class Cluster
             $this->logger->reopen();
         }
         foreach ($this->workers as $w) {
-            if ($w->pipe) {
-                @\fwrite($w->pipe, 'L');
-            }
+            $this->send($w, 'L');
         }
     }
 
     /** Ask a worker to drain: by a byte, see the class's docblock. */
     private function drain(WorkerProcess $w): void
     {
-        if ($w->pipe) {
-            @\fwrite($w->pipe, 'T');
-        }
+        $this->send($w, 'T');
         $w->state         = WorkerProcess::DRAINING;
         $w->drainingSince = self::now();
     }
