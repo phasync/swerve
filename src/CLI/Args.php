@@ -2,108 +2,37 @@
 
 namespace Swerve\CLI;
 
+/**
+ * The command line: options, flags and arguments, parsed as GNU tools do. Options and
+ * arguments may come in any order; an option's value is attached (`--workers=4`, `-w4`) or
+ * the next word (`--workers 4`, `-w 4`); flags may be grouped (`-vv`, `-qv`); `--` ends the
+ * options.
+ */
 final class Args
 {
     /**
-     * Options and flags.
+     * Options, flags and arguments, and section headings for --help (by an int key).
      *
-     * @var array<string, Option|Flag>
+     * @var array<string|int, Option|Flag|Argument|string>
      */
     private array $values = [];
 
-    private bool $hasArguments = false;
+    /** @var array{0: array<string, mixed>, 1: string[], 2: ?string}|null see parse() */
+    private ?array $parsed = null;
 
     /**
-     * Validates all options and returns the first error string
-     * if an error is found, or null if no errors are found.
+     * @param string[]|null $argv the words after the command; $_SERVER['argv'] without its first by default
      */
-    public function isInvalid(): ?string
+    public function __construct(private ?array $argv = null)
     {
-        [ $shortOptions, $longOptions ] = $this->buildGetOpts();
+    }
 
-        $restIndex = null;
-        $options = getopt($shortOptions, $longOptions, $restIndex);
+    /** A heading in --help for the options added after it. */
+    public function section(string $title): self
+    {
+        $this->values[] = $title;
 
-        $args = $this->getArguments();
-        $argVals = [];
-        foreach ($args as $arg) {
-            if (isset($_SERVER['argv'][$restIndex])) {
-                $val = $_SERVER['argv'][$restIndex++];
-                if (null !== ($e = $arg->isInvalid($val))) {
-                    return $e;
-                }
-                $argVals[] = $val;
-            } elseif ($arg->default === '') {
-                return 'Required argument: ' . $arg->name;
-            } else {
-                $argVals[] = $arg->default;
-            }
-        }
-
-        // getopt() stops at the first word that is not an option: what follows the arguments
-        // would be ignored
-        if ($restIndex < count($_SERVER['argv'])) {
-            $rest = $_SERVER['argv'][$restIndex];
-
-            return 'Unknown argument: ' . $rest . (\str_starts_with($rest, '-') && $args ? ' (options go before ' . \reset($args)->name . ')' : '');
-        }
-
-        foreach ($_SERVER['argv'] as $argv) {
-            if (\str_starts_with($argv, '--')) {
-                $name = \substr($argv, 2);
-                $parts = \explode("=", $name, 2);
-                $found = false;
-                foreach ($this->values as $v) {
-                    if ($v instanceof Argument) {
-                        continue;
-                    }
-                    if ($v->long === $parts[0]) {
-                        // getopt() leaves out `--log=` without a word
-                        if ($v instanceof Option && '' === ($parts[1] ?? null)) {
-                            return "Value required for option: --{$v->long}=<{$v->placeholder}>";
-                        }
-                        $found = true;
-                        break;
-                    }
-                }
-                if (!$found) {
-                    return 'Unknown option: --' . $parts[0];
-                }
-            } elseif (\str_starts_with($argv, '-')) {
-                foreach ($this->values as $v) {
-                    if ($v instanceof Argument) {
-                        continue;
-                    }
-                    if ($v->short !== '' && \str_starts_with($argv, '-' . $v->short) && $v instanceof Option) {
-                        continue 2;
-                    }
-                }
-                $name = \substr($argv, 1);
-                for ($i = 0; $i < \strlen($name); $i++) {
-                    foreach ($this->values as $v) {
-                        if ($v instanceof Argument) {
-                            continue;
-                        }
-                        if ($v->short === $name[$i]) {
-                            continue 2;
-                        }
-                    }
-                    return "Unknown flag: -" . $name[$i] . (\strlen($name) > 1 ? " in -" . $name : '');
-                }
-            }
-        }
-
-        // Validate options
-        foreach ($this->values as $name => $value) {
-            if ($value instanceof ArgInterface) {
-                $error = $value->isInvalid($options);
-                if ($error !== null) {
-                    return $error;
-                }
-            }
-        }
-
-        return null;
+        return $this;
     }
 
     public function add(string $name, ArgInterface|Argument $option): self
@@ -111,207 +40,216 @@ final class Args
         if (isset($this->values[$name])) {
             throw new \InvalidArgumentException("Option/flag `$name` already added");
         }
-
-        if ($option instanceof ArgInterface && $this->hasArguments) {
-            throw new \InvalidArgumentException("Can't add option/flag after adding arguments");
-        }
-
         foreach ($this->values as $valName => $v) {
-            if ($option instanceof ArgInterface) {
-                if ($option->short !== '' && $option->short === $v->short) {
-                    throw new \InvalidArgumentException("Option/flag `$name`: -" . $option->short . " already used for $valName.");
+            if ($option instanceof ArgInterface && $v instanceof ArgInterface) {
+                if ('' !== $option->getShort() && $option->getShort() === $v->getShort()) {
+                    throw new \InvalidArgumentException("Option/flag `$name`: -" . $option->getShort() . " already used for $valName.");
                 }
-                if ($option->long !== '' && $option->long === $v->long) {
-                    throw new \InvalidArgumentException("Option/flag `$name`: --" . $option->long . " already used for $valName.");
-                }    
+                if ('' !== $option->getLong() && $option->getLong() === $v->getLong()) {
+                    throw new \InvalidArgumentException("Option/flag `$name`: --" . $option->getLong() . " already used for $valName.");
+                }
             }
         }
-
-        if ($option instanceof Argument) {
-            $this->hasArguments = true;
-        }
-
         $this->values[$name] = $option;
 
         return $this;
     }
 
-    public function __isset($name) {
+    /**
+     * The first thing wrong with the command line, or null.
+     */
+    public function isInvalid(): ?string
+    {
+        [$options, $words, $error] = $this->parse();
+        if (null !== $error) {
+            return $error;
+        }
+        $arguments = $this->getArguments();
+        foreach (\array_values($arguments) as $i => $arg) {
+            if (isset($words[$i])) {
+                if (null !== ($e = $arg->isInvalid($words[$i]))) {
+                    return $e;
+                }
+            } elseif ('' === $arg->default) {
+                return 'Required argument: ' . $arg->name;
+            }
+        }
+        if (\count($words) > \count($arguments)) {
+            return 'Unknown argument: ' . $words[\count($arguments)];
+        }
+        foreach ($this->values as $value) {
+            if ($value instanceof ArgInterface && null !== ($error = $value->isInvalid($options))) {
+                return $error;
+            }
+        }
+
+        return null;
+    }
+
+    public function __isset($name)
+    {
         return isset($this->values[$name]);
     }
 
     public function __get(string $name): array|int|string
     {
-        if (!isset($this->values[$name])) {
-            throw new \LogicException("Option/flag `$name` not defined");
+        $value = $this->values[$name] ?? throw new \LogicException("Option/flag `$name` not defined");
+        [$options, $words] = $this->parse();
+        if ($value instanceof ArgInterface) {
+            return $value->getValue($options);
         }
-        [ $short, $long ] = $this->buildGetOpts();
-        $options = \getopt($short, $long, $restIndex);
+        $index = \array_search($name, \array_keys($this->getArguments()), true);
 
-        if ($this->values[$name] instanceof ArgInterface) {
-            return $this->values[$name]->getValue($options);
-        } elseif ($this->values[$name] instanceof Argument) {
-            $args = $this->getArguments();
-            $argVals = [];
-            foreach ($args as $n => $arg) {
-                if (isset($_SERVER['argv'][$restIndex])) {
-                    $val = $_SERVER['argv'][$restIndex++];
-                    if (null !== ($e = $arg->isInvalid($val))) {
-                        return $e;
-                    }
-                    $argVals[$n] = $val;
-                } else {
-                    $argVals[$n] = $arg->default;
-                }
-            }
-            return $argVals[$n];
-        }
+        return $words[$index] ?? $value->default;
     }
 
-    public function isDefault(string $name): bool {
-        if (!isset($this->values[$name])) {
-            throw new \LogicException("Option `$name` not defined");
+    public function isDefault(string $name): bool
+    {
+        $value = $this->values[$name] ?? throw new \LogicException("Option `$name` not defined");
+        if ($value instanceof Option) {
+            return $value->isDefault($this->parse()[0]);
         }
-        $val = $this->values[$name];
-        if ($val instanceof Option) {
-            [ $short, $long ] = $this->buildGetOpts();
-            $options = \getopt($short, $long, $restIndex);
-            return $val->isDefault($options);
-        } elseif ($val instanceof Argument) {
-            return $val->default === $this->$name;
+        if ($value instanceof Argument) {
+            return $value->default === $this->$name;
         }
-        throw new \LogicException("Flags have no default");
+        throw new \LogicException('Flags have no default');
     }
 
     /**
-     * Returns a nicely aligned argument list similar to typical Unix applications.
+     * The options, as getopt() would give them (a name to its value, false for a flag, a list
+     * for one given more than once), the arguments, and the first error, if any.
+     *
+     * @return array{0: array<string, mixed>, 1: string[], 2: ?string}
+     */
+    private function parse(): array
+    {
+        if (null !== $this->parsed) {
+            return $this->parsed;
+        }
+        $argv    = $this->argv ?? \array_slice($_SERVER['argv'], 1);
+        $options = [];
+        $words   = [];
+        $error   = null;
+        $set     = static function (string $name, string|false $value) use (&$options) {
+            if (\array_key_exists($name, $options)) {
+                $options[$name]   = (array) $options[$name];
+                $options[$name][] = $value;
+            } else {
+                $options[$name] = $value;
+            }
+        };
+        for ($i = 0; $i < \count($argv) && null === $error; ++$i) {
+            $word = $argv[$i];
+            if ('--' === $word) {
+                \array_push($words, ...\array_slice($argv, $i + 1));
+                break;
+            }
+            if (\str_starts_with($word, '--')) {
+                [$long, $value] = \explode('=', \substr($word, 2), 2) + [1 => null];
+                $arg            = $this->find(static fn (ArgInterface $a) => $a->getLong() === $long);
+                if (null === $arg) {
+                    $error = "Unknown option: --$long";
+                } elseif ($arg instanceof Flag) {
+                    null === $value ? $set($long, false) : $error = "--$long takes no value";
+                } else {
+                    $value ??= $argv[++$i] ?? null;
+                    null === $value || '' === $value ? $error = "Value required for option: --$long=<{$arg->placeholder}>" : $set($long, $value);
+                }
+            } elseif (\strlen($word) > 1 && '-' === $word[0]) {
+                for ($j = 1; $j < \strlen($word); ++$j) {
+                    $arg = $this->find(static fn (ArgInterface $a) => $a->getShort() === $word[$j]);
+                    if (null === $arg) {
+                        $error = "Unknown flag: -$word[$j]" . (\strlen($word) > 2 ? " in $word" : '');
+                        break;
+                    }
+                    if ($arg instanceof Option) {
+                        $value = \substr($word, $j + 1);
+                        $value = '' !== $value ? \ltrim($value, '=') : ($argv[++$i] ?? null);
+                        null === $value || '' === $value ? $error = "Value required for option: -$word[$j] <{$arg->placeholder}>" : $set($word[$j], $value);
+                        break;
+                    }
+                    $set($word[$j], false);
+                }
+            } else {
+                $words[] = $word;
+            }
+        }
+
+        return $this->parsed = [$options, $words, $error];
+    }
+
+    private function find(\Closure $match): ?ArgInterface
+    {
+        foreach ($this->values as $value) {
+            if ($value instanceof ArgInterface && $match($value)) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The options, flags and arguments, one per line under their section's heading, aligned as
+     * Unix tools do.
      */
     public function getArgumentList(): string
     {
+        $width = 0;
+        foreach ($this->values as $value) {
+            if (!\is_string($value)) {
+                $width = \max($width, \strlen(self::makeArgList($value)));
+            }
+        }
         $output = [];
-        $maxLen = 0;
-
-        // Calculate the maximum length of the option/flag strings
         foreach ($this->values as $value) {
-            $maxLen = max($maxLen, \strlen(self::makeArgList($value)));
+            if (\is_string($value)) {
+                $output[] = ($output ? "\n" : '') . "$value:";
+                continue;
+            }
+            $description = $value->description . ($value instanceof Option && '' !== $value->default ? " (default: {$value->default})" : '');
+            $output[]    = \sprintf('  %-' . $width . 's  %s', self::makeArgList($value), $description);
         }
 
-        // Build the output lines with proper alignment
-        foreach ($this->values as $value) {
-            $name = self::makeArgList($value);
-            $description = $value->description.($value instanceof Option && $value->default ? " (default: {$value->default})" : '');
-
-            $output[] = sprintf('%-'.$maxLen.'s  %s', $name, $description);
-        }
-
-        return implode("\n", $output)."\n";
+        return \implode("\n", $output) . "\n";
     }
 
-    /**
-     * Returns a short version of the argument list.
-     */
+    /** `[options] [swerve.php]`. */
     public function getShortArgumentList(): string
     {
-        $flags = [];
-        $requiredOptions = [];
-        $optionalOptions = [];
-
-        foreach ($this->values as $value) {
-            if ($value instanceof Flag) {
-                $flags[] = $value->short;
-            } elseif ($value instanceof Option) {
-                $placeholder = $value->placeholder ? ' <'.$value->placeholder.'>' : '';
-                $optionStr = self::makeArgList($value);
-                if ($value->required) {
-                    $requiredOptions[] = $optionStr;
-                } else {
-                    $optionalOptions[] = "[$optionStr]";
-                }
-            }
-        }
-
-        $parts = [];
-        if ($flags) {
-            $parts[] = '[-'.implode('', $flags).']';
-        }
-        foreach ($requiredOptions as $o) {
-            $parts[] = $o;
-        }
-        foreach ($optionalOptions as $o) {
-            $parts[] = $o;
-        }
-
+        $parts = ['[options]'];
         foreach ($this->getArguments() as $arg) {
-            if ($arg->default !== '') {
-                $parts[] = '[' . $arg->name . ']';
-            } else {
-                $parts[] = '<' . $arg->name . '>';
-            }
+            $parts[] = '' !== $arg->default ? "[$arg->name]" : "<$arg->name>";
         }
 
-        return \implode(" ", $parts);
+        return \implode(' ', $parts);
     }
-    
+
     /**
-     * 
-     * @return Argument[] 
+     * @return array<string, Argument>
      */
-    private function getArguments(): array {
-        $result = [];
-        foreach ($this->values as $n => $v) {
-            if ($v instanceof Argument) {
-                $result[$n] = $v;
-            }
-        }
-        return $result;
+    private function getArguments(): array
+    {
+        return \array_filter($this->values, static fn ($v) => $v instanceof Argument);
     }
 
-    private function buildGetOpts(): array {
-        $shortOptions = '';
-        $longOptions = [];
-        foreach ($this->values as $val) {
-            if ($val instanceof Option) {
-                if ($val->short !== '') {
-                    $shortOptions .= $val->short . ':' . ($val->required ? '' : ':');
-                }
-                if ($val->long !== '') {
-                    $longOptions[] = $val->long . ':' . ($val->required ? '' : ':');
-                }
-            } elseif ($val instanceof Flag) {
-                if ($val->short !== '') {
-                    $shortOptions .= $val->short;
-                }
-                if ($val->long !== '') {
-                    $longOptions[] = $val->long;
-                }
-            }
-        }
-
-        return [ $shortOptions, $longOptions ];
-
-    }
-
-    private static function makeArgList(ArgInterface|Argument $value): string {
+    private static function makeArgList(ArgInterface|Argument $value): string
+    {
         if ($value instanceof Argument) {
-            if ($value->default === '') {
-                return '<' . $value->name . '>';
-            } else {
-                return '[' . $value->name . ']';
-            }
+            return '' === $value->default ? "<$value->name>" : "[$value->name]";
         }
-        $hadLong = false;
         $parts = [];
-        if ($value->getShort() !== '') {
+        if ('' !== $value->getShort()) {
             $parts[] = '-' . $value->getShort();
         }
-        if ($value->getLong() !== '') {
-            $hadLong = true;
+        if ('' !== $value->getLong()) {
             $parts[] = '--' . $value->getLong();
         }
+        $list = \implode(', ', $parts);
         if ($value instanceof Option) {
-            return \implode(",", $parts) . ($hadLong ? '=' : ' ') . '<' . $value->placeholder . '>';
-        } else {
-            return \implode(",", $parts);
+            $list .= ('' !== $value->getLong() ? '=' : ' ') . '<' . $value->placeholder . '>';
         }
+
+        return $list;
     }
 }

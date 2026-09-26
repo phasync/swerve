@@ -124,7 +124,7 @@ final class Cluster
      * @param float       $grace      seconds a draining worker gets before SIGKILL
      * @param float       $watchdog   seconds of silence after which a worker is killed; 0 = off
      * @param string|null $monitorDir reload when a PHP file below it changes
-     * @param string      $listening  the addresses, logged once the first worker is ready
+     * @param string      $serving    what is served where, logged once the first worker is ready
      */
     public function __construct(
         private readonly int $numWorkers,
@@ -132,7 +132,7 @@ final class Cluster
         private readonly float $grace,
         private readonly float $watchdog,
         private readonly ?string $monitorDir,
-        private readonly string $listening,
+        private readonly string $serving,
     ) {
         $this->masterPid = \posix_getpid();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
@@ -243,7 +243,7 @@ final class Cluster
                 }
             }
             $this->workers = [];
-            $logger        = $this->logger instanceof Logger ? $this->logger->withSource("w$slot:" . \getmypid()) : $this->logger;
+            $logger        = $this->logger instanceof Logger ? $this->logger->withSource((string) $slot) : $this->logger;
 
             return new Worker($slot, $child, $this->masterPid, $this->grace, $this->watchdog, $logger);
         }
@@ -261,7 +261,8 @@ final class Cluster
         \stream_set_blocking($master, false);
         $this->workers[$pid] = new WorkerProcess($pid, $slot, $this->generation, $master, $now, $now, $replaces);
         // Once serving, a start is a restart or a replacement, and its pid is news
-        $this->logger->log($this->everReady ? 'notice' : 'info', 'Started worker {pid} in slot {slot} (generation {generation})' . (null !== $replaces ? ', replacing {old}' : ''), [
+        // A restart is news; a replacement is logged as it takes over, see onReady()
+        $this->logger->log($this->everReady && null === $replaces ? 'notice' : 'info', 'Started worker {pid} in slot {slot} (generation {generation})' . (null !== $replaces ? ', replacing {old}' : ''), [
             'pid' => $pid, 'slot' => $slot, 'generation' => $this->generation, 'old' => $replaces,
         ]);
 
@@ -352,7 +353,7 @@ final class Cluster
         $this->logger->info('Worker {pid} (slot {slot}) ready in {s} s', ['pid' => $w->pid, 'slot' => $w->slot, 's' => \round($now - $w->started, 2)]);
         if (!$this->everReady) {
             $this->everReady = true;
-            $this->logger->notice('Listening to {addresses}', ['addresses' => $this->listening]);
+            $this->logger->notice($this->serving);
         }
         $old = null !== $w->replaces ? ($this->workers[$w->replaces] ?? null) : null;
         if ($old && WorkerProcess::SERVING === $old->state) {
@@ -402,7 +403,7 @@ final class Cluster
 
         if (WorkerProcess::DRAINING === $w->state) {
             if (\pcntl_wifexited($status) && 0 === \pcntl_wexitstatus($status)) {
-                $this->logger->notice('Worker {pid} (slot {slot}) exited after draining ({how}, up {up})', $ctx);
+                $this->logger->info('Worker {pid} (slot {slot}) exited after draining ({how}, up {up})', $ctx);
             } else {
                 $this->logger->warning('Worker {pid} (slot {slot}) ended while draining: {how}' . $killed, $ctx);
             }

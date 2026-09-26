@@ -4,54 +4,8 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "eabbb1df5aece355fad829a2363e6d46",
+    "content-hash": "208876e739f9e9c3b9ad652345158eca",
     "packages": [
-        {
-            "name": "charm/http",
-            "version": "2.0.0",
-            "source": {
-                "type": "git",
-                "url": "https://bitbucket.org/ennerd/charm-http.git",
-                "reference": "0ce3a0652175fc41e7ad842a064b9cb7abb803ac"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://bitbucket.org/ennerd/charm-http/get/0ce3a0652175fc41e7ad842a064b9cb7abb803ac.zip",
-                "reference": "0ce3a0652175fc41e7ad842a064b9cb7abb803ac",
-                "shasum": ""
-            },
-            "require": {
-                "psr/http-message": "^2.0"
-            },
-            "provide": {
-                "psr/http-message-implementation": "1.0"
-            },
-            "require-dev": {
-                "frodeborli/themis": "^1.1"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Charm\\Http\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Frode Børli",
-                    "email": "frode@ennerd.com"
-                }
-            ],
-            "description": "A simple and extendable implementation of PSR-7 HTTP message interfaces",
-            "homepage": "https://bitbucket.org/ennerd/charm-http",
-            "support": {
-                "source": "https://bitbucket.org/ennerd/charm-http/src/0ce3a0652175fc41e7ad842a064b9cb7abb803ac/?at=2.0.0"
-            },
-            "time": "2024-05-26T20:44:50+00:00"
-        },
         {
             "name": "charm/options",
             "version": "1.1.5",
@@ -252,54 +206,6 @@
             "time": "2024-09-09T07:06:30+00:00"
         },
         {
-            "name": "phasync/net",
-            "version": "2.0.0-alpha1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/phasync/net.git",
-                "reference": "087a1e075aabd3035ee16bde526f3d1d3056d843"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/phasync/net/zipball/087a1e075aabd3035ee16bde526f3d1d3056d843",
-                "reference": "087a1e075aabd3035ee16bde526f3d1d3056d843",
-                "shasum": ""
-            },
-            "require": {
-                "phasync/phasync": "^2.0@alpha",
-                "php": "^8.2"
-            },
-            "require-dev": {
-                "friendsofphp/php-cs-fixer": "^3.0",
-                "pestphp/pest": "^3.0 || ^4.0"
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "src/Net/functions.php"
-                ],
-                "psr-4": {
-                    "phasync\\Net\\": "src/Net/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Frode Børli",
-                    "email": "frode@ennerd.com"
-                }
-            ],
-            "description": "TCP, UDP and Unix socket networking for PHP using phasync coroutines.",
-            "support": {
-                "issues": "https://github.com/phasync/net/issues",
-                "source": "https://github.com/phasync/net/tree/2.0.0-alpha1"
-            },
-            "time": "2026-09-25T13:42:43+00:00"
-        },
-        {
             "name": "phasync/phasync",
             "version": "2.0.0-alpha3",
             "source": {
@@ -471,6 +377,62 @@
                 "source": "https://github.com/php-fig/http-message/tree/2.0"
             },
             "time": "2023-04-04T09:54:51+00:00"
+        },
+        {
+            "name": "psr/http-server-handler",
+            "version": "1.0.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-fig/http-server-handler.git",
+                "reference": "84c4fb66179be4caaf8e97bd239203245302e7d4"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-fig/http-server-handler/zipball/84c4fb66179be4caaf8e97bd239203245302e7d4",
+                "reference": "84c4fb66179be4caaf8e97bd239203245302e7d4",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.0",
+                "psr/http-message": "^1.0 || ^2.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "1.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Psr\\Http\\Server\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "PHP-FIG",
+                    "homepage": "https://www.php-fig.org/"
+                }
+            ],
+            "description": "Common interface for HTTP server-side request handler",
+            "keywords": [
+                "handler",
+                "http",
+                "http-interop",
+                "psr",
+                "psr-15",
+                "psr-7",
+                "request",
+                "response",
+                "server"
+            ],
+            "support": {
+                "source": "https://github.com/php-fig/http-server-handler/tree/1.0.2"
+            },
+            "time": "2023-04-10T20:06:20+00:00"
         },
         {
             "name": "psr/log",
@@ -1258,12 +1220,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/PHP-CS-Fixer/PHP-CS-Fixer.git",
-                "reference": "0bd71d7f1fc594f8d0ac533c2eb9134df243a10d"
+                "reference": "ee4e496df23d6706d715bacbbb547ed39e41e0bc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/PHP-CS-Fixer/PHP-CS-Fixer/zipball/0bd71d7f1fc594f8d0ac533c2eb9134df243a10d",
-                "reference": "0bd71d7f1fc594f8d0ac533c2eb9134df243a10d",
+                "url": "https://api.github.com/repos/PHP-CS-Fixer/PHP-CS-Fixer/zipball/ee4e496df23d6706d715bacbbb547ed39e41e0bc",
+                "reference": "ee4e496df23d6706d715bacbbb547ed39e41e0bc",
                 "shasum": ""
             },
             "require": {
@@ -1355,7 +1317,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-09-23T21:06:29+00:00"
+            "time": "2026-09-25T19:42:47+00:00"
         },
         {
             "name": "jean85/pretty-package-versions",
@@ -2975,62 +2937,6 @@
                 "source": "https://github.com/php-fig/event-dispatcher/tree/1.0.0"
             },
             "time": "2019-01-08T18:20:26+00:00"
-        },
-        {
-            "name": "psr/http-server-handler",
-            "version": "1.0.2",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/php-fig/http-server-handler.git",
-                "reference": "84c4fb66179be4caaf8e97bd239203245302e7d4"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/php-fig/http-server-handler/zipball/84c4fb66179be4caaf8e97bd239203245302e7d4",
-                "reference": "84c4fb66179be4caaf8e97bd239203245302e7d4",
-                "shasum": ""
-            },
-            "require": {
-                "php": ">=7.0",
-                "psr/http-message": "^1.0 || ^2.0"
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "1.0.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Psr\\Http\\Server\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "PHP-FIG",
-                    "homepage": "https://www.php-fig.org/"
-                }
-            ],
-            "description": "Common interface for HTTP server-side request handler",
-            "keywords": [
-                "handler",
-                "http",
-                "http-interop",
-                "psr",
-                "psr-15",
-                "psr-7",
-                "request",
-                "response",
-                "server"
-            ],
-            "support": {
-                "source": "https://github.com/php-fig/http-server-handler/tree/1.0.2"
-            },
-            "time": "2023-04-10T20:06:20+00:00"
         },
         {
             "name": "psr/http-server-middleware",
@@ -6554,13 +6460,15 @@
     "minimum-stability": "stable",
     "stability-flags": {
         "friendsofphp/php-cs-fixer": 20,
-        "phasync/net": 15,
         "phasync/phasync": 15
     },
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": "^8.2"
+        "php": "^8.2",
+        "ext-pcntl": "*",
+        "ext-posix": "*",
+        "ext-sockets": "*"
     },
     "platform-dev": {},
     "platform-overrides": {

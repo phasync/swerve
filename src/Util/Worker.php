@@ -439,7 +439,8 @@ final class Worker
         $this->draining     = true;
         $this->drainStarted = \microtime(true);
         $this->deadline     = $this->drainStarted + \max($this->grace - 1.0, $this->grace / 2);
-        $this->logger->notice('Draining ({why})', ['why' => $why]);
+        // Asked by the master, the master logs it once for all; anything else is news
+        $this->logger->log('the master asked' === $why ? 'info' : 'notice', 'Draining ({why})', ['why' => $why]);
         $this->send('D'); // the master may not know: a SIGTERM from someone else, or its death
         foreach ($this->drains as $drain) {
             $drain();

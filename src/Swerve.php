@@ -247,8 +247,9 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
         return new Subscription($topic, $maxLag);
     }
 
+    /** The installed version, as Composer knows it: 0.1.0-alpha3, or dev-main in a checkout. */
     public static function getVersion(): string
     {
-        return '1.0';
+        return \Composer\InstalledVersions::getPrettyVersion('phasync/swerve') ?? 'unknown';
     }
 }

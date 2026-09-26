@@ -11,6 +11,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
+use Swerve\CLI\Address;
 use Swerve\CLI\Args;
 use Swerve\Connection;
 use Swerve\ConnectionInterface;
@@ -60,25 +61,23 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $args = require __DIR__.'/../inc/args.php';
 
     /*
-    * Banner
-    */
-    if (!$args->quiet) {
-        $term->write("<!bold>[ SWERVE ] <!blue>Swerving your website...<!!>\n\n");
-        $term->write("<!red> >>> <!bold>WARNING! THIS IS BETA SOFTWARE FOR PREVIEW ONLY<!> <<<<!>\n\n");
-    }
-
-    /*
-    * Validate arguments or display --help
-    */
+     * Validate arguments or display --help / --version
+     */
     if ($error = $args->isInvalid()) {
-        $term->write("<!redBG white>ERROR:<!> <!bold>$error<!>\n\n");
-        $term->write("Valid arguments:\n");
-        $term->write($args->getArgumentList()."\n");
-        exit(255);
-    } elseif ($args->help) {
-        $term->write('<!yellow>Usage:<!> <!underline>'.\basename($argv[0]).'<!> '.$args->getShortArgumentList()."\n\n");
+        \fwrite(\STDERR, "swerve: $error\nRun `swerve --help` for the options.\n");
+        exit(2);
+    }
+    if ($args->help) {
+        $term->write('<!yellow>Usage:<!> <!underline>swerve<!> '.$args->getShortArgumentList()."\n\n");
         $term->write($args->getArgumentList()."\n");
         exit(0);
+    }
+    if ($args->version) {
+        echo 'swerve ', Swerve::getVersion(), ' (PHP ', \PHP_VERSION, ', phasync ', \Composer\InstalledVersions::getPrettyVersion('phasync/phasync'), ', phasync-ext ', \phpversion('phasync') ?: 'not loaded', ")\n";
+        exit(0);
+    }
+    if (!$args->quiet && \stream_isatty(\STDOUT)) {
+        $term->write('<!bold>swerve '.Swerve::getVersion()."<!> <!yellow>(alpha: expect changes until 1.0)<!>\n");
     }
 
     phasync::setDefaultTimeout(60);
@@ -90,23 +89,25 @@ foreach ([\STDOUT, \STDERR] as $out) {
      */
     $swerveFile = \str_starts_with($args->swervefile, '/') ? $args->swervefile : \getcwd() . '/' . $args->swervefile;
     if (!\is_file($swerveFile)) {
-        $term->write("<!redBG white>ERROR:<!> <!bold>{$args->swervefile} not found<!>\n\n");
+        \fwrite(\STDERR, "swerve: {$args->swervefile} not found\n");
         exit(1);
     }
 
-    $addresses = $args->fastcgi ?: $args->http;
+    $http      = \array_map(Address::normalize(...), $args->http);
+    $fastcgi   = \array_map(Address::normalize(...), $args->fastcgi);
+    $addresses = $fastcgi ?: $http;
     if (\count(\array_unique($addresses)) < \count($addresses)) {
         $twice = \implode(' ', \array_unique(\array_diff_assoc($addresses, \array_unique($addresses))));
-        $term->write("<!redBG white>ERROR:<!> <!bold>$twice more than once<!>\n\n");
+        \fwrite(\STDERR, "swerve: $twice more than once\n");
         exit(2);
     }
-    if (!empty($args->fastcgi)) {
+    if ($fastcgi) {
         if (!$args->isDefault('http')) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>Can't combine --fastcgi with --http<!>\n\n");
+            \fwrite(\STDERR, "swerve: Can't combine --fastcgi with --http\n");
             exit(2);
         }
         if ($args->bufferResponses || !$args->isDefault('maxBody')) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>--buffer-responses and --max-body only apply to --http<!>\n\n");
+            \fwrite(\STDERR, "swerve: --buffer-responses and --max-body only apply to --http\n");
             exit(2);
         }
     }
@@ -123,6 +124,12 @@ foreach ([\STDOUT, \STDERR] as $out) {
         $logLevel = LogLevel::NOTICE;
     }
 
+    $workerCount = 'auto' === $args->workers ? System::getCPUCount() : (int) $args->workers;
+    // The column after the time: a worker's slot number, right-aligned; blank for the master
+    $source = \str_repeat(' ', \strlen((string) ($workerCount - 1)));
+    // A line per request, in HTTP mode: in FastCGI mode the web server in front logs them
+    $access = !$args->noAccessLog && !$fastcgi;
+
     /*
      * Logger Interface. With --log, PHP's own errors go to the file too: after a fatal error
      * such as memory_limit, PHP still writes its message, where a handler of ours may have no
@@ -131,19 +138,19 @@ foreach ([\STDOUT, \STDERR] as $out) {
     if ($args->log) {
         $file = @\fopen($args->log, 'a');
         if (false === $file) {
-            $term->write("<!redBG white>ERROR:<!> <!bold>Can't open {$args->log} for writing<!>\n\n");
+            \fwrite(\STDERR, "swerve: Can't open {$args->log} for writing\n");
             exit(1);
         }
         \ini_set('log_errors', '1');
         \ini_set('error_log', $args->log);
         \ini_set('display_errors', '0');
-        $logger = new Logger($file, 'master', $logLevel, $args->log);
+        $logger = new Logger($file, $source, $logLevel, $args->log, $access);
     } elseif ($args->quiet) {
         \ini_set('display_errors', '0');
         \ini_set('log_errors', '0');
         $logger = new NullLogger();
     } else {
-        $logger = new Logger(\STDOUT, 'master', $logLevel);
+        $logger = new Logger(\STDOUT, $source, $logLevel, access: $access);
     }
 
     // Each worker says so at info level; asked for, and then off, is worth a warning, once
@@ -157,7 +164,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
      * connections. Bound once without it, before any worker listens, the address is refused
      * when anything listens there.
      */
-    foreach ($args->fastcgi ?: $args->http as $address) {
+    foreach ($addresses as $address) {
         $probe = @\stream_socket_server("tcp://$address", $errno, $errstr, \STREAM_SERVER_BIND);
         if (false === $probe) {
             $logger->critical('The server failed to start: {address} is already in use ({error})', ['address' => $address, 'error' => $errstr]);
@@ -167,20 +174,17 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     /*
-     * Setup clustering to launch enough worker processes.
+     * The master process forks the workers, and supervises them until stopped.
      */
-    if ($args->workers === 'auto') {
-        $workerCount = System::getCPUCount();
-    } else {
-        $workerCount = (int) $args->workers;
-    }
     $cluster = new Cluster(
         $workerCount,
         $logger,
         (float) $args->grace,
         (float) $args->watchdog,
-        $args->monitor ? \dirname($swerveFile) : null,
-        \implode(' ', $args->fastcgi ?: $args->http),
+        $args->watch ? \dirname($swerveFile) : null,
+        \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(), $args->swervefile,
+            \implode(', ', \array_map(static fn ($a) => ($fastcgi ? 'fastcgi://' : 'http://') . $a, $addresses)),
+            $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
     );
     $worker = $cluster->run();
     if (\is_int($worker)) {
@@ -206,13 +210,13 @@ foreach ([\STDOUT, \STDERR] as $out) {
         $logger->critical('{file} returned {value}', ['file' => $args->swervefile, 'value' => Debug::getDebugInfo($app)]);
         exit(Worker::EXIT_BAD_APP);
     }
-    if (empty($args->fastcgi) && !$app instanceof RequestHandlerInterface) {
+    if (!$fastcgi && !$app instanceof RequestHandlerInterface) {
         $logger->critical('HTTP mode needs {file} to return a PSR-15 RequestHandlerInterface', ['file' => $args->swervefile]);
         exit(Worker::EXIT_BAD_APP);
     }
     $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
 
-    if (!empty($args->fastcgi)) {
+    if ($fastcgi) {
         /*
          * FastCGI mode
          *
@@ -220,8 +224,8 @@ foreach ([\STDOUT, \STDERR] as $out) {
          * to the workers.
          */
         $swerve = new Swerve($logger);
-        foreach ($args->fastcgi as $fastcgi) {
-            $swerve->add(new FastCGIServer("tcp://$fastcgi", $logger));
+        foreach ($fastcgi as $address) {
+            $swerve->add(new FastCGIServer("tcp://$address", $logger));
         }
         // Every request counts towards recycling, also one that throws
         $runner = new class($runner, $worker) implements SwerveInterface {
@@ -252,24 +256,31 @@ foreach ([\STDOUT, \STDERR] as $out) {
          * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
          * kernel spreads new connections over them.
          */
-        $handler = new class($app, $worker) implements RequestHandlerInterface {
-            public function __construct(private RequestHandlerInterface $app, private Worker $worker)
+        $handler = new class($app, $worker, $logger instanceof Logger && $logger->access ? $logger : null) implements RequestHandlerInterface {
+            public function __construct(private RequestHandlerInterface $app, private Worker $worker, private ?Logger $access)
             {
             }
 
+            /** The access log's line is written when the application returns the response, before its body is sent. */
             public function handle(ServerRequestInterface $request): ResponseInterface
             {
-                $id = $this->worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getRequestTarget());
+                $id     = $this->worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getRequestTarget());
+                $start  = \hrtime(true);
+                $status = 500;
                 try {
-                    return $this->app->handle($request);
+                    $response = $this->app->handle($request);
+                    $status   = $response->getStatusCode();
+
+                    return $response;
                 } finally {
                     $this->worker->requestDone($id);
+                    $this->access?->request($request->getMethod(), $request->getRequestTarget(), $status, (\hrtime(true) - $start) / 1e9);
                 }
             }
         };
         $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
         $servers = [];
-        foreach ($args->http as $address) {
+        foreach ($http as $address) {
             $server = new NativeHttpServer($address, $handler, $logger, (bool) $args->bufferResponses, $maxBody);
             try {
                 $server->listen();

@@ -2,59 +2,111 @@
 
 ![SWERVE](swerve-logo.png)
 
-> EARLY DEMO RELEASE, BUGS TO BE EXPECTED
+A PHP application server for PSR-15 applications, built on [phasync](https://github.com/phasync/phasync)
+coroutines. Your application stays loaded between requests, every worker serves many requests
+at once, and request and response bodies stream.
+
+> Alpha: APIs and options may change until 1.0.
 
 ## Getting started
 
-1. Create a file named `swerve.php` in your application root. This file must return
-   a PSR-15 RequestHandlerInterface. For example:
+Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions.
 
-```php
-<?php
+1. Install swerve. While it is alpha, your project must allow alpha packages:
 
-use Psr\Http\Message\RequestInterface;
-use Psr\Http\Message\ResponseInterface;
-use Slim\Factory\AppFactory;
+   ```bash
+   composer config minimum-stability alpha
+   composer config prefer-stable true
+   composer require phasync/swerve
+   ```
 
-$app = AppFactory::create();
-$app->get('/', function (RequestInterface $request, ResponseInterface $response) {
-    $response->getBody()->write('Hello, World');
+2. Create `swerve.php` in your project root, returning a PSR-15 `RequestHandlerInterface`. A
+   Slim app is one (`composer require slim/slim slim/psr7`):
 
-    return $response;
-});
+   ```php
+   <?php
 
-return $app;
-```
+   use Psr\Http\Message\ResponseInterface;
+   use Psr\Http\Message\ServerRequestInterface;
+   use Slim\Factory\AppFactory;
 
-2. Install `swerve`: `composer require phasync/swerve`
+   $app = AppFactory::create();
+   $app->addErrorMiddleware(true, false, false); // a 404 page for unknown routes
+   $app->get('/', function (ServerRequestInterface $request, ResponseInterface $response) {
+       $response->getBody()->write('Hello, World');
 
-3. Run `./vendor/bin/swerve` to launch the web server.
+       return $response;
+   });
+
+   return $app;
+   ```
+
+3. Run it:
+
+   ```
+   > vendor/bin/swerve
+   2026-09-26 17:00:30.12    swerve 0.1.0 serving ./swerve.php on http://127.0.0.1:8080 with 8 workers
+   2026-09-26 17:00:31.25 3 GET / 200 1.2ms
+   2026-09-26 17:00:31.31 6 GET /missing 404 0.4ms
+   ```
+
+   Each line has the time, the worker (its slot number, 0 to 7 here; blank for the master
+   process), and the message: a request with its status and how long the application took,
+   or anything else worth knowing, such as a worker that crashed and was restarted. Ctrl+C
+   stops swerve, letting the requests in flight finish first.
+
+   ```bash
+   vendor/bin/swerve --watch            # during development: reload when a PHP file changes
+   vendor/bin/swerve app.php --http :80 # app.php on port 80 of every interface
+   ```
 
 ## Usage
 
-```bash
-> ./vendor/bin/swerve --help
-Usage: swerve [-mhvq] [-w,--workers=<processes>] [--fastcgi=<ip:port>] [--http=<ip:port>] [--max-body=<bytes>] [--grace=<seconds>] [--watchdog=<seconds>] [--max-memory=<size|P%>] [--max-requests=<n>] [--log=<path>] [swerve.php]
+```
+> vendor/bin/swerve --help
+Usage: swerve [options] [swerve.php]
 
--m,--monitor              Watch the application's PHP files and do a rolling reload on change
--w,--workers=<processes>  Number of worker processes (default: auto)
---fastcgi=<ip:port>       IP and port for FastCGI server; [::1]:9000 for IPv6
---http=<ip:port>          IP and port to serve HTTP on; [::1]:8080 for IPv6 (default: 127.0.0.1:8080)
---buffer-responses        HTTP mode: read each response body whole (up to 8 MiB) and send it in one write with a Content-Length
---max-body=<bytes>        HTTP mode: the largest request body in bytes (413), 0 for no limit (default: 8388608)
---grace=<seconds>         Seconds workers get to finish requests on shutdown, reload and recycle before SIGKILL (default: 30)
---watchdog=<seconds>      A worker whose event loop is silent this long is killed and replaced (a request doing more CPU work than this without yielding counts as stuck); at least 1, or 0 = off (default: 30)
---max-memory=<size|P%>    Recycle a worker above this memory (after gc): bytes, K, M or G, or a % of memory_limit (off when memory_limit is -1); 0 = off (default: 80%)
---max-requests=<n>        Recycle a worker after about n requests; 0 = off
---log=<path>              Append all log lines, and PHP errors, to this file instead of the terminal
--h,--help                 Display this help message
--v,--verbose              Log more: -v also info, -vv also debug (by default notices and up)
--q,--quiet                Suppress all terminal output (--log still logs to its file)
-[swerve.php]              Full path to application php file
+Application:
+  [swerve.php]            A PHP file returning a PSR-15 RequestHandlerInterface, such as a Slim app
+
+Serving:
+  --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port or [ipv6]:port; repeat for several (default: 127.0.0.1:8080)
+  --fastcgi=<address>     Serve FastCGI here instead, behind nginx or the like; the same forms as --http
+  -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
+
+Development:
+  --watch                 Reload the workers, one at a time, when a PHP file of the application changes
+
+Logging (to the terminal, or with --log to a file):
+  -v, --verbose           Log more: -v also what swerve does (workers starting, draining), -vv also debug
+  -q, --quiet             Log nothing to the terminal (--log still logs to its file)
+  --no-access-log         No line per request
+  --log=<path>            Append the log, and PHP errors, to this file instead
+
+Limits:
+  --max-body=<bytes>      HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
+  --buffer-responses      HTTP: send each response body whole (up to 8 MiB) with a Content-Length, instead of streaming it
+  --grace=<seconds>       Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL (default: 30)
+  --watchdog=<seconds>    Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
+  --max-memory=<size|P%>  Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
+  --max-requests=<n>      Recycle a worker after about n requests; 0 = off (default: 0)
+
+Information:
+  -h, --help              This help
+  --version               The versions of swerve, PHP, phasync and phasync-ext
 ```
 
-swerve runs in the foreground, as systemd, Docker and supervisord expect; there is no
-daemon mode. Elsewhere, `nohup swerve -q --log=/var/log/swerve.log &` does the same.
+Options and the application file may come in any order; an option's value is attached
+(`--workers=4`, `-w4`) or the next word (`--workers 4`, `-w 4`). A usage error exits with
+code 2.
+
+swerve runs in the foreground, as systemd, Docker and supervisord expect, and logs to
+standard output, which they collect; there is no daemon mode. Elsewhere,
+`nohup swerve -q --log=/var/log/swerve.log &` does the same.
+
+The line per request costs about 5% of the throughput of a hello-world application, and
+less of a real one; `--no-access-log` turns it off. In FastCGI mode there is none: the web
+server in front logs the requests.
 
 ## Modes
 
@@ -235,7 +287,7 @@ is doing: its requests in flight, and where its code runs.
   warning, and recycling is off. A
   worker that hits `memory_limit` itself dies with PHP's fatal error (in the log with `--log`),
   loses its requests in flight, and is replaced.
-- **`--monitor`** watches the `*.php` files next to and below the swerve file (not in
+- **`--watch`** watches the `*.php` files next to and below the swerve file (not in
   `vendor/`, nor names starting with a dot, such as editors' lock files; but
   `vendor/composer/installed.php`, so `composer install` counts) and reloads 1 to 2 seconds
   after the last change. Directories it can't read are skipped. The scan runs in the master:

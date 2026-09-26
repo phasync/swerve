@@ -172,14 +172,14 @@ test('a blocking call in a request shorter than the watchdog timeout is not inte
     native_stop($process);
 })->with(['watchdog off' => '0', 'watchdog 10 s' => '10']);
 
-test('--monitor on a large tree leaves the watchdog working and the master mostly idle', function () {
+test('--watch on a large tree leaves the watchdog working and the master mostly idle', function () {
     $dir = test_dir();
     file_put_contents("$dir/app.php", "<?php return require '" . __DIR__ . "/Fixtures/app.php';\n");
     // 384k entries, hard links made by the kernel, so that one scan takes over a second
     exec('cd ' . escapeshellarg($dir) . ' && mkdir -p node_modules/p && cd node_modules/p && seq 1 750 | sed s/$/.js/ | xargs touch'
         . ' && cd .. && for i in 1 2 3 4 5 6 7 8 9; do mkdir ../t && cp -al . ../t/x && mv ../t c$i; done', $out, $code);
     expect($code)->toBe(0);
-    [$process, $addr, $log, $pid] = swerve_start(['--monitor', '--watchdog=2'], env: ['SWERVE_TEST_DIR' => $dir], fixture: "$dir/app.php");
+    [$process, $addr, $log, $pid] = swerve_start(['--watch', '--watchdog=2'], env: ['SWERVE_TEST_DIR' => $dir], fixture: "$dir/app.php");
     worker_pids($addr, 2);
     $spin = send_get($addr, '/spin');
 
@@ -561,16 +561,16 @@ test('a log that can\'t be written, under an application error handler that thro
 test('a PHP fatal error is logged by its worker, with the requests it had in flight', function () {
     [$process, $addr, $log] = swerve_start(php: ['-d', 'memory_limit=32M']);
     expect(probe($addr, '/oom?x=1'))->toBeNull();
-    $died = log_wait($log, '/Worker (\d+) \(slot \d\) died: exit 255/');
-    expect(file_get_contents($log))->toMatch('/ w\d:' . $died[0][1] . ' +critical +PHP fatal error: Allowed memory size .*; in flight: GET \/oom\?x=1/');
+    $died = log_wait($log, '/Worker \d+ \(slot (\d)\) died: exit 255/');
+    expect(file_get_contents($log))->toMatch('/\.\d\d ' . $died[0][1] . ' critical +PHP fatal error: Allowed memory size .*; in flight: GET \/oom\?x=1/');
     native_stop($process);
 });
 
 test('the watchdog logs the request a worker is stuck in, and where, before killing it', function () {
     [$process, $addr, $log] = swerve_start(['--watchdog=2']);
     $stuck = send_get($addr, '/spin?user=42');
-    $match = log_wait($log, '/Worker (\d+) \(slot \d\) died: signal 9 \(SIGKILL\).*killed: watchdog/', 5);
-    expect(file_get_contents($log))->toMatch('/ w\d:' . $match[0][1] . ' +warning +Silent for [\d.]+ s; in flight: GET \/spin\?user=42; at .*Fixtures\/app\.php:\d+/');
+    $match = log_wait($log, '/Worker \d+ \(slot (\d)\) died: signal 9 \(SIGKILL\).*killed: watchdog/', 5);
+    expect(file_get_contents($log))->toMatch('/\.\d\d ' . $match[0][1] . ' warning +Silent for [\d.]+ s; in flight: GET \/spin\?user=42; at .*Fixtures\/app\.php:\d+/');
     native_stop($process);
 });
 
@@ -725,15 +725,16 @@ test('memory recycling that is off says why', function (string $limit, string $o
     [$process, , $log] = swerve_start(["--max-memory=$option"], workers: 1, php: ['-d', "memory_limit=$limit"]);
     native_stop($process);
 
-    expect(file_get_contents($log))->toMatch('/' . preg_quote($level, '/') . ' .*' . preg_quote($says, '/') . '/')->not->toContain('pass --max-memory to enable');
+    // Only warnings and worse name their level
+    expect(file_get_contents($log))->toMatch('/\.\d\d [ \d]+ ' . ('' !== $level ? preg_quote($level, '/') . ' +' : '') . '.*' . preg_quote($says, '/') . '/')->not->toContain('pass --max-memory to enable');
 })->with([
     'a percentage of no limit' => ['-1', '50%', 'memory_limit is -1, so --max-memory=50% is no limit', 'warning'],
-    '0 %'                      => ['64M', '0%', 'memory recycling off', 'info'],
+    '0 %'                      => ['64M', '0%', 'memory recycling off', ''],
 ]);
 
 test('--max-memory above 100 % is refused', function () {
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' --max-memory=150% --http=' . free_address() . ' missing.php 2>&1', $out, $code);
-    expect($code)->toBe(255);
+    expect($code)->toBe(2);
     expect(implode("\n", $out))->toContain('a percentage up to 100%, required');
 });
 
@@ -811,7 +812,7 @@ test('a --max-memory at or above memory_limit is said to be no limit, and a size
     expect(file_get_contents($log))->toMatch('/warning .*--max-memory=2G is not below memory_limit 64M/')->toContain('memory recycling off');
 
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' --max-memory=99999999999999999999 --http=' . free_address() . ' missing.php 2>&1', $out, $code);
-    expect($code)->toBe(255);
+    expect($code)->toBe(2);
     expect(implode("\n", $out))->toContain('--max-memory is too large');
 });
 
@@ -1233,10 +1234,10 @@ test('SIGTERM during a reload also stops the starting worker', function () {
     expect(group_gone($pid))->toBeTrue();
 });
 
-test('--monitor reloads once when files change', function () {
+test('--watch reloads once when files change', function () {
     $dir = test_dir();
     file_put_contents("$dir/app.php", "<?php return require '" . __DIR__ . "/Fixtures/app.php';\n");
-    [$process, $addr, $log] = swerve_start(['--monitor'], env: ['SWERVE_TEST_DIR' => $dir], fixture: "$dir/app.php");
+    [$process, $addr, $log] = swerve_start(['--watch'], env: ['SWERVE_TEST_DIR' => $dir], fixture: "$dir/app.php");
     expect(probe($addr, '/version'))->toBe('v1');
     for ($i = 1; $i <= 3; ++$i) {
         // A different size each time, as mtimes have whole seconds only
@@ -1280,12 +1281,12 @@ test('a new worker dying during a reload, after it took over, does not stop the 
     native_stop($process);
 });
 
-test('--monitor survives dangling symlinks and unreadable directories', function () {
+test('--watch survives dangling symlinks and unreadable directories', function () {
     $dir = test_dir();
     file_put_contents("$dir/app.php", "<?php return require '" . __DIR__ . "/Fixtures/app.php';\n");
     mkdir("$dir/private", 0);
     try {
-        [$process, $addr, $log] = swerve_start(['--monitor'], env: ['SWERVE_TEST_DIR' => $dir], fixture: "$dir/app.php");
+        [$process, $addr, $log] = swerve_start(['--watch'], env: ['SWERVE_TEST_DIR' => $dir], fixture: "$dir/app.php");
         symlink("$dir/nowhere", "$dir/.#app.php"); // an Emacs lock file
         symlink("$dir/nowhere", "$dir/gone.php");
         usleep(2_500_000);
@@ -1494,11 +1495,11 @@ test('-d is gone from --help and is refused', function () {
     expect(implode("\n", $help))->toContain('--grace')->toContain('--watchdog')->toContain('--max-memory')->toContain('--max-requests')->not->toMatch('/^\s*-d\b/m');
 
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' -d 2>&1', $out, $code);
-    expect($code)->toBe(255);
+    expect($code)->toBe(2);
     expect(implode("\n", $out))->toContain('Unknown flag: -d');
 });
 
-test('without -v, the log still tells of reloads, drained workers and shutdown', function () {
+test('without -v, the log tells of reloads and shutdown, not of each worker draining', function () {
     $addr     = free_address();
     $log      = temp_path();
     $process  = swerve_spawn(["--http=$addr", '--workers=2', "--log=$log"], 'app.php');
@@ -1513,7 +1514,7 @@ test('without -v, the log still tells of reloads, drained workers and shutdown',
     swerve_wait($process, 3);
 
     expect_log_order($log, ['/Reload requested/', '/took over, draining/', '/Reload complete/', '/Shutting down/', '/Stopped in/']);
-    expect(log_count($log, '/exited after draining/'))->toBe(4);
+    expect(log_count($log, '/exited after draining|Draining \(the master asked\)/'))->toBe(0);
 });
 
 test('a second swerve on an address already served is refused', function () {
@@ -1536,7 +1537,7 @@ test('--help exits 0; an empty --log and a repeated address are refused', functi
     $addr = free_address();
     $out  = [];
     exec("$swerve --log= --http=$addr missing.php 2>&1", $out, $code);
-    expect($code)->toBe(255);
+    expect($code)->toBe(2);
     expect(implode("\n", $out))->toContain('Value required for option: --log=<path>');
 
     $out = [];
@@ -1547,19 +1548,24 @@ test('--help exits 0; an empty --log and a repeated address are refused', functi
 
 test('--watchdog below a second is refused', function () {
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' --watchdog=0.5 --http=' . free_address() . ' missing.php 2>&1', $out, $code);
-    expect($code)->toBe(255);
+    expect($code)->toBe(2);
     expect(implode("\n", $out))->toContain('Seconds: 1 or more, or 0 for off');
 });
 
-test('an option or a word after the swerve file is refused, not ignored', function (string $rest, string $says) {
-    exec('timeout 5 ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' ' . escapeshellarg(__DIR__ . '/Fixtures/app.php') . " $rest 2>&1", $out, $code);
-    expect($code)->toBe(255);
-    expect(implode("\n", $out))->toContain($says);
-})->with([
-    'an option'  => ['--http=127.0.0.1:1', 'Unknown argument: --http=127.0.0.1:1 (options go before swerve.php)'],
-    'two'        => ['--workers=1 --http=127.0.0.1:1', 'Unknown argument: --workers=1 (options go before swerve.php)'],
-    'a word'     => ['other.php', 'Unknown argument: other.php'],
-]);
+test('options may follow the swerve file; a second file is refused', function () {
+    $addr    = free_address();
+    $log     = temp_path();
+    $process = proc_open(['setsid', PHP_BINARY, __DIR__ . '/../bin/swerve.php', __DIR__ . '/Fixtures/app.php', "--http=$addr", '-w', '1', "--log=$log"], [], $pipes);
+    try {
+        expect(log_wait($log, '/with 1 worker$/m', 10))->not->toBeEmpty();
+        expect(probe($addr, '/hello'))->toBe('Hello');
+    } finally {
+        native_stop($process);
+    }
+
+    exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' ' . escapeshellarg(__DIR__ . '/Fixtures/app.php') . ' other.php 2>&1', $out, $code);
+    expect([$code, $out[0]])->toBe([2, 'swerve: Unknown argument: other.php']);
+});
 
 test('--http and --fastcgi take an IPv6 address', function (string $mode) {
     $probe = stream_socket_server('tcp://[::1]:0');
@@ -1606,7 +1612,7 @@ test('-q --log writes nothing to the terminal and everything to the file', funct
     native_stop($process);
 
     expect(file_get_contents($stdout))->toBe('');
-    expect(file_get_contents($log))->toMatch('/ master +\S/')->toMatch('/ w0:\d+ /')->toMatch('/ w1:\d+ /');
+    expect(file_get_contents($log))->toMatch('/\.\d\d   \S/')->toMatch('/\.\d\d 0 /')->toMatch('/\.\d\d 1 /');
 });
 
 /*
@@ -1870,3 +1876,43 @@ test('a 101 decided during a drain is sent, and its input ends at once', functio
     expect($code)->toBe(0);
     log_wait($log, '/Drained in/', 1);
 });
+
+test('options take their value attached or as the next word, and addresses may be a port, :port or host:port', function (array $args, string $listening) {
+    $log     = temp_path();
+    $process = swerve_spawn([...$args, "--log=$log"], 'app.php');
+    try {
+        expect(log_wait($log, '/serving \S+ on http:\/\/(\S+) with 1 worker$/m', 10)[0][1])->toBe($listening);
+    } finally {
+        native_stop($process);
+    }
+})->with([
+    '-w 1, a port'       => [['-w', '1', '--http=18977'], '127.0.0.1:18977'],
+    '--workers 1, :port' => [['--workers', '1', '--http', ':18978'], '0.0.0.0:18978'],
+    'host:port'          => [['-w1', '--http=localhost:18979'], '127.0.0.1:18979'],
+]);
+
+test('a usage error is one line on stderr, pointing at --help, with exit code 2', function (string $args, string $error) {
+    exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . " $args 2>&1 >/dev/null", $out, $code);
+    expect([$code, $out])->toBe([2, ["swerve: $error", 'Run `swerve --help` for the options.']]);
+})->with([
+    'unknown option' => ['--bogus', 'Unknown option: --bogus'],
+    'bad port'       => ['--http=:99999', 'Illegal value for option: --http: a port from 1 to 65535 required'],
+    'unknown host'   => ['--http=no-such-host.invalid:80', "Illegal value for option: --http: can't resolve no-such-host.invalid"],
+]);
+
+test('--version names swerve, PHP, phasync and phasync-ext', function () {
+    exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' --version', $out, $code);
+    expect($code)->toBe(0);
+    expect($out[0])->toMatch('/^swerve \S+ \(PHP \S+, phasync \S+, phasync-ext .+\)$/');
+});
+
+test('each request is logged with its worker\'s slot, method, target, status and time; --no-access-log turns that off', function (array $args, int $lines) {
+    [$process, $addr, $log] = swerve_start($args, 1);
+    $body                   = probe($addr, '/hello?x=1');
+    native_stop($process);
+    expect($body)->toBe('Hello');
+    expect(preg_match_all('/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d\d 0 GET \/hello\?x=1 200 [\d.]+ms$/m', file_get_contents($log)))->toBe($lines, file_get_contents($log));
+})->with([
+    'by default'      => [[], 1],
+    '--no-access-log' => [['--no-access-log'], 0],
+]);

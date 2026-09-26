@@ -8,9 +8,11 @@
         "charm/terminal": "^1.1.5",
         "psr/log": "^3.0",
         "psr/http-message": "^1.0 | ^2.0",
-        "charm/http": "^2.0",
         "nyholm/psr7": "^1.8",
-        "phasync/net": "^2.0@alpha"
+        "ext-pcntl": "*",
+        "ext-posix": "*",
+        "ext-sockets": "*",
+        "psr/http-server-handler": "^1.0"
     },
     "bin": [
         "bin/swerve"

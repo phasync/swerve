@@ -11,12 +11,21 @@ class Logger implements LoggerInterface
 {
     use LoggerTrait;
 
+    /** Levels named on the line, padded alike. */
+    private const LABELS = [
+        LogLevel::WARNING   => 'warning  ',
+        LogLevel::ERROR     => 'error    ',
+        LogLevel::CRITICAL  => 'critical ',
+        LogLevel::ALERT     => 'alert    ',
+        LogLevel::EMERGENCY => 'emergency',
+    ];
+
     private const COLORS = [
         LogLevel::DEBUG => '<!silverBG black>',
         LogLevel::INFO => '<!tealBG black>',
         LogLevel::NOTICE => '<!fuchsia black>',
-        LogLevel::WARNING => '<!maroonBG black>',
-        LogLevel::ERROR => '<!redBG black>',
+        LogLevel::WARNING => '<!yellow>',
+        LogLevel::ERROR => '<!red>',
         LogLevel::CRITICAL => '<!redBG white>',
         LogLevel::ALERT => '<!redBG white>',
         LogLevel::EMERGENCY => '<!redBG white>',
@@ -42,11 +51,19 @@ class Logger implements LoggerInterface
      * @param resource    $stream
      * @param string|null $path   the file $stream writes to, if any: see reopen()
      */
-    public function __construct($stream, ?string $source = null, string $logLevel = LogLevel::DEBUG, private readonly ?string $path = null)
+    /** The second the time prefix was made for, and the prefix, see prefix(). */
+    private int $second = -1;
+    private string $time = '';
+
+    /**
+     * @param string      $source the column after the time: the worker's slot, blank for the master
+     * @param bool        $access whether request() logs
+     */
+    public function __construct($stream, string $source = '', string $logLevel = LogLevel::DEBUG, private readonly ?string $path = null, public readonly bool $access = false)
     {
         $this->stream = $stream;
         $this->term   = new Terminal($stream);
-        $this->source = $source !== null ? \str_pad($source, 10) : '';
+        $this->source = $source;
         foreach ($this->logLevels as $level => $state) {
             if ($logLevel === $level) {
                 break;
@@ -55,10 +72,11 @@ class Logger implements LoggerInterface
         }
     }
 
+    /** The same log, for a worker: its slot right-aligned in the column the master leaves blank. */
     public function withSource(string $source): Logger
     {
-        $c = clone $this;
-        $c->source = $source;
+        $c         = clone $this;
+        $c->source = \str_pad($source, \strlen($this->source), ' ', \STR_PAD_LEFT);
 
         return $c;
     }
@@ -91,7 +109,8 @@ class Logger implements LoggerInterface
         // request target or an exception's message must not change the line ('<!!>' vanishes)
         // nor reach a terminal as escape sequences ('<!clear>'). Control characters are escaped
         // for the same reason.
-        $line = $this->markup('<!white>'.\gmdate('Y-m-d H:i:s').'<!> '.$this->source.Terminal::str_pad(self::COLORS[$level].$level.'<!>', 12, ' ', \STR_PAD_BOTH));
+        // Notices and below are just the message: most lines are those
+        $line = $this->prefix() . (isset(self::LABELS[$level]) ? $this->markup(self::COLORS[$level] . self::LABELS[$level] . '<!>') . ' ' : '');
         foreach (\preg_split('/(\{[^{}\s]+\})/', (string) $message, -1, \PREG_SPLIT_DELIM_CAPTURE) as $i => $part) {
             $key = \substr($part, 1, -1);
             $val = $context[$key] ?? null;
@@ -105,6 +124,33 @@ class Logger implements LoggerInterface
         // the application's error handler may turn it into an exception, thrown from wherever
         // swerve logs, such as a drain or the 500 for another exception
         @\fwrite($this->stream, $line."\n");
+    }
+
+    /**
+     * One request answered: `GET /path 200 1.2ms`, when the access log is on.
+     */
+    public function request(string $method, string $target, int $status, float $seconds): void
+    {
+        if ($this->access) {
+            @\fwrite($this->stream, $this->prefix() . self::text("$method $target $status ") . self::duration($seconds) . "\n");
+        }
+    }
+
+    /** The local time to hundredths of a second, and the source column. */
+    private function prefix(): string
+    {
+        $now = \microtime(true);
+        if ((int) $now !== $this->second) {
+            $this->second = (int) $now;
+            $this->time   = \date('Y-m-d H:i:s', $this->second);
+        }
+
+        return $this->markup('<!white>' . $this->time . \sprintf('.%02d', (int) (($now - $this->second) * 100)) . '<!>') . ' ' . $this->source . ' ';
+    }
+
+    private static function duration(float $seconds): string
+    {
+        return $seconds < 1 ? \sprintf('%.1fms', $seconds * 1000) : \sprintf('%.2fs', $seconds);
     }
 
     private function markup(string $markup): string
