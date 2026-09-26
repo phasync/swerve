@@ -22,16 +22,20 @@ final class LoggingContext implements ContextInterface
 {
     use ContextTrait;
 
-    private bool $exiting = false;
+    /** PHP is shutting down: null until the first context registers the shutdown function. */
+    private static ?bool $exiting = null;
 
     public function __construct(private readonly LoggerInterface $logger)
     {
-        \register_shutdown_function(function () { $this->exiting = true; });
+        if (null === self::$exiting) {
+            self::$exiting = false;
+            \register_shutdown_function(static function () { self::$exiting = true; });
+        }
     }
 
     public function setContextException(\Throwable $exception): void
     {
-        if (!$this->exiting || !$exception instanceof CancelledException) {
+        if (!self::$exiting || !$exception instanceof CancelledException) {
             $this->logger->error('Unhandled exception in a coroutine: {exception}', ['exception' => $exception]);
         }
     }

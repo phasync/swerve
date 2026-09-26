@@ -1094,12 +1094,16 @@ test('a chunked response body is copied once into its chunk framing', function (
 });
 
 /**
- * A stream that gives one byte per read, never waits, and keeps what is written to it.
+ * A stream that gives one byte per read, never waits, and keeps what is written to it. Waiting
+ * on it in an event loop waits on a socket that is always readable and writable.
  */
 final class OneByteStream
 {
     public static string $in  = '';
     public static string $out = '';
+
+    /** @var resource|null */
+    private static $ready = null;
 
     public $context;
     private int $position = 0;
@@ -1130,6 +1134,21 @@ final class OneByteStream
     {
         return false;
     }
+
+    /** @return resource */
+    public function stream_cast(int $castAs)
+    {
+        if (null === self::$ready) {
+            [self::$ready, $other] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
+            fwrite($other, 'x'); // never read: readable for good
+            self::$keep = $other;
+        }
+
+        return self::$ready;
+    }
+
+    /** @var resource|null the other end, kept open */
+    private static $keep = null;
 }
 
 test('a request head arriving a byte at a time takes linear time, not quadratic', function () {
@@ -1148,7 +1167,8 @@ test('a request head arriving a byte at a time takes linear time, not quadratic'
             OneByteStream::$in  = "GET / HTTP/1.1\r\nHost: t\r\nX-Pad: " . str_repeat('a', $size) . "\r\n\r\n";
             OneByteStream::$out = '';
             $start              = hrtime(true);
-            (new Swerve\Http\NativeHttpConnection(fopen('one-byte://', 'r+'), '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve();
+            // In the event loop, as always: the application runs in a coroutine of its own
+            phasync::run(static fn () => (new Swerve\Http\NativeHttpConnection(fopen('one-byte://', 'r+'), '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve());
             $best = min($best, hrtime(true) - $start);
             expect(OneByteStream::$out)->toStartWith('HTTP/1.1 200');
         }

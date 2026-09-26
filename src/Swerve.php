@@ -9,6 +9,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 use swerve\ServerInterface;
+use Swerve\Util\LoggingContext;
 use Swerve\Util\Topics;
 
 final class Swerve implements SelectableInterface, LoggerAwareInterface
@@ -140,9 +141,10 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
                     }
                     while (!$this->pendingConnections->isEmpty()) {
                         $connection = $this->pendingConnections->dequeue();
+                        // A request of its own, in a phasync context of its own, see NativeHttpConnection
                         \phasync::go(function () use ($app, $connection) {
                             $this->handle($app, $connection);
-                        });
+                        }, context: new LoggingContext($this->logger));
                     }
                 }
             } catch (\Throwable $e) {

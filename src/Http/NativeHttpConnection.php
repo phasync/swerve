@@ -12,6 +12,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
+use Swerve\Util\LoggingContext;
 
 /**
  * One HTTP/1.1 client connection in HTTP mode: reads a request, calls the application,
@@ -236,7 +237,7 @@ final class NativeHttpConnection
     /** serve() ended. Read by RequestBody: later reads throw (a switched body's give EOF). */
     public bool $closed = false;
 
-    /** This connection's coroutine, which runs handle(); read by RequestBody. */
+    /** The coroutine running the application's handle() for the current request; read by RequestBody. */
     public ?\Fiber $fiber = null;
 
     /**
@@ -262,7 +263,6 @@ final class NativeHttpConnection
 
     public function serve(): void
     {
-        $this->fiber = \Fiber::getCurrent();
         try {
             $first     = true;
             $pipelined = 0;
@@ -977,7 +977,13 @@ final class NativeHttpConnection
             $request = $request->withCookieParams($cookies);
         }
 
-        $response = $this->handler->handle($request);
+        // Each request runs in a coroutine and a phasync context of its own, which the coroutines it
+        // starts share: request-scoped state can hang on phasync::getContext() (mini's does)
+        $response = phasync::await(phasync::go(function () use ($request) {
+            $this->fiber = \Fiber::getCurrent();
+
+            return $this->handler->handle($request);
+        }, context: new LoggingContext($this->logger)));
         if (null !== $this->ioError) {
             return false; // the application swallowed our socket failure: the client is gone
         }
