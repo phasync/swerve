@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c032d9abae68532b56a1372a61996e81",
+    "content-hash": "c66d6a0d7d8fe3b7512d1f082120d781",
     "packages": [
         {
             "name": "charm/options",

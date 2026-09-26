@@ -29,20 +29,20 @@ Without a framework:
 ```php
 <?php // swerve.php
 
-use Nyholm\Psr7\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\Http\Message\Response;
 
 return new class implements RequestHandlerInterface {
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        return new Response(200, ['Content-Type' => 'text/plain'], 'Hello, ' . ($request->getQueryParams()['name'] ?? 'World'));
+        return new Response('Hello, ' . ($request->getQueryParams()['name'] ?? 'World'), ['Content-Type' => 'text/plain']);
     }
 };
 ```
 
-`nyholm/psr7` comes with swerve. With Slim (`composer require slim/slim slim/psr7`):
+`Swerve\Http\Message\Response` is swerve's own PSR-7 implementation, which any application may use; frameworks bring their own. With Slim (`composer require slim/slim slim/psr7`):
 
 ```php
 <?php // swerve.php

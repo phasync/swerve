@@ -1,10 +1,10 @@
 <?php
 
-use Nyholm\Psr7\Response;
 use phasync\Psr\UnbufferedStream;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
+use Swerve\Http\Message\Response;
 
 /**
  * A small WebSocket server connection (RFC 6455), written against swerve's two streams: the
@@ -45,7 +45,7 @@ final class WebSocket
     {
         $key = $request->getHeaderLine('Sec-WebSocket-Key');
         if ('websocket' !== \strtolower($request->getHeaderLine('Upgrade')) || 16 !== \strlen((string) \base64_decode($key, true))) {
-            return new Response(400, ['Content-Type' => 'text/plain'], 'Not a WebSocket handshake');
+            return new Response('Not a WebSocket handshake', ['Content-Type' => 'text/plain'], 400);
         }
         $ws = new self($request->getBody(), new UnbufferedStream(65536, self::SEND_TIMEOUT));
         phasync::go(static function () use ($ws, $handler) {
@@ -60,11 +60,11 @@ final class WebSocket
             }
         });
 
-        return new Response(101, [
+        return new Response($ws->out, [
             'Upgrade'              => 'websocket',
             'Connection'           => 'Upgrade',
             'Sec-WebSocket-Accept' => \base64_encode(\sha1($key . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true)),
-        ], $ws->out);
+        ], 101);
     }
 
     /**

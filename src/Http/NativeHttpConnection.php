@@ -2,8 +2,6 @@
 
 namespace Swerve\Http;
 
-use Nyholm\Psr7\ServerRequest;
-use Nyholm\Psr7\Uri;
 use phasync;
 use phasync\CancelledException;
 use phasync\IOException;
@@ -101,6 +99,9 @@ final class NativeHttpConnection
     public const MAX_BODY = 8388608;
 
     /** The characters of a token (RFC 9110 5.6.2), such as a method. */
+    /** Control characters, which a header value may not contain, but horizontal tab (RFC 9110 5.5). */
+    private const CTL = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f";
+
     private const TOKEN = "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
     /** Not allowed in a request target: control characters (space is the separator) and '#'. */
@@ -194,13 +195,6 @@ final class NativeHttpConnection
 
     /** Request-body reads in a row that got all they asked for, see readBody(). */
     private int $fullReads = 0;
-
-    /**
-     * The last origin-form request's URI, parsed. Requests on a connection often repeat it,
-     * and a Uri is immutable, so it is shared rather than parsed again.
-     */
-    private string $uriString = '';
-    private ?Uri $uri          = null;
 
     private readonly string $remoteAddr;
     private readonly int $remotePort;
@@ -822,7 +816,7 @@ final class NativeHttpConnection
         }
 
         // Framing is decided on exact (lower-cased) names only; a line such as
-        // "Transfer-Encoding : chunked" never counts, and Nyholm rejects it below.
+        // "Transfer-Encoding : chunked" never counts: its name is not a token, which is refused.
         $headers    = [];
         $hosts      = 0;
         $host       = '';
@@ -833,13 +827,19 @@ final class NativeHttpConnection
         $connection = '';
         $expect     = null;
         $upgrade    = false;
+        $contentType = '';
         for ($i = 1, $n = \count($lines); $i < $n; ++$i) {
             $colon = \strpos($lines[$i], ':');
             if (false === $colon) {
                 throw new HttpError('Bad Request', 400);
             }
-            $name             = \substr($lines[$i], 0, $colon);
-            $value            = \trim(\substr($lines[$i], $colon + 1), " \t"); // not NUL: Nyholm must see it
+            $name  = \substr($lines[$i], 0, $colon);
+            $value = \trim(\substr($lines[$i], $colon + 1), " \t");
+            // RFC 9112: a name is a token (which rejects whitespace before the colon, and obs-fold
+            // continuation lines); a value has no control characters but horizontal tab
+            if ('' === $name || \strspn($name, self::TOKEN) !== \strlen($name) || \strcspn($value, self::CTL) !== \strlen($value)) {
+                throw new HttpError('Bad Request', 400);
+            }
             $headers[$name][] = $value;
             switch (\strtolower($name)) {
                 case 'host':
@@ -869,6 +869,9 @@ final class NativeHttpConnection
                     break;
                 case 'expect':
                     $expect = $value;
+                    break;
+                case 'content-type':
+                    $contentType = $value;
                     break;
                 case 'upgrade':
                     $upgrade = true;
@@ -908,73 +911,38 @@ final class NativeHttpConnection
             $continue = null !== $te || $length > 0;
         }
 
-        // The target URI (RFC 9112 3.3). An origin-form target is a path, also when it starts
-        // with "//": parsed alone, that would be read as an authority, so the path is always
-        // parsed after the Host's (whose characters can't end the authority early).
-        if ('/' === $target[0]) {
-            if ('' !== $host) {
-                $uri = "http://$host$target";
-                if ($uri !== $this->uriString) {
-                    try {
-                        $this->uri = new Uri($uri);
-                    } catch (\InvalidArgumentException) {
-                        throw new HttpError('Bad Request', 400);
-                    }
-                    $this->uriString = $uri;
-                }
-                $uri = $this->uri;
-            } else {
-                [$path, $query] = \explode('?', $target, 2) + [1 => ''];
-                $uri            = (new Uri())->withPath($path)->withQuery($query);
-            }
-        } elseif ('*' === $target) {
-            $uri = '' === $host ? '' : "http://$host";
-        } else {
-            // Absolute form: its authority is the host, the Host header is replaced by it (RFC
-            // 9112 3.2.2). The authority gets the Host header's check, and the scheme is always
-            // http: this connection is not TLS, whatever the target says.
+        // An absolute-form target (RFC 9112 3.2.2): its authority is the host, and replaces the
+        // Host header; the application gets its path as the target. The authority gets the Host
+        // header's check. The scheme is always http: this connection is not TLS, whatever the
+        // target says.
+        if ('/' !== $target[0] && '*' !== $target) {
             $start = 0 === \strncasecmp($target, 'https://', 8) ? 8 : 7;
             $end   = \strcspn($target, '/?', $start);
             $host  = \substr($target, $start, $end);
             if ('' === $host || \strspn($host, self::HOST) !== $end) {
                 throw new HttpError('Bad Request', 400);
             }
-            $path = \substr($target, $start + $end);
-            $uri  = "http://$host" . ('/' === ($path[0] ?? '') ? $path : "/$path");
+            $path   = \substr($target, $start + $end);
+            $target = '/' === ($path[0] ?? '') ? $path : "/$path";
             if (null !== $hostName) {
                 unset($headers[$hostName]);
             }
+            $headers['Host'] = [$host];
         }
 
         $body = new RequestBody($this, null !== $te ? null : ($length ?? 0), $continue, $this->maxBodySize, $upgrade);
-        $now  = \microtime(true);
-        try {
-            // Nyholm validates header names and values: this is what rejects obs-fold,
-            // whitespace before the colon, names that aren't tokens, and CR, LF or NUL in a value
-            $request = new ServerRequest($method, $uri, $headers, $body, $version, [
-                'REMOTE_ADDR'        => $this->remoteAddr,
-                'REMOTE_PORT'        => $this->remotePort,
-                'REQUEST_METHOD'     => $method,
-                'REQUEST_URI'        => $target,
-                'SERVER_PROTOCOL'    => $protocol,
-                'REQUEST_TIME'       => (int) $now,
-                'REQUEST_TIME_FLOAT' => $now,
-            ]);
-        } catch (\InvalidArgumentException) {
-            throw new HttpError('Bad Request', 400);
-        }
-        if ('*' === $target) {
-            $request = $request->withRequestTarget('*');
-        }
+        $now     = \microtime(true);
+        $request = new ServerRequest($method, $target, $body, $headers, [
+            'REMOTE_ADDR'        => $this->remoteAddr,
+            'REMOTE_PORT'        => $this->remotePort,
+            'REQUEST_METHOD'     => $method,
+            'REQUEST_URI'        => $target,
+            'SERVER_PROTOCOL'    => $protocol,
+            'REQUEST_TIME'       => (int) $now,
+            'REQUEST_TIME_FLOAT' => $now,
+        ], $version, $upgrade ? null : FormBody::for($method, $contentType, $body));
         if (null !== $cookie) {
-            // As PHP fills $_COOKIE: the first of equal names wins, values are URL-decoded
-            $cookies = [];
-            foreach (\explode(';', $cookie) as $pair) {
-                if (false !== ($eq = \strpos($pair, '='))) {
-                    $cookies[\trim(\substr($pair, 0, $eq), " \t")] ??= \urldecode(\trim(\substr($pair, $eq + 1), " \t"));
-                }
-            }
-            $request = $request->withCookieParams($cookies);
+            $request = $request->withCookieParams(ServerRequest::cookies($cookie));
         }
 
         // Each request runs in a coroutine and a phasync context of its own, which the coroutines it
@@ -1172,7 +1140,7 @@ final class NativeHttpConnection
         }
         // Each line added one CRLF; any other CR, LF or NUL came from the application and could
         // inject headers or split the response. Three C-level scans over the head, whatever
-        // PSR-7 implementation (or reason phrase, which Nyholm doesn't check) produced it.
+        // PSR-7 implementation (or reason phrase, which PSR-7 implementations don't all check) produced it.
         if (\substr_count($head, "\n") !== $lines || \substr_count($head, "\r") !== $lines || \str_contains($head, "\0")) {
             throw new \UnexpectedValueException('CR, LF or NUL in a response header or reason phrase');
         }

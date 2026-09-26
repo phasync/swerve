@@ -10,11 +10,11 @@
 
 require_once __DIR__ . '/WebSocket.php';
 
-use Nyholm\Psr7\Response;
 use phasync\CancelledException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\Http\Message\Response;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
 
@@ -22,7 +22,7 @@ return new class implements RequestHandlerInterface {
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         if ('/chat' !== $request->getUri()->getPath()) {
-            return new Response(404, [], 'Not found');
+            return new Response('Not found', [], 404);
         }
 
         return WebSocket::upgrade($request, static function (WebSocket $ws) {

@@ -1,6 +1,6 @@
 # Requests and responses
 
-Swerve gives your handler a PSR-7 `ServerRequestInterface` (nyholm/psr7) and sends the
+Swerve gives your handler a PSR-7 `ServerRequestInterface` (its own implementation) and sends the
 `ResponseInterface` it returns. This page is about HTTP mode, swerve's default; in FastCGI
 mode (`--fastcgi`), the web server in front speaks HTTP.
 
@@ -14,11 +14,34 @@ mode (`--fastcgi`), the web server in front speaks HTTP.
 | `getCookieParams()` | parsed from the Cookie header, as PHP does |
 | `getServerParams()` | `REMOTE_ADDR`, `REMOTE_PORT`, `REQUEST_METHOD`, `REQUEST_URI`, `SERVER_PROTOCOL`, `REQUEST_TIME`, `REQUEST_TIME_FLOAT` |
 | `getBody()` | the request body, read from the connection as you read it; see below |
-| `getParsedBody()` | `null`: swerve does not parse bodies. Decode JSON yourself (`json_decode((string) $request->getBody(), true)`), or use your framework's body parsing (Slim: `$app->addBodyParsingMiddleware()`) |
-| `getUploadedFiles()` | empty: multipart bodies are not parsed |
+| `getParsedBody()` | a POST form's fields, as PHP's `$_POST`: see *Forms* below; `null` for any other body |
+| `getUploadedFiles()` | a multipart POST's files, as PHP's `$_FILES`, as PSR-7 `UploadedFileInterface` objects |
 
 Behind a reverse proxy, `REMOTE_ADDR` is the proxy's address. The client's is in the header
 the proxy sets, such as `X-Forwarded-For`; trust it only when the request came from your proxy.
+
+## Forms
+
+Swerve parses what PHP parses, and only that: a **POST** whose `Content-Type` is
+`application/x-www-form-urlencoded` or `multipart/form-data`. Its fields and files are what PHP
+would put in `$_POST` and `$_FILES`, down to how names like `a[b][]` nest and dots in names
+become underscores. Every other body is left raw for you: a PUT, a JSON POST, anything else.
+Decode JSON yourself, or with your framework (Slim: `$app->addBodyParsingMiddleware()`).
+
+Parsing is lazy: the body is read on the first `getParsedBody()` or `getUploadedFiles()`, so a
+handler that never asks costs nothing, and one that streams the body itself still can. Asking
+for the parsed body after reading the raw body throws a `LogicException`: ask first. After
+parsing, `getBody()` is what `php://input` would be: an url-encoded body's bytes, and nothing
+for a multipart one.
+
+PHP's limits from `php.ini` apply as in PHP: `post_max_size` (a larger body gives an empty form,
+and a warning in the log), `upload_max_filesize` (a larger file gets `UPLOAD_ERR_INI_SIZE`),
+`max_file_uploads`, `max_input_vars`, `max_multipart_body_parts`, `file_uploads` and
+`enable_post_data_reading`. Uploads are streamed to temporary files in `upload_tmp_dir` and
+deleted when the request is gone, unless moved with `moveTo()`. The one difference from PHP:
+PHP keeps one field more than `max_input_vars`, swerve exactly that many.
+
+Upgrade requests (WebSockets) are never parsed.
 
 ## The request body
 

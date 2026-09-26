@@ -2,13 +2,13 @@
 
 namespace Swerve;
 
-use Nyholm\Psr7\Response;
-use Nyholm\Psr7\Stream;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\Http\Message\Response;
+use Swerve\Http\Message\Stream;
 
 /**
  * Serve the files of a directory, and pass every other request on: `--public=<dir>`, or as
@@ -72,7 +72,7 @@ final class StaticFiles implements MiddlewareInterface
             if (!\str_ends_with($path, '/')) {
                 $query = $request->getUri()->getQuery();
 
-                return new Response(301, ['Location' => $request->getUri()->getPath() . '/' . ('' !== $query ? "?$query" : '')]);
+                return new Response('', ['Location' => $request->getUri()->getPath() . '/' . ('' !== $query ? "?$query" : '')], 301);
             }
             $file .= '/index.html';
         }
@@ -85,7 +85,7 @@ final class StaticFiles implements MiddlewareInterface
         $stat = @\stat($file);
         $fp   = false !== $stat ? @\fopen($file, 'r') : false;
         if (false === $fp) {
-            return new Response(403);
+            return new Response('', [], 403);
         }
         $size     = $stat['size'];
         $modified = \gmdate('D, d M Y H:i:s', $stat['mtime']) . ' GMT';
@@ -103,7 +103,7 @@ final class StaticFiles implements MiddlewareInterface
             : ('' !== ($since = $request->getHeaderLine('If-Modified-Since')) && false !== ($t = \strtotime($since)) && $stat['mtime'] <= $t)) {
             \fclose($fp);
 
-            return new Response(304, $headers);
+            return new Response('', $headers, 304);
         }
 
         // One range; several are answered with the whole file, as RFC 9110 allows
@@ -120,15 +120,15 @@ final class StaticFiles implements MiddlewareInterface
             if ($start >= $size || $start > $end) {
                 \fclose($fp);
 
-                return new Response(416, ['Content-Range' => "bytes */$size"] + $headers);
+                return new Response('', ['Content-Range' => "bytes */$size"] + $headers, 416);
             }
             \fseek($fp, $start);
             $length = $end - $start + 1;
 
-            return new Response(206, ['Content-Range' => "bytes $start-$end/$size", 'Content-Length' => (string) $length] + $headers, self::part($fp, $length));
+            return new Response(self::part($fp, $length), ['Content-Range' => "bytes $start-$end/$size", 'Content-Length' => (string) $length] + $headers, 206);
         }
 
-        return new Response(200, ['Content-Length' => (string) $size] + $headers, Stream::create($fp));
+        return new Response(Stream::create($fp), ['Content-Length' => (string) $size] + $headers, 200);
     }
 
     /**

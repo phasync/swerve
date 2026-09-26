@@ -5,7 +5,9 @@ namespace Swerve\Runners;
 use Psr\Http\Server\RequestHandlerInterface;
 use RuntimeException;
 use Swerve\ConnectionInterface;
-use Swerve\Psr15\ServerRequest;
+use phasync\Psr\ComposableStream;
+use Swerve\Http\FormBody;
+use Swerve\Http\ServerRequest;
 use Swerve\SwerveInterface;
 
 /**
@@ -35,7 +37,21 @@ final class Psr15Runner implements SwerveInterface
      */
     public function handleConnection(ConnectionInterface $connection): void
     {
-        $request = new ServerRequest($connection);
+        // The request as HTTP mode's: FastCGI passes the body's type and length as parameters,
+        // which PSR-7 has as headers
+        $params  = $connection->getServerParams();
+        $headers = $connection->getRequestHeaders();
+        foreach (['CONTENT_TYPE' => 'content-type', 'CONTENT_LENGTH' => 'content-length'] as $param => $header) {
+            if ('' !== ($params[$param] ?? '')) {
+                $headers[$header] = [$params[$param]];
+            }
+        }
+        $method  = $connection->getRequestMethod();
+        $body    = new ComposableStream(readFunction: $connection->read(...), eofFunction: $connection->eof(...));
+        $request = new ServerRequest($method, $connection->getRequestTarget(), $body, $headers, $params, $connection->getProtocolVersion(), FormBody::for($method, $headers['content-type'][0] ?? '', $body));
+        if (isset($headers['cookie'])) {
+            $request = $request->withCookieParams(ServerRequest::cookies(\implode('; ', $headers['cookie'])));
+        }
         $response = $this->requestHandler->handle($request);
         $headers = [];
         $map = [];
