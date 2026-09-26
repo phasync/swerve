@@ -442,6 +442,7 @@ final class Worker
         // Asked by the master, the master logs it once for all; anything else is news
         $this->logger->log('the master asked' === $why ? 'info' : 'notice', 'Draining ({why})', ['why' => $why]);
         $this->send('D'); // the master may not know: a SIGTERM from someone else, or its death
+        Topics::drain(); // ends the long responses fed by subscriptions
         foreach ($this->drains as $drain) {
             $drain();
         }

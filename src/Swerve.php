@@ -168,6 +168,7 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
     public function stop(): void
     {
         $this->stopping = true;
+        Topics::drain();
         foreach ($this->modules as $module) {
             if ($module instanceof ServerInterface) {
                 $module->drain();
@@ -266,12 +267,23 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
      *
      *     foreach (Swerve::subscribe('chat') as $message) { ... }
      *
-     * The subscription ends when its last reference goes, see Subscription. One falling more
-     * than $maxLag seconds behind gets a SubscriberLagException from the loop.
+     * The subscription ends when its last reference goes, and its loop when the process drains,
+     * see Subscription. One falling more than $maxLag seconds behind gets a
+     * SubscriberLagException from the loop. With $heartbeat, the loop also gets null after
+     * that many seconds without a message: for a keep-alive.
      */
-    public static function subscribe(string $topic, float $maxLag = 30.0): Subscription
+    public static function subscribe(string $topic, float $maxLag = 30.0, ?float $heartbeat = null): Subscription
     {
-        return new Subscription($topic, $maxLag);
+        return new Subscription($topic, $maxLag, $heartbeat);
+    }
+
+    /**
+     * Whether this worker drains: it is shutting down, reloading or being recycled, and finishes
+     * the requests in flight. Long responses should end soon: see docs/realtime.md.
+     */
+    public static function draining(): bool
+    {
+        return Topics::$draining;
     }
 
     /** The installed version, as Composer knows it: 0.1.0-alpha3, or dev-main in a checkout. */

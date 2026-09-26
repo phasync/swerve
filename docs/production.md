@@ -1,0 +1,152 @@
+# Production
+
+## phasync-ext
+
+[phasync-ext](https://github.com/phasync/phasync-ext) is an optional PHP extension, with
+prebuilt binaries for PHP 8.3 to 8.5 on Linux. Swerve loads it by itself when it is installed:
+
+```bash
+composer require phasync/phasync-ext
+vendor/bin/swerve --version     # ... phasync-ext 0.4.0-alpha17
+```
+
+With it:
+
+- A worker is not limited to about 1,000 open connections (PHP's own `stream_select()` fails for
+  file descriptors of 1024 and up; see sizing below).
+- Code that is not written for phasync cooperates: inside a coroutine, `fread()`, `fwrite()`,
+  `fgets()` on blocking streams, file reads, DNS lookups, `sleep()` and `usleep()` let other
+  requests run instead of blocking the worker. Database client libraries, `curl` and CPU-bound
+  code still block. See [the rule](how-it-runs.md#the-rule-never-block-a-worker).
+
+Your application behaves the same with and without it; it only waits better.
+
+## Sizing
+
+**Workers.** `--workers=auto` (the default) is one per CPU core, the best for ordinary
+request/response traffic: more workers only compete for the cores. Each worker holds its own
+copy of your application in memory.
+
+**Connections per worker.**
+
+- *Without phasync-ext*, a worker holds at most about **960 connections** (1024 file descriptors,
+  less 64 kept for your application's files and database connections). Long-lived
+  connections (SSE, WebSockets, long polling) use one each for as long as they are open. For
+  many of them, run more workers than cores: **`--workers` of four times the cores** is a good
+  start (4 cores: 16 workers, about 15,000 connections). Idle connections cost almost no CPU,
+  so the extra workers don't compete much; they cost memory, one application each.
+- *With phasync-ext*, the limit is the open-file limit (`ulimit -n`; `LimitNOFILE` under
+  systemd). Past a few hundred **busy** connections per worker, waiting on them gets
+  expensive; more workers help here too.
+
+At the limit, a worker closes connections that sit idle (kept-alive ones, ones that never sent
+a request) to make room for new ones, and logs a warning at most once a minute. Upgraded
+connections (WebSockets) and ones whose request is still being handled are never closed to
+make room.
+
+**Memory.** `--max-memory` (80 % of `memory_limit` by default) recycles a worker whose memory
+grows past it: a new worker starts, then the old one finishes its requests and exits. With
+`memory_limit=-1` this is off; give a size such as `--max-memory=512M`. `--max-requests`
+recycles after about so many requests.
+
+## systemd
+
+```ini
+# /etc/systemd/system/myapp.service
+[Unit]
+Description=myapp
+After=network.target
+
+[Service]
+User=myapp
+WorkingDirectory=/srv/myapp/current
+ExecStart=/usr/bin/php vendor/bin/swerve --http=127.0.0.1:8080 --public=public
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+LimitNOFILE=1048576
+# Longer than --grace (30 s), so swerve's own drain finishes first
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`systemctl reload myapp` replaces the workers one at a time with ones running the current code:
+deploy the new code, then reload; no request is dropped. Logs go to the journal
+(`journalctl -u myapp`).
+
+## Docker
+
+```dockerfile
+FROM php:8.4-cli
+RUN docker-php-ext-install pcntl sockets
+WORKDIR /app
+COPY . .
+CMD ["vendor/bin/swerve", "--http=:8080", "--public=public"]
+```
+
+`docker stop` sends `SIGTERM` and waits 10 s by default: give it `--time=40` (or
+`stop_grace_period: 40s` in compose), or lower `--grace`. The container's CPU count is what
+`--workers=auto` sees.
+
+## nginx in front: TLS, and SSE and WebSockets through it
+
+Swerve serves plain HTTP. For HTTPS, put a reverse proxy in front. For nginx:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name chat.example.com;
+    ssl_certificate     /etc/letsencrypt/live/chat.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/chat.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # WebSockets
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        # Server-Sent Events: send each event on at once, and keep long-lived requests open
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
+Caddy does all of that with `reverse_proxy 127.0.0.1:8080`. The request's `REMOTE_ADDR` is
+then the proxy's; the client's address is in `X-Forwarded-For`.
+
+Alternatively, `--fastcgi=127.0.0.1:9000` serves FastCGI to nginx's `fastcgi_pass`, several
+requests over one connection. HTTP mode is simpler and supports WebSockets; prefer it.
+
+## Reloads, shutdown, and long-lived connections
+
+- On a reload or shutdown, each worker stops accepting, finishes the requests in flight, and
+  exits; the kernel hands new connections to the other workers (reload) or refuses them
+  (shutdown). A worker gets `--grace` seconds (30); what is still open a second before that is
+  dropped.
+- WebSocket connections see their request body end at once, so they can say goodbye (see
+  [Realtime](realtime.md)); subscriptions end, so SSE responses fed by them end too. Other
+  long responses are requests in flight: they run until the deadline, unless they check
+  `Swerve::draining()`. Clients must reconnect: `EventSource` does by itself; write
+  reconnecting into WebSocket clients.
+- `sysctl net.ipv4.tcp_migrate_req=1` makes the kernel hand connections waiting in a closing
+  worker's queue to another worker instead of resetting them; swerve logs a hint at start when
+  it is 0.
+
+## Logs
+
+Swerve logs to standard output, which systemd and Docker collect. `--log=<file>` appends to a
+file instead; after rotating it, send `SIGUSR1` (logrotate's `postrotate`), or use
+`copytruncate`. PHP's own errors go to the same place. `-q` logs nothing to the terminal.
+
+Next: [Troubleshooting](troubleshooting.md).

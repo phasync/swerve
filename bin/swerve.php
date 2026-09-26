@@ -32,6 +32,9 @@ use Swerve\Util\Worker;
 require $GLOBALS['_composer_autoload_path']
     ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
 
+// With phasync/phasync-ext installed, load the extension: may restart this process once
+phasync\try_enable_ext();
+
 pcntl_async_signals(true);
 
 /*
@@ -198,120 +201,120 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $logger = $worker->logger;
     Swerve::setLog($logger);
     Worker::refreshAutoloader();
-    try {
-        $app = require $swerveFile;
-    } catch (\Throwable $e) {
-        $logger->critical('Loading {file} failed: {exception}', ['file' => $swerveFile, 'exception' => $e]);
-        exit(Worker::EXIT_BAD_APP);
-    }
-    if ($app instanceof SwerveInterface) {
-        $runner = $app;
-    } elseif ($app instanceof RequestHandlerInterface) {
-        $runner = new Psr15Runner($app);
-    } else {
-        $logger->critical('{file} returned {value}', ['file' => $args->swervefile, 'value' => Debug::getDebugInfo($app)]);
-        exit(Worker::EXIT_BAD_APP);
-    }
-    if (!$fastcgi && !$app instanceof RequestHandlerInterface) {
-        $logger->critical('HTTP mode needs {file} to return a PSR-15 RequestHandlerInterface', ['file' => $args->swervefile]);
-        exit(Worker::EXIT_BAD_APP);
-    }
-    $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
-
-    if ($fastcgi) {
-        /*
-         * FastCGI mode
-         *
-         * For running swerve behind another web server, such as nginx, which speaks FastCGI
-         * to the workers.
-         */
-        $swerve = new Swerve($logger);
-        foreach ($fastcgi as $address) {
-            $swerve->add(new FastCGIServer("tcp://$address", $logger));
+    // Loaded in the worker's event loop: the application may start coroutines as it loads,
+    // such as a subscriber that runs for the worker's whole life
+    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $fastcgi) {
+        try {
+            $app = require $swerveFile;
+        } catch (\Throwable $e) {
+            $logger->critical('Loading {file} failed: {exception}', ['file' => $swerveFile, 'exception' => $e]);
+            exit(Worker::EXIT_BAD_APP);
         }
-        // Every request counts towards recycling, also one that throws
-        $runner = new class($runner, $worker) implements SwerveInterface {
-            public function __construct(private SwerveInterface $inner, private Worker $worker)
-            {
-            }
+        if ($app instanceof SwerveInterface) {
+            $runner = $app;
+        } elseif ($app instanceof RequestHandlerInterface) {
+            $runner = new Psr15Runner($app);
+        } else {
+            $logger->critical('{file} returned {value}', ['file' => $args->swervefile, 'value' => Debug::getDebugInfo($app)]);
+            exit(Worker::EXIT_BAD_APP);
+        }
+        if (!$fastcgi && !$app instanceof RequestHandlerInterface) {
+            $logger->critical('HTTP mode needs {file} to return a PSR-15 RequestHandlerInterface', ['file' => $args->swervefile]);
+            exit(Worker::EXIT_BAD_APP);
+        }
+        $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
 
-            public function handleConnection(ConnectionInterface $connection): void
-            {
-                // The request's head may not have come yet
-                $id = $this->worker->requestStarted(static fn () => $connection->getState() > Connection::STATE_REQUEST_HEAD
-                    ? $connection->getRequestMethod() . ' ' . $connection->getRequestTarget()
-                    : 'a request');
-                try {
-                    $this->inner->handleConnection($connection);
-                } finally {
-                    $this->worker->requestDone($id);
-                }
+        if ($fastcgi) {
+            /*
+             * FastCGI mode
+             *
+             * For running swerve behind another web server, such as nginx, which speaks FastCGI
+             * to the workers.
+             */
+            $swerve = new Swerve($logger);
+            foreach ($fastcgi as $address) {
+                $swerve->add(new FastCGIServer("tcp://$address", $logger));
             }
-        };
-        phasync::run(static function () use ($worker, $swerve, $runner, $logger) {
-            $worker->serve(static fn () => $swerve->run($runner, $worker->ready(...), new LoggingContext($logger)), $swerve->stop(...));
-        }, [], new LoggingContext($logger));
-    } else {
-        /*
-         * HTTP mode
-         *
-         * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
-         * kernel spreads new connections over them.
-         */
-        if ('' !== $args->public) {
-            // Files first; the application gets what is not one
-            $app = new class(new StaticFiles($args->public), $app) implements RequestHandlerInterface {
-                public function __construct(private StaticFiles $files, private RequestHandlerInterface $app)
+            // Every request counts towards recycling, also one that throws
+            $runner = new class($runner, $worker) implements SwerveInterface {
+                public function __construct(private SwerveInterface $inner, private Worker $worker)
                 {
                 }
 
-                public function handle(ServerRequestInterface $request): ResponseInterface
+                public function handleConnection(ConnectionInterface $connection): void
                 {
-                    return $this->files->process($request, $this->app);
+                    // The request's head may not have come yet
+                    $id = $this->worker->requestStarted(static fn () => $connection->getState() > Connection::STATE_REQUEST_HEAD
+                        ? $connection->getRequestMethod() . ' ' . $connection->getRequestTarget()
+                        : 'a request');
+                    try {
+                        $this->inner->handleConnection($connection);
+                    } finally {
+                        $this->worker->requestDone($id);
+                    }
                 }
             };
-        }
-        $handler = new class($app, $worker, $logger instanceof Logger && $logger->access ? $logger : null) implements RequestHandlerInterface {
-            public function __construct(private RequestHandlerInterface $app, private Worker $worker, private ?Logger $access)
-            {
+            $worker->serve(static fn () => $swerve->run($runner, $worker->ready(...), new LoggingContext($logger)), $swerve->stop(...));
+        } else {
+            /*
+             * HTTP mode
+             *
+             * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
+             * kernel spreads new connections over them.
+             */
+            if ('' !== $args->public) {
+                // Files first; the application gets what is not one
+                $app = new class(new StaticFiles($args->public), $app) implements RequestHandlerInterface {
+                    public function __construct(private StaticFiles $files, private RequestHandlerInterface $app)
+                    {
+                    }
+
+                    public function handle(ServerRequestInterface $request): ResponseInterface
+                    {
+                        return $this->files->process($request, $this->app);
+                    }
+                };
             }
-
-            /** The access log's line is written when the application returns the response, before its body is sent. */
-            public function handle(ServerRequestInterface $request): ResponseInterface
-            {
-                $id     = $this->worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getRequestTarget());
-                $start  = \hrtime(true);
-                $status = 500;
-                try {
-                    $response = $this->app->handle($request);
-                    $status   = $response->getStatusCode();
-
-                    return $response;
-                } finally {
-                    $this->worker->requestDone($id);
-                    $this->access?->request($request->getMethod(), $request->getRequestTarget(), $status, (\hrtime(true) - $start) / 1e9);
+            $handler = new class($app, $worker, $logger instanceof Logger && $logger->access ? $logger : null) implements RequestHandlerInterface {
+                public function __construct(private RequestHandlerInterface $app, private Worker $worker, private ?Logger $access)
+                {
                 }
+
+                /** The access log's line is written when the application returns the response, before its body is sent. */
+                public function handle(ServerRequestInterface $request): ResponseInterface
+                {
+                    $id     = $this->worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getRequestTarget());
+                    $start  = \hrtime(true);
+                    $status = 500;
+                    try {
+                        $response = $this->app->handle($request);
+                        $status   = $response->getStatusCode();
+
+                        return $response;
+                    } finally {
+                        $this->worker->requestDone($id);
+                        $this->access?->request($request->getMethod(), $request->getRequestTarget(), $status, (\hrtime(true) - $start) / 1e9);
+                    }
+                }
+            };
+            $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
+            $servers = [];
+            foreach ($http as $address) {
+                $server = new NativeHttpServer($address, $handler, $logger, (bool) $args->bufferResponses, $maxBody);
+                try {
+                    $server->listen();
+                } catch (\Throwable $e) {
+                    // Before 'R': the master counts it as a failed start
+                    $logger->critical('{exception}', ['exception' => $e]);
+                    exit(1);
+                }
+                $servers[] = $server;
             }
-        };
-        $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
-        $servers = [];
-        foreach ($http as $address) {
-            $server = new NativeHttpServer($address, $handler, $logger, (bool) $args->bufferResponses, $maxBody);
-            try {
-                $server->listen();
-            } catch (\Throwable $e) {
-                // Before 'R': the master counts it as a failed start
-                $logger->critical('{exception}', ['exception' => $e]);
-                exit(1);
-            }
-            $servers[] = $server;
-        }
-        phasync::run(static function () use ($worker, $servers) {
             foreach ($servers as $server) {
                 $worker->serve($server->run(...), $server->drain(...));
             }
             $worker->ready();
-        }, [], new LoggingContext($logger));
-    }
+        }
+    }, [], new LoggingContext($logger));
     exit(0);
 })();

@@ -215,3 +215,52 @@ test('the master kills a worker that leaves published messages unread for 30 s, 
         native_stop($process);
     }
 });
+
+test('with a heartbeat, the loop also gets null after that long without a message', function () {
+    $got = phasync::run(function () {
+        // phasync checks timeouts coarsely (docs/SEMANTICS.md, TMO-3): up to 0.5 s late
+        phasync::go(static function () {
+            phasync::sleep(1.2);
+            Swerve::publish('t', 'later');
+        });
+        $got = [];
+        foreach (Swerve::subscribe('t', heartbeat: 0.1) as $message) {
+            $got[] = $message;
+            if (null !== $message) {
+                break;
+            }
+        }
+
+        return $got;
+    });
+
+    expect($got)->toContain(null)->toContain('later');
+    expect(end($got))->toBe('later');
+});
+
+test('a drain ends every subscription\'s loop, and one made while draining ends at once', function () {
+    $got = phasync::run(function () {
+        $ended = [];
+        foreach (['a', 'b'] as $name) {
+            $subscription = Swerve::subscribe('t');
+            phasync::go(static function () use ($subscription, $name, &$ended) {
+                foreach ($subscription as $message) {
+                }
+                $ended[] = $name;
+            });
+        }
+        unset($subscription);
+        phasync::sleep(0.01);
+        Topics::drain();
+        phasync::sleep(0.01);
+        foreach (Swerve::subscribe('t') as $message) {
+            $ended[] = 'got a message';
+        }
+        $ended[] = 'new one ended';
+
+        return [$ended, Swerve::draining(), Topics::active()];
+    });
+    Topics::$draining = false; // this test process goes on
+
+    expect($got)->toBe([['a', 'b', 'new one ended'], true, []]);
+});

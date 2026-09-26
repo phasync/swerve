@@ -1923,3 +1923,18 @@ test('Swerve::log() logs in swerve\'s format, with the worker\'s slot', function
     native_stop($process);
     expect(file_get_contents($log))->toMatch('/\.\d\d 0 warning +from the application: hi$/m');
 });
+
+test('the application may start coroutines as it loads; they run for the worker\'s life, and don\'t hold up its drain', function () {
+    [$process, $addr, $log] = swerve_start([], 1, fixture: 'background.php', wait: false);
+    $deadline = microtime(true) + 5;
+    while (null === ($ticks = probe($addr, '/'))) {
+        expect(microtime(true))->toBeLessThan($deadline, file_get_contents($log));
+        usleep(20_000);
+    }
+    usleep(300_000);
+    expect((int) probe($addr, '/'))->toBeGreaterThan((int) $ticks);
+    swerve_signal($process, SIGTERM);
+    [$code, $took] = swerve_wait($process, 5);
+    expect([$code, $took < 2])->toBe([0, true]);
+    expect(log_count($log, '/(error|critical|warning)/'))->toBe(0, file_get_contents($log));
+});

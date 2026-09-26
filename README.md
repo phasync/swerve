@@ -8,6 +8,9 @@ at once, and request and response bodies stream.
 
 > Alpha: APIs and options may change until 1.0.
 
+**[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
+[Server-Sent Events](examples/sse-chat) and over [WebSockets](examples/websocket-chat).
+
 ## Getting started
 
 Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions.

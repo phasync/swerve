@@ -35,6 +35,9 @@ final class Topics
      */
     public static ?Closure $toMaster = null;
 
+    /** The process drains: subscriptions have ended, see drain(). */
+    public static bool $draining = false;
+
     /** @var array<string, SubscribersInterface> */
     private static array $subscribers = [];
     /** @var array<string, WriteChannelInterface> */
@@ -87,7 +90,8 @@ final class Topics
      */
     public static function leave(string $topic): void
     {
-        if (--self::$counts[$topic] > 0) {
+        // Gone already when the drain ended it
+        if (!isset(self::$counts[$topic]) || --self::$counts[$topic] > 0) {
             return;
         }
         $writer = self::$writers[$topic];
@@ -136,6 +140,20 @@ final class Topics
         $buffer = \substr($buffer, $at);
 
         return $status;
+    }
+
+    /**
+     * The process drains (shutdown, reload, recycle): every subscription ends, so that the
+     * long responses fed by them (Server-Sent Events) end too, instead of holding the drain up
+     * to its deadline. Subscriptions made from now on end at once.
+     */
+    public static function drain(): void
+    {
+        self::$draining = true;
+        foreach (self::$writers as $writer) {
+            $writer->close();
+        }
+        self::$subscribers = self::$writers = self::$counts = [];
     }
 
     /** @return string[] the topics with subscribers in this process */
