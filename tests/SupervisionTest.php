@@ -1916,3 +1916,10 @@ test('each request is logged with its worker\'s slot, method, target, status and
     'by default'      => [[], 1],
     '--no-access-log' => [['--no-access-log'], 0],
 ]);
+
+test('Swerve::log() logs in swerve\'s format, with the worker\'s slot', function () {
+    [$process, $addr, $log] = swerve_start([], 1);
+    expect(probe($addr, '/app-log'))->toBe('logged');
+    native_stop($process);
+    expect(file_get_contents($log))->toMatch('/\.\d\d 0 warning +from the application: hi$/m');
+});

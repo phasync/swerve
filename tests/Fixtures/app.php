@@ -687,6 +687,11 @@ return new class($version) implements RequestHandlerInterface {
 
                 return new Response(200, [], 'published');
             })(),
+            '/app-log'        => (static function () {
+                Swerve::log()->warning('from the application: {what}', ['what' => 'hi']);
+
+                return new Response(200, [], 'logged');
+            })(),
             '/topics'         => new Response(200, [], \implode(',', Swerve\Util\Topics::active())),
             // Stalls this worker's event loop for ?s= seconds
             '/busy'           => (static function () use ($query) {

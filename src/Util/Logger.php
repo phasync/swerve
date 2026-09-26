@@ -111,7 +111,7 @@ class Logger implements LoggerInterface
         // for the same reason.
         // Notices and below are just the message: most lines are those
         $line = $this->prefix() . (isset(self::LABELS[$level]) ? $this->markup(self::COLORS[$level] . self::LABELS[$level] . '<!>') . ' ' : '');
-        foreach (\preg_split('/(\{[^{}\s]+\})/', (string) $message, -1, \PREG_SPLIT_DELIM_CAPTURE) as $i => $part) {
+        foreach (\preg_split('/(\{[^{}\s]+\})/', \rtrim((string) $message), -1, \PREG_SPLIT_DELIM_CAPTURE) as $i => $part) {
             $key = \substr($part, 1, -1);
             $val = $context[$key] ?? null;
             if ($i % 2 && \array_key_exists($key, $context) && !\is_array($val) && (!\is_object($val) || \method_exists($val, '__toString'))) {

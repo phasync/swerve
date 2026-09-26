@@ -7,6 +7,7 @@ use phasync\SelectableInterface;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
+use Psr\Log\NullLogger;
 use swerve\ServerInterface;
 use Swerve\Util\Topics;
 
@@ -38,6 +39,7 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
     {
         $this->pendingConnections = new \SplQueue();
         $this->logger = $logger;
+        self::$log    = $logger;
         $this->logger->debug('Swerve constructed');
     }
 
@@ -213,6 +215,31 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
         }
         $this->pendingConnections->enqueue($connection);
         \phasync::raiseFlag($this->pendingConnections);
+    }
+
+    /** The log of this process, see log(). */
+    private static ?LoggerInterface $log = null;
+
+    /**
+     * The log of this process: swerve's own, in its format (the time, this worker's slot),
+     * wherever swerve logs (the terminal, or --log's file); a NullLogger with -q. Give it to
+     * the libraries that take a PSR-3 logger, such as Slim's error middleware:
+     *
+     *     $app->addErrorMiddleware(true, true, false, Swerve::log());
+     *
+     * Without swerve's command line (swerve embedded), the logger of the last Swerve created.
+     */
+    public static function log(): LoggerInterface
+    {
+        return self::$log ??= new NullLogger();
+    }
+
+    /**
+     * @internal set by bin/swerve and the Swerve constructor
+     */
+    public static function setLog(LoggerInterface $log): void
+    {
+        self::$log = $log;
     }
 
     /**

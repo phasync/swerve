@@ -29,9 +29,11 @@ Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets`
    use Psr\Http\Message\ResponseInterface;
    use Psr\Http\Message\ServerRequestInterface;
    use Slim\Factory\AppFactory;
+   use Swerve\Swerve;
 
    $app = AppFactory::create();
-   $app->addErrorMiddleware(true, false, false); // a 404 page for unknown routes
+   // Error pages, and errors logged in swerve's log
+   $app->addErrorMiddleware(true, true, false, Swerve::log());
    $app->get('/', function (ServerRequestInterface $request, ResponseInterface $response) {
        $response->getBody()->write('Hello, World');
 
@@ -56,8 +58,9 @@ Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets`
    stops swerve, letting the requests in flight finish first.
 
    ```bash
-   vendor/bin/swerve --watch            # during development: reload when a PHP file changes
-   vendor/bin/swerve app.php --http :80 # app.php on port 80 of every interface
+   vendor/bin/swerve --watch              # during development: reload when a PHP file changes
+   vendor/bin/swerve --public=public      # also serve the files in public/ (CSS, JavaScript, images)
+   vendor/bin/swerve app.php --http :80   # app.php on port 80 of every interface
    ```
 
 ## Usage
@@ -72,6 +75,7 @@ Application:
 Serving:
   --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port or [ipv6]:port; repeat for several (default: 127.0.0.1:8080)
   --fastcgi=<address>     Serve FastCGI here instead, behind nginx or the like; the same forms as --http
+  --public=<dir>          HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
   -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
 
 Development:
@@ -107,6 +111,32 @@ standard output, which they collect; there is no daemon mode. Elsewhere,
 The line per request costs about 5% of the throughput of a hello-world application, and
 less of a real one; `--no-access-log` turns it off. In FastCGI mode there is none: the web
 server in front logs the requests.
+
+## Static files
+
+`--public=<dir>` serves the files in a directory, and passes every other request to the
+application: `/css/site.css` is `public/css/site.css`, `/` is `public/index.html`. Files are
+streamed, with their Content-Type, Content-Length, Last-Modified and ETag; a browser's
+revalidation gets `304 Not Modified`, and a `Range` request (video, resumed downloads) `206
+Partial Content`. Other methods than GET and HEAD, names starting with a dot (`.env`, `.git/`;
+`.well-known/` is served), and paths leading out of the directory (`..`, a symlink pointing
+outside) go to the application; directories are never listed.
+
+The same is PSR-15 middleware for your own stack, with swerve or any other server:
+`$app->add(new Swerve\StaticFiles(__DIR__ . '/public'))` in Slim.
+
+## Logging from the application
+
+`Swerve::log()` is swerve's log as a PSR-3 `LoggerInterface`: lines go where swerve's go (the
+terminal, or `--log`'s file), with the time and the worker's slot. Give it to anything that takes
+a logger, such as Slim's error middleware above, or log directly:
+
+```php
+Swerve::log()->warning('Payment {id} declined', ['id' => $id]);
+```
+
+With `-q` it logs nothing; embedded without swerve's command line, it is the logger given to the
+last `new Swerve($logger)`.
 
 ## Modes
 

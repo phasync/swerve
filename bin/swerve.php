@@ -18,6 +18,7 @@ use Swerve\ConnectionInterface;
 use Swerve\FastCGI\FastCGIServer;
 use Swerve\Http\NativeHttpServer;
 use Swerve\Runners\Psr15Runner;
+use Swerve\StaticFiles;
 use Swerve\Swerve;
 use Swerve\SwerveInterface;
 use Swerve\Util\Cluster;
@@ -106,8 +107,8 @@ foreach ([\STDOUT, \STDERR] as $out) {
             \fwrite(\STDERR, "swerve: Can't combine --fastcgi with --http\n");
             exit(2);
         }
-        if ($args->bufferResponses || !$args->isDefault('maxBody')) {
-            \fwrite(\STDERR, "swerve: --buffer-responses and --max-body only apply to --http\n");
+        if ($args->bufferResponses || !$args->isDefault('maxBody') || '' !== $args->public) {
+            \fwrite(\STDERR, "swerve: --buffer-responses, --max-body and --public only apply to --http\n");
             exit(2);
         }
     }
@@ -195,6 +196,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
      * From here on: a worker process. Load the application.
      */
     $logger = $worker->logger;
+    Swerve::setLog($logger);
     Worker::refreshAutoloader();
     try {
         $app = require $swerveFile;
@@ -256,6 +258,19 @@ foreach ([\STDOUT, \STDERR] as $out) {
          * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
          * kernel spreads new connections over them.
          */
+        if ('' !== $args->public) {
+            // Files first; the application gets what is not one
+            $app = new class(new StaticFiles($args->public), $app) implements RequestHandlerInterface {
+                public function __construct(private StaticFiles $files, private RequestHandlerInterface $app)
+                {
+                }
+
+                public function handle(ServerRequestInterface $request): ResponseInterface
+                {
+                    return $this->files->process($request, $this->app);
+                }
+            };
+        }
         $handler = new class($app, $worker, $logger instanceof Logger && $logger->access ? $logger : null) implements RequestHandlerInterface {
             public function __construct(private RequestHandlerInterface $app, private Worker $worker, private ?Logger $access)
             {

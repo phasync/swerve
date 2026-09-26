@@ -37,6 +37,11 @@ return (function () {
         validator: $addr_validator,
         multiple: true
     ));
+    $args->add('public', new Option(
+        '', 'public', 'HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application',
+        placeholder: 'dir',
+        validator: fn ($value) => \is_dir($value) ? null : "$value is not a directory",
+    ));
     $args->add('workers', new Option(
         'w', 'workers', 'Worker processes; auto is one per CPU core',
         default: 'auto',
