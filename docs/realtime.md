@@ -18,7 +18,7 @@ swerve's tests run them.
 ```php
 use phasync\Psr\UnbufferedStream;
 
-$out = new UnbufferedStream(1, 60);         // buffer size in bytes, write timeout in seconds
+$out = new UnbufferedStream(1, 60);         // buffer size in bytes, timeout in seconds
 phasync::go(function () use ($out) {        // write from a coroutine of its own
     $out->append("some data\n");            // waits while more than the buffer size is unsent
     $out->end();                            // the response ends
@@ -31,6 +31,10 @@ return new Response(200, ['Content-Type' => 'text/plain'], $out);
   returns when swerve has taken the data. If swerve doesn't take it within the timeout (the
   client stopped reading, or left), `append()` throws `phasync\TimeoutException`. That is how a
   producer learns its client is gone.
+- The same timeout applies the other way: swerve waits at most that long for the next data.
+  A stream that stays quiet longer (no event, no message to send) ends the response with a
+  `TimeoutException`. Send something before then: a keep-alive comment for Server-Sent Events,
+  a ping for a WebSocket (the example pings every 15 s).
 - `end()` ends the response. Call it exactly once, in a `finally`.
 - Create the stream in the handler, write to it from a coroutine started there, and return the
   response: swerve starts sending as soon as the handler returns.
