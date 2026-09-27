@@ -55,8 +55,10 @@ final class Worker
     private $wakeWrite;
     /** @var resource awaitTerm() waits on it */
     private $wake;
-    /** The event loop's last tick: the worker's start until the first, see the SIGQUIT dump. */
-    private float $lastTick;
+    /** The event loop's last heartbeat; 0 before the first (which then always goes out). */
+    private float $lastTick = 0.0;
+    /** When the worker started: the SIGQUIT dump's silence before the first heartbeat. */
+    private readonly float $startedAt;
     /** Bytes for the master that the pipe did not take yet, see send(). */
     private string $out = '';
     /** Seconds without a tick after which SIGALRM checks whether the master is alive; 0 = never. */
@@ -74,7 +76,7 @@ final class Worker
         float $watchdog,
         public readonly LoggerInterface $logger,
     ) {
-        $this->lastTick = \microtime(true);
+        $this->startedAt = \microtime(true);
         [$this->wake, $this->wakeWrite] = System::socketPair();
         \stream_set_blocking($this->wake, false);
         \stream_set_blocking($this->wakeWrite, false);
@@ -96,7 +98,7 @@ final class Worker
                     $at[] = $frame['file'] . ':' . $frame['line'];
                 }
             }
-            $this->logger->warning('Silent for {s} s; in flight: {requests}; at {at}', ['s' => \round(\microtime(true) - $this->lastTick, 1), 'requests' => $this->describeInFlight(), 'at' => \implode(' < ', $at)]);
+            $this->logger->warning('Silent for {s} s; in flight: {requests}; at {at}', ['s' => \round(\microtime(true) - ($this->lastTick ?: $this->startedAt), 1), 'requests' => $this->describeInFlight(), 'at' => \implode(' < ', $at)]);
         });
         // The master's watchdog can't stop a worker whose event loop is stuck once the master is
         // gone, and such a worker would keep its listener, taking a share of the connections of
