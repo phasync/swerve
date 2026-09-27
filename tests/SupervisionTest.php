@@ -574,6 +574,22 @@ test('the watchdog logs the request a worker is stuck in, and where, before kill
     native_stop($process);
 });
 
+test('SIGQUIT on a worker that never ticked (still loading the application) says how long since it started', function () {
+    $dir = test_dir();
+    file_put_contents("$dir/load-ms", '3000');
+    [$process, $addr, $log, $pid] = swerve_start(['--watchdog=0'], workers: 1, env: ['SWERVE_TEST_DIR' => $dir], wait: false);
+    $deadline = microtime(true) + 5;
+    while ('' === ($worker = trim((string) shell_exec("pgrep -P $pid")))) {
+        expect(microtime(true))->toBeLessThan($deadline);
+        usleep(20_000);
+    }
+    usleep(500_000);
+    posix_kill((int) $worker, SIGQUIT);
+    $match = log_wait($log, '/warning +Silent for ([\d.]+) s; in flight: none/');
+    expect((float) $match[0][1])->toBeLessThan(10.0);
+    native_stop($process);
+});
+
 test('a worker busy with blocking requests back to back, each shorter than the watchdog timeout, is not killed', function () {
     [$process, $addr, $log] = swerve_start(['--watchdog=2'], workers: 1);
     $conns                  = [];

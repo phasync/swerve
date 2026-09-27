@@ -55,7 +55,8 @@ final class Worker
     private $wakeWrite;
     /** @var resource awaitTerm() waits on it */
     private $wake;
-    private float $lastTick = 0.0;
+    /** The event loop's last tick: the worker's start until the first, see the SIGQUIT dump. */
+    private float $lastTick;
     /** Bytes for the master that the pipe did not take yet, see send(). */
     private string $out = '';
     /** Seconds without a tick after which SIGALRM checks whether the master is alive; 0 = never. */
@@ -73,6 +74,7 @@ final class Worker
         float $watchdog,
         public readonly LoggerInterface $logger,
     ) {
+        $this->lastTick = \microtime(true);
         [$this->wake, $this->wakeWrite] = System::socketPair();
         \stream_set_blocking($this->wake, false);
         \stream_set_blocking($this->wakeWrite, false);
