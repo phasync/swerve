@@ -84,8 +84,6 @@ foreach ([\STDOUT, \STDERR] as $out) {
         $term->write('<!bold>swerve '.Swerve::getVersion()."<!> <!yellow>(alpha: expect changes until 1.0)<!>\n");
     }
 
-    phasync::setDefaultTimeout(60);
-
     /**
      * Check that `swerve.php` file exists. The application is loaded in each worker, after
      * the fork, so that a reload runs the current code. Symlinks are not resolved: a deploy
