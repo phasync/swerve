@@ -601,7 +601,7 @@ function native_serve_packets(Psr\Http\Server\RequestHandlerInterface $handler, 
         stream_set_blocking($server, false);
         stream_set_blocking($client, false);
         stream_set_read_buffer($client, 0);
-        $connection = new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger());
+        $connection = new Swerve\Http\NativeHttpConnection(new phasync\Net\StreamDuplex($server), '127.0.0.1:1', $handler, new Psr\Log\NullLogger());
         phasync::go($connection->serve(...));
 
         foreach ((array) $requests as $packet) {

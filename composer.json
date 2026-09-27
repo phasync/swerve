@@ -12,7 +12,8 @@
         "ext-posix": "*",
         "ext-sockets": "*",
         "psr/http-server-handler": "^1.0",
-        "psr/http-server-middleware": "^1.0"
+        "psr/http-server-middleware": "^1.0",
+        "phasync/net": "^2.0.0-alpha2"
     },
     "bin": [
         "bin/swerve"

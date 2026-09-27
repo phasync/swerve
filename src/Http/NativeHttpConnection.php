@@ -5,6 +5,7 @@ namespace Swerve\Http;
 use phasync;
 use phasync\CancelledException;
 use phasync\IOException;
+use phasync\Net\Duplex;
 use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamInterface;
@@ -235,21 +236,20 @@ final class NativeHttpConnection
     public ?\Fiber $fiber = null;
 
     /**
-     * @param resource $socket      a connected, non-blocking stream
+     * @param Duplex   $conn        the client's connection (phasync/net)
      * @param int      $maxBodySize a larger request body gets 413, by its Content-Length before
      *                              the application runs, or when a chunk would exceed it
      */
     public function __construct(
-        private readonly mixed $socket,
+        private readonly Duplex $conn,
         string $peer,
         private readonly RequestHandlerInterface $handler,
         private readonly LoggerInterface $logger,
         private readonly bool $bufferResponses = false,
         private readonly int $maxBodySize = self::MAX_BODY,
     ) {
-        // Without PHP's own 8 KiB read buffer, a read asks the kernel for what it asks for:
-        // READ_SIZE, or no more than the body has left, so nothing is read ahead
-        \stream_set_read_buffer($socket, 0);
+        // A read takes at most what it asks for: READ_SIZE, or no more than the body has left,
+        // so nothing is read ahead
         $colon            = (int) \strrpos($peer, ':');
         $this->remoteAddr = \substr($peer, 0, $colon);
         $this->remotePort = (int) \substr($peer, $colon + 1);
@@ -300,26 +300,25 @@ final class NativeHttpConnection
                 if ($this->upgraded) {
                     phasync::cancel($this->reader);
                 } else {
-                    @\stream_socket_shutdown($this->socket, \STREAM_SHUT_RDWR);
+                    $this->conn->close();
                 }
                 do {
                     phasync::awaitFlag($this);
                 } while (null !== $this->reader);
             }
-            if ($this->linger && null === $this->ioError && !self::$exiting) {
-                @\stream_socket_shutdown($this->socket, \STREAM_SHUT_WR);
+            if ($this->linger && null === $this->ioError && !self::$exiting && !$this->conn->isClosed()) {
+                $this->conn->end();
                 $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
                 $this->reclaimable = self::ANSWERED;
                 try {
                     do {
-                        phasync::readable($this->socket, $deadline - \microtime(true));
-                        $data = @\fread($this->socket, self::READ_SIZE);
-                    } while (false !== $data && !('' === $data && \feof($this->socket)) && \microtime(true) < $deadline);
+                        $data = $this->conn->read(self::READ_SIZE, \max(0.0, $deadline - \microtime(true)));
+                    } while ('' !== $data && \microtime(true) < $deadline);
                 } catch (IOException|TimeoutException) {
                 }
             }
             $this->reclaimable = 0;
-            \fclose($this->socket);
+            $this->conn->close();
             if (!self::$exiting) {
                 phasync::raiseFlag($this); // a read waiting for an upgrade's status learns there will be none
             }
@@ -373,7 +372,7 @@ final class NativeHttpConnection
 
     private function nothingReceived(): bool
     {
-        return \strlen($this->buffer) === $this->offset && '' === (string) @\stream_socket_recvfrom($this->socket, 1, \STREAM_PEEK);
+        return \strlen($this->buffer) === $this->offset && !$this->conn->pending();
     }
 
     /**
@@ -388,7 +387,7 @@ final class NativeHttpConnection
         $this->reclaimable = 0;
         // Wakes this connection's own coroutine, which finds the end of the stream and closes,
         // or a read waiting for an upgrade's status (awaitStatus()), which gives the upgrade up
-        \stream_socket_shutdown($this->socket, \STREAM_SHUT_RDWR);
+        $this->conn->close();
         phasync::raiseFlag($this);
 
         return true;
@@ -415,17 +414,10 @@ final class NativeHttpConnection
         if (0 === $have) {
             $size = \min($readable, self::READ_SIZE);
             try {
-                // No feof() when that read finds nothing: on a live socket it is one more
-                // syscall, and at the end the read after the wait finds the end again
-                $chunk = 0 === $this->fullReads % self::BURST ? '' : @\fread($this->socket, $size);
-                while ('' === $chunk) {
-                    $this->awaitBody();
-                    $chunk = @\fread($this->socket, $size);
-                    if ('' === $chunk && \feof($this->socket)) {
-                        throw new IOException('Connection closed by the client');
-                    }
-                }
-                if (false === $chunk) {
+                // After a short read (a slow client), and every BURST full ones, the event loop
+                // runs first: a fast client doesn't have the worker to itself
+                $chunk = $this->readMoreBody($size, 0 === $this->fullReads % self::BURST);
+                if ('' === $chunk) {
                     throw new IOException('Connection closed by the client');
                 }
             } catch (IOException|TimeoutException $e) {
@@ -547,19 +539,9 @@ final class NativeHttpConnection
             return $this->readBody($max, \PHP_INT_MAX); // from the buffer only
         }
         while (!$this->draining && !$this->closed) {
-            $chunk = @\fread($this->socket, \min($max, self::READ_SIZE));
-            if (false === $chunk) {
-                throw $this->ioError = new IOException('Connection reset by the client');
-            }
-            if ('' !== $chunk) {
-                return $chunk;
-            }
-            if (\feof($this->socket)) {
-                break;
-            }
             $this->reader = \Fiber::getCurrent();
             try {
-                phasync::readable($this->socket, \PHP_FLOAT_MAX);
+                return $this->conn->read(\min($max, self::READ_SIZE)); // '' at the end
             } catch (CancelledException $e) {
                 if (!$this->draining && !$this->closed) {
                     throw $e; // not drain()'s, nor serve()'s
@@ -583,7 +565,7 @@ final class NativeHttpConnection
     {
         if (!$this->closed) {
             $this->ioError ??= new IOException('The application closed the connection');
-            @\stream_socket_shutdown($this->socket, \STREAM_SHUT_RDWR);
+            $this->conn->close();
         }
     }
 
@@ -627,49 +609,57 @@ final class NativeHttpConnection
      */
     public function clientClosed(): bool
     {
-        return \strlen($this->buffer) === $this->offset && '' === @\stream_socket_recvfrom($this->socket, 1, \STREAM_PEEK);
+        return \strlen($this->buffer) === $this->offset && $this->conn->eof();
     }
 
     /**
-     * Wait until more of a request body can be read: within the client's allowance (see
-     * BODY_TIMEOUT), and when skipping an unread body, by its deadline. After a 101 (the
+     * Up to $size more bytes of a request body, waiting for them: within the client's allowance
+     * (see BODY_TIMEOUT), and when skipping an unread body, by its deadline. After a 101 (the
      * upgrade request's own body, sent after it) without either, and never closed to make room;
      * like readRaw(), drain() wakes that wait, also one that began before the 101 (the timeout
-     * it began with then just starts it again), and once draining the socket is not waited on:
-     * the tunnel's input ends (RequestBody::take()).
+     * it began with then just starts it again), and once draining the connection is not waited
+     * on: the tunnel's input ends (RequestBody::take()). '' when the client closed its side.
      *
      * @throws IOException|TimeoutException
      * @throws CancelledException after a 101, when the server drains
      */
-    private function awaitBody(): void
+    private function readMoreBody(int $size, bool $yield = false): string
     {
-        $start   = \microtime(true);
-        $timeout = $this->bodyAllowance;
-        if ($this->upgraded) {
-            if ($this->draining) {
-                throw new CancelledException('The server drains');
+        while (true) {
+            $start   = \microtime(true);
+            $timeout = $this->bodyAllowance;
+            if ($this->upgraded) {
+                if ($this->draining) {
+                    throw new CancelledException('The server drains');
+                }
+                $timeout = \PHP_FLOAT_MAX;
+            } elseif (null === $this->discardUntil) {
+                $this->reclaimable = self::BODY;
+            } else {
+                $this->reclaimable = self::ANSWERED;
+                $timeout           = \min($timeout, $this->discardUntil - $start);
             }
-            $timeout = \PHP_FLOAT_MAX;
-        } elseif (null === $this->discardUntil) {
-            $this->reclaimable = self::BODY;
-        } else {
-            $this->reclaimable = self::ANSWERED;
-            $timeout           = \min($timeout, $this->discardUntil - $start);
-        }
-        $this->reader = \Fiber::getCurrent();
-        try {
-            phasync::readable($this->socket, \max(0.0, $timeout));
-        } catch (TimeoutException $e) {
-            if (!$this->upgraded) {
-                throw $e;
-            }
-            // The 101 went out during the wait: no HTTP timeout applies any more
-        } finally {
-            $this->reclaimable    = 0;
-            $this->bodyAllowance -= \microtime(true) - $start;
-            $this->reader         = null;
-            if ($this->closed && !self::$exiting) {
-                phasync::raiseFlag($this); // serve() waits to close the socket
+            // The reader is known before anything waits: serve() and settle() must not read too
+            $this->reader = \Fiber::getCurrent();
+            try {
+                if ($yield) {
+                    $yield = false;
+                    phasync::sleep();
+                }
+
+                return $this->conn->read($size, \max(0.0, $timeout - (\microtime(true) - $start)));
+            } catch (TimeoutException $e) {
+                if (!$this->upgraded) {
+                    throw $e;
+                }
+                // The 101 went out during the wait: no HTTP timeout applies any more
+            } finally {
+                $this->reclaimable    = 0;
+                $this->bodyAllowance -= \microtime(true) - $start;
+                $this->reader         = null;
+                if ($this->closed && !self::$exiting) {
+                    phasync::raiseFlag($this); // serve() waits to close the connection
+                }
             }
         }
     }
@@ -689,23 +679,14 @@ final class NativeHttpConnection
             $this->buffer = \substr($this->buffer, $this->offset);
             $this->offset = 0;
         }
-        while (true) {
-            // Not @ around the wait: silencing is process-wide, and would last while other
-            // coroutines run
-            null === $timeout ? $this->awaitBody() : phasync::readable($this->socket, $timeout);
-            $chunk = @\fread($this->socket, self::READ_SIZE);
-            if (false === $chunk || ('' === $chunk && \feof($this->socket))) {
-                throw new IOException('Connection closed by the client');
-            }
-            if ('' !== $chunk) {
-                // Appended in place: a head arriving a byte at a time is not copied whole each time
-                $this->buffer .= $chunk;
-                if (null === $timeout) {
-                    $this->bodyAllowance = \min(self::IO_TIMEOUT, $this->bodyAllowance + \strlen($chunk) / self::BODY_MIN_RATE);
-                }
-
-                return;
-            }
+        $chunk = null === $timeout ? $this->readMoreBody(self::READ_SIZE) : $this->conn->read(self::READ_SIZE, $timeout);
+        if ('' === $chunk) {
+            throw new IOException('Connection closed by the client');
+        }
+        // Appended in place: a head arriving a byte at a time is not copied whole each time
+        $this->buffer .= $chunk;
+        if (null === $timeout) {
+            $this->bodyAllowance = \min(self::IO_TIMEOUT, $this->bodyAllowance + \strlen($chunk) / self::BODY_MIN_RATE);
         }
     }
 
@@ -1001,12 +982,15 @@ final class NativeHttpConnection
     {
         if (!$keepAlive) {
             // No next request: the client sees the response end now, not once the body is read
-            @\stream_socket_shutdown($this->socket, \STREAM_SHUT_WR);
+            $this->conn->end();
         }
         $until = $this->upgraded ? \microtime(true) + self::LINGER_TIMEOUT : null;
         // A body released already is still there (its destructor keeps it for the skip below)
         if (null === $until && self::BODY_OPEN === $this->bodyState && null === $this->reader && ($body = $held->get())?->absorbable(self::DISCARD_LIMIT)) {
             $body->absorb(self::DISCARD_LIMIT);
+            // A read of the body that waited for this goes first, before the next request: the
+            // next head may be here already, and reading it doesn't wait
+            phasync::sleep();
         }
         unset($body);
         $this->settling = true;
@@ -1300,7 +1284,7 @@ final class NativeHttpConnection
         $piece ??= $body->read($max);
         for ($wait = 0.001; '' === $piece && !$body->eof(); $wait = \min($wait * 2, 0.05)) {
             phasync::sleep($wait);
-            if (!$this->upgraded && \feof($this->socket)) {
+            if (!$this->upgraded && $this->conn->eof()) {
                 throw $this->ioError = new IOException('Connection closed by the client');
             }
             $piece = $body->read($max);
@@ -1322,7 +1306,10 @@ final class NativeHttpConnection
      */
     private function writeError(int $status, string $reason): void
     {
-        @\fwrite($this->socket, "HTTP/1.1 $status $reason\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        try {
+            $this->conn->write("HTTP/1.1 $status $reason\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", 0.0);
+        } catch (IOException|TimeoutException) {
+        }
         $this->linger = true;
     }
 
@@ -1332,17 +1319,7 @@ final class NativeHttpConnection
     private function write(string $data): void
     {
         try {
-            while (true) {
-                $written = @\fwrite($this->socket, $data);
-                if (false === $written) {
-                    throw new IOException('Connection closed by the client');
-                }
-                if ($written === \strlen($data)) {
-                    return;
-                }
-                $data = \substr($data, $written);
-                phasync::writable($this->socket, $this->upgraded ? \PHP_FLOAT_MAX : self::IO_TIMEOUT);
-            }
+            $this->conn->write($data, $this->upgraded ? null : self::IO_TIMEOUT);
         } catch (IOException|TimeoutException $e) {
             throw $this->ioError = $e;
         }

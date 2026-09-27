@@ -64,7 +64,7 @@ function serve_in_process(RequestHandlerInterface $handler, Closure $client, ?Ps
         }
         stream_set_blocking($server, false);
         stream_set_blocking($conn, false);
-        phasync::go((new NativeHttpConnection($server, '127.0.0.1:1', $handler, $logger ?? new Psr\Log\NullLogger()))->serve(...));
+        phasync::go((new NativeHttpConnection(new phasync\Net\StreamDuplex($server), '127.0.0.1:1', $handler, $logger ?? new Psr\Log\NullLogger()))->serve(...));
         try {
             return $client($conn);
         } finally {

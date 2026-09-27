@@ -963,7 +963,7 @@ test('pipelined requests already buffered let the worker\'s other coroutines run
                 $gap = max($gap, ($now = hrtime(true)) - $last);
             }
         });
-        phasync::go((new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve(...));
+        phasync::go((new Swerve\Http\NativeHttpConnection(new phasync\Net\StreamDuplex($server), '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve(...));
         $received = '';
         while (substr_count($received, 'HTTP/1.1 200') < 100) {
             $received .= fread(phasync::readable($client, 5), 65536);
@@ -1007,7 +1007,7 @@ test('a request body the kernel already holds is read without an event-loop wait
                 phasync::sleep();
             }
         });
-        phasync::go((new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve(...));
+        phasync::go((new Swerve\Http\NativeHttpConnection(new phasync\Net\StreamDuplex($server), '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve(...));
         stream_set_blocking($client, false);
         $received = '';
         while (!feof($client)) {
@@ -1168,7 +1168,7 @@ test('a request head arriving a byte at a time takes linear time, not quadratic'
             OneByteStream::$out = '';
             $start              = hrtime(true);
             // In the event loop, as always: the application runs in a coroutine of its own
-            phasync::run(static fn () => (new Swerve\Http\NativeHttpConnection(fopen('one-byte://', 'r+'), '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve());
+            phasync::run(static fn () => (new Swerve\Http\NativeHttpConnection(new phasync\Net\StreamDuplex(fopen('one-byte://', 'r+')), '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve());
             $best = min($best, hrtime(true) - $start);
             expect(OneByteStream::$out)->toStartWith('HTTP/1.1 200');
         }

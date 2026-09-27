@@ -984,7 +984,7 @@ test('drain answers a request that reached an idle keep-alive connection before 
         [$server, $client] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
         stream_set_blocking($server, false);
         stream_set_blocking($client, false);
-        $connection = new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger());
+        $connection = new Swerve\Http\NativeHttpConnection(new phasync\Net\StreamDuplex($server), '127.0.0.1:1', $handler, new Psr\Log\NullLogger());
         phasync::go($connection->serve(...));
         fwrite($client, "GET /1 HTTP/1.1\r\nHost: test\r\n\r\n");
         phasync::sleep(0.05);
