@@ -2,33 +2,25 @@
 
 ![SWERVE](swerve-logo.png)
 
-**WebSockets for PHP, in your own controllers.** A WebSocket is a route like any other: it has
-the request, the route and the logged-in user at hand, and the connection is a loop you write
-top to bottom.
+**WebSockets in PHP, solved.**
 
 ```php
 public function chat(ServerRequestInterface $request): ResponseInterface
 {
-    $user = $request->getAttribute('user');
-
-    return WebSocket::from($request, function (WebSocket $ws) use ($user) {
-        foreach ($ws as $message) {                  // until the browser leaves
-            $ws->send("$user->name said: $message");
+    return WebSocket::from($request, function (WebSocket $ws) {
+        foreach ($ws as $message) {
+            $ws->send("echo: $message");
         }
     });
 }
 ```
 
-The same server, port and process serve your pages and your WebSockets, and
-[publish/subscribe](docs/publish-subscribe.md) reaches the connections in every worker: no
-separate WebSocket server, no broker, no client SDK. Adapters bring it to
-[Laravel](https://github.com/phasync/swerve-laravel),
+Confirmed both ways, with tests, in [Laravel](https://github.com/phasync/swerve-laravel),
 [Symfony](https://github.com/phasync/swerve-symfony), [Yii](https://github.com/phasync/swerve-yii),
 [CakePHP](https://github.com/phasync/swerve-cakephp),
 [Spiral](https://github.com/phasync/swerve-spiral),
-[CodeIgniter](https://github.com/phasync/swerve-codeigniter) and
-[Laminas](https://github.com/phasync/swerve-laminas); Slim, Mezzio and other PSR-15 frameworks
-need none.
+[CodeIgniter](https://github.com/phasync/swerve-codeigniter),
+[Laminas](https://github.com/phasync/swerve-laminas), and Slim and other PSR-15 frameworks.
 
 Swerve is a PHP application server, built on [phasync](https://github.com/phasync/phasync)
 coroutines. Your application stays loaded between requests, every worker serves many requests
