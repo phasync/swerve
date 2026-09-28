@@ -110,3 +110,42 @@ test('WebSocket: a drain (shutdown) closes open connections with 1001', function
     swerve_wait($process, 5);
     expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
 });
+
+test('WebSocket: a callback that only sends (a subscription forwarded) gets every publish, and ends when its client leaves', function () {
+    [$process, $addr, $log] = swerve_start(workers: 2);
+    try {
+        $clients = [];
+        for ($i = 0; $i < 8; ++$i) {
+            $clients[] = ws_connect($addr, '/websocket-news');
+        }
+        usleep(200_000); // every callback subscribed
+        expect(probe($addr, '/publish?topic=news&m=first'))->toBe('published');
+        expect(probe($addr, '/publish?topic=news&m=second'))->toBe('published');
+        foreach ($clients as $conn) {
+            expect([ws_read($conn), ws_read($conn)])->toBe([[1, 'first'], [1, 'second']]);
+        }
+        $live = static function () use ($addr): int {
+            $seen = [];
+            for ($i = 0; $i < 40 && count($seen) < 2; ++$i) {
+                [$pid, $n]  = json_decode((string) probe($addr, '/news-live'), true);
+                $seen[$pid] = $n;
+            }
+
+            return array_sum($seen);
+        };
+        expect($live())->toBe(8);
+
+        // Half leave without a word, half say goodbye: every callback ends either way
+        foreach ($clients as $i => $conn) {
+            $i % 2 ? ws_send($conn, 8, pack('n', 1000)) : fclose($conn);
+        }
+        $deadline = microtime(true) + 3;
+        while ($live() > 0 && microtime(true) < $deadline) {
+            usleep(50_000);
+        }
+        expect($live())->toBe(0);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
+});

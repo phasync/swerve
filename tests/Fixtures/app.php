@@ -329,6 +329,9 @@ return new class($version) implements RequestHandlerInterface {
     /** /sse-beat producers still running. */
     private int $sseLive = 0;
 
+    /** WebSocket callbacks of /websocket-news still running, see /news-live. */
+    private int $newsLive = 0;
+
     public function __construct(private string $version)
     {
     }
@@ -341,6 +344,18 @@ return new class($version) implements RequestHandlerInterface {
             '/hello'  => new Response(200, ['Content-Type' => 'text/plain'], 'Hello'),
             '/echo'   => new Response(200, ['Content-Type' => 'text/plain'], (string) $request->getBody()),
             '/big'    => new Response(200, ['Content-Type' => 'text/plain'], \str_repeat('x', (int) $query['n'])),
+            // A WebSocket that only sends: what is published to 'news' goes to the browser
+            '/websocket-news' => WebSocket::from($request, function (WebSocket $ws) {
+                ++$this->newsLive;
+                try {
+                    foreach (Swerve::subscribe('news') as $message) {
+                        $ws->send($message);
+                    }
+                } finally {
+                    --$this->newsLive;
+                }
+            }),
+            '/news-live' => new Response(200, [], \json_encode([\getmypid(), $this->newsLive])),
             // Swerve::cache(): ?k= and ?v= (JSON), ?ttl= seconds; answers with the worker's pid
             '/cache-set' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->set($query['k'], \json_decode($query['v'], true), isset($query['ttl']) ? (int) $query['ttl'] : null)])),
             '/cache-get' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->get($query['k'], 'missing')])),
