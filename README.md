@@ -11,6 +11,50 @@ at once, and request and response bodies stream.
 **[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
 [Server-Sent Events](examples/sse-chat) and over [WebSockets](examples/websocket-chat).
 
+## Why swerve
+
+PHP-FPM builds your application from nothing for every request (autoloader, framework,
+container, database connection), runs one request per process, and throws it all away. swerve
+keeps the application loaded in long-running workers, and each worker serves thousands of
+requests and connections at once on [phasync](https://github.com/phasync/phasync) coroutines.
+
+- **Boot once, serve forever.** The framework, routes and connection pools are built once per
+  worker. A Slim route costs swerve 3–7% over a bare handler; Express costs Node 30–50%.
+- **Waiting is free.** While one request waits for the database or an API, the same worker serves
+  others. Your handler stays ordinary sequential PHP: no promises, no callbacks.
+- **Connections that stay open.** Streaming request and response bodies, Server-Sent Events,
+  WebSockets, and [publish/subscribe](docs/publish-subscribe.md) between workers, so live
+  features need no separate Node or Go service.
+- **Isolated requests.** Each request runs in a phasync context of its own, which the coroutines it
+  starts share, so request-scoped state stays separate even with thousands in flight.
+- **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
+  workers that grow are recycled, and reloads roll one worker at a time.
+
+Measured on one 56-core server (56 workers or all cores), hello world over HTTP/1.1 with
+keep-alive, load from a separate machine, in requests per second. Go is shown in its fastest
+process layout (NUMA-pinned processes); its default single process is slower.
+
+| Connections | swerve + phasync-ext | swerve + Slim | Node http | Node + Express | Go net/http |
+|---|---:|---:|---:|---:|---:|
+| 64 | 193,041 | 187,861 | 132,146 | 67,446 | 157,249 |
+| 1,024 | 177,443 | 168,758 | 136,837 | 92,365 | 161,388 |
+| 10,000 | 139,988 | 132,130 | 112,588 | 85,381 | 124,916 |
+
+### Coming from PHP-FPM
+
+1. **Already using phasync under FPM?** That code runs unchanged in swerve: the coroutines you
+   started inside one request now also share the worker with other requests.
+2. **Keep per-request state per request.** A worker runs many requests at once, so static
+   properties and globals are shared between them. Read request data from the PSR-7 request, not
+   from `$_GET` or `$_SESSION`, unless your framework maps those per request, as mini does. See
+   [How swerve runs your application](docs/how-it-runs.md).
+3. **Return a PSR-15 request handler** from `swerve.php`: a Slim app, mini's dispatcher, or any
+   other PSR-15 stack.
+4. **Load [phasync-ext](https://github.com/phasync/phasync-ext)** in production. Blocking calls in
+   libraries you did not write (PDO, mysqli, curl, Guzzle, file and DNS functions) then wait as a
+   coroutine instead of stalling the worker, and a worker can hold far more than 1,024
+   connections.
+
 ## Getting started
 
 Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions.

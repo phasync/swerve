@@ -42,10 +42,12 @@ A call that blocks the process, instead of letting phasync switch coroutines, st
   `mail()`
 - CPU-heavy work: a long loop, image processing, a big `json_decode()`
 
-With [phasync-ext](production.md#phasync-ext) loaded, most of PHP's stream I/O no longer
-blocks the process: inside a coroutine, `fread()`, `fwrite()`, `fgets()` and friends on
-blocking streams, file reads, DNS lookups, `sleep()` and `usleep()` wait as a coroutine
-instead. Database client libraries, `curl` and CPU-bound code still block.
+With [phasync-ext](production.md#phasync-ext) loaded, almost all of that waits as a coroutine
+instead of blocking the process: sockets and TLS, mysqli and PDO (over the network), `curl_exec()`
+and curl-multi loops such as Guzzle's, `file_get_contents('https://...')`, pipes and child
+processes, file and DNS functions, `sleep()` and `usleep()`. The
+[extension's README](https://github.com/phasync/phasync-ext#readme) has the full list.
+CPU-bound code still blocks, and so does I/O in extensions that bypass PHP's streams.
 
 What that means in practice:
 

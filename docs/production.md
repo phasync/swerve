@@ -3,21 +3,22 @@
 ## phasync-ext
 
 [phasync-ext](https://github.com/phasync/phasync-ext) is an optional PHP extension, with
-prebuilt binaries for PHP 8.3 to 8.5 on Linux. Swerve loads it by itself when it is installed:
+prebuilt binaries for PHP 8.2 to 8.5 on Linux. Swerve loads it by itself when it is installed:
 
 ```bash
 composer require phasync/phasync-ext
-vendor/bin/swerve --version     # ... phasync-ext 0.4.0-alpha17
+vendor/bin/swerve --version     # ... phasync-ext 0.5.0
 ```
 
 With it:
 
-- A worker is not limited to about 1,000 open connections (PHP's own `stream_select()` fails for
-  file descriptors of 1024 and up; see sizing below).
-- Code that is not written for phasync cooperates: inside a coroutine, `fread()`, `fwrite()`,
-  `fgets()` on blocking streams, file reads, DNS lookups, `sleep()` and `usleep()` let other
-  requests run instead of blocking the worker. Database client libraries, `curl` and CPU-bound
-  code still block. See [the rule](how-it-runs.md#the-rule-never-block-a-worker).
+- A worker waits on its sockets with epoll, and is not limited to about 1,000 open connections
+  (PHP's own `stream_select()` fails for file descriptors of 1024 and up; see sizing below).
+  At 50,000 connections a hello-world worker pool served 4 times as many requests as without it.
+- Code that is not written for phasync cooperates: inside a coroutine, sockets and TLS, mysqli and
+  PDO, `curl_exec()` and Guzzle, pipes, file and DNS functions, `sleep()` and `usleep()` let other
+  requests run instead of blocking the worker. CPU-bound code still blocks. See
+  [the rule](how-it-runs.md#the-rule-never-block-a-worker).
 
 Your application behaves the same with and without it; it only waits better.
 
