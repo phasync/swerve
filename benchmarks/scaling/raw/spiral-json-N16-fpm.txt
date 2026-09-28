@@ -1,0 +1,16 @@
+Running 10s test @ http://192.168.10.15:19100/swerve/json
+  32 threads and 256 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    77.72ms    4.21ms  87.59ms   96.30%
+    Req/Sec   102.74     31.36   161.00     76.85%
+  Latency Distribution
+     50%   77.70ms
+     75%   78.68ms
+     90%   79.92ms
+     99%   84.21ms
+  33104 requests in 10.09s, 11.56MB read
+Requests/sec:   3280.43
+Transfer/sec:      1.15MB
+client: busy=2% max_cpu_busy=14% max_softirq=8%(cpu28)
+server: busy=49% max_cpu_busy=80% max_softirq=1%(cpu27)
+qdisc_drops: 0

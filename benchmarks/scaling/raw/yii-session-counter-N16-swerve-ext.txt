@@ -1,0 +1,16 @@
+Running 10s test @ http://192.168.10.15:19100/counter
+  32 threads and 256 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     0.90ms  394.94us   8.59ms   72.77%
+    Req/Sec     8.76k     0.98k   17.57k    70.44%
+  Latency Distribution
+     50%  819.00us
+     75%    1.09ms
+     90%    1.48ms
+     99%    2.11ms
+  2817693 requests in 10.10s, 485.26MB read
+Requests/sec: 279019.89
+Transfer/sec:     48.05MB
+client: busy=27% max_cpu_busy=93% max_softirq=77%(cpu28)
+server: busy=50% max_cpu_busy=97% max_softirq=8%(cpu29)
+qdisc_drops: 0

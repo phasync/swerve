@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+Set-Cookie: XSRF-TOKEN=eyJpdiI6ImJGai93M2Z4cFRtSjZuelFGdElzMkE9PSIsInZhbHVlIjoiK2RrV2xFSGs
+Set-Cookie: laravel-session=eyJpdiI6IjBXSi9BZ21rSjd1WlFYQzNraTVRdWc9PSIsInZhbHVlIjoiVFY3Sn
+{"n":3,"pid":1306705,"driver":"database"}
+HTTP/1.1 200 OK
+Set-Cookie: XSRF-TOKEN=eyJpdiI6Im9vaFNSQ0RXTFJFUjFOV2c5YXprY1E9PSIsInZhbHVlIjoiZ1gxUU9COGN
+Set-Cookie: laravel-session=eyJpdiI6IllVc1RUVXZJbUMycnJST0ZjR3ZiMFE9PSIsInZhbHVlIjoiL3FwVH
+{"n":5,"pid":1306705,"driver":"database"}
+sessions: 2048

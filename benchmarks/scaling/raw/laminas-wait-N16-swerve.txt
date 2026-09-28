@@ -1,0 +1,16 @@
+Running 10s test @ http://192.168.10.15:19100/test/usleep?ms=10
+  32 threads and 256 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   166.39ms   46.09ms 802.32ms   67.77%
+    Req/Sec    47.86     16.52   120.00     62.10%
+  Latency Distribution
+     50%  167.75ms
+     75%  189.49ms
+     90%  220.24ms
+     99%  231.31ms
+  15414 requests in 10.10s, 2.00MB read
+Requests/sec:   1526.39
+Transfer/sec:    202.72KB
+client: busy=1% max_cpu_busy=6% max_softirq=1%(cpu28)
+server: busy=3% max_cpu_busy=13% max_softirq=0%(cpu0)
+qdisc_drops: 0
