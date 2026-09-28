@@ -8,13 +8,12 @@
  *     vendor/bin/swerve --public=examples/websocket-chat/public examples/websocket-chat/swerve.php
  */
 
-require_once __DIR__ . '/WebSocket.php';
-
 use phasync\CancelledException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Swerve\Http\Message\Response;
+use Swerve\Http\WebSocket;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
 
@@ -25,7 +24,7 @@ return new class implements RequestHandlerInterface {
             return new Response('Not found', [], 404);
         }
 
-        return WebSocket::upgrade($request, static function (WebSocket $ws) {
+        return WebSocket::from($request, static function (WebSocket $ws) {
             // Everything published to the room goes to this browser, from a coroutine of its own
             $subscription = Swerve::subscribe('chat');
             $forward      = phasync::go(static function () use ($ws, $subscription) {
@@ -41,7 +40,7 @@ return new class implements RequestHandlerInterface {
             });
 
             // What this browser sends goes to the room
-            while (null !== ($message = $ws->receive())) {
+            foreach ($ws as $message) {
                 $data = \json_decode($message, true);
                 $name = \trim((string) ($data['name'] ?? ''));
                 $text = \trim((string) ($data['text'] ?? ''));

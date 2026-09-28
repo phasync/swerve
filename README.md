@@ -207,8 +207,9 @@ configuration that uses it.
 In HTTP mode swerve deals in two streams, and nothing else. The request's body is the unread
 request body, still connected to the socket. The response's body is read piece by piece and
 sent as it comes. swerve doesn't care when or where either is read or written, so WebSocket,
-Server-Sent Events and other protocols are ordinary PSR-7 responses that the application builds
-on the two streams. swerve itself has no WebSocket or SSE code.
+Server-Sent Events and other protocols are ordinary PSR-7 responses built on the two streams.
+`Swerve\Http\WebSocket` is one, and `Swerve\Http\ProtocolUpgrade`, its base, is there for
+protocols of your own.
 
 - **Reading after the response.** The request body may be read after `handle()` returned, from
   any coroutine, also while the response is being written. The next request on the connection
@@ -264,24 +265,16 @@ on the two streams. swerve itself has no WebSocket or SSE code.
   deadline bounds them.
 
 ```php
-use phasync\Psr\UnbufferedStream;
+use Swerve\Http\WebSocket;
 
-// A WebSocket handler: check the handshake, answer 101, speak the protocol on the two streams
-$out = new UnbufferedStream(65536, PHP_FLOAT_MAX);
-phasync::go(function () use ($request, $out) {
-    $in = $request->getBody();
-    while ('' !== ($bytes = $in->read(65536))) {
-        // parse frames from $bytes, $out->append() the answers
+return WebSocket::from($request, function (WebSocket $ws) {
+    foreach ($ws as $message) {        // ends when the connection closes, or swerve drains
+        $ws->send("echo: $message");
     }
-    $out->append($closeFrame); // EOF: the client left, or the server drains
-    $out->end();
 });
-
-return new Response(101, ['Upgrade' => 'websocket', 'Connection' => 'Upgrade', 'Sec-WebSocket-Accept' => $accept], $out);
 ```
 
-`tests/Fixtures/app.php` has a complete minimal WebSocket server (`fixture_ws()`) written this
-way.
+See [Realtime](docs/realtime.md#websockets) for how the streams behave underneath.
 
 ## Publish and subscribe
 

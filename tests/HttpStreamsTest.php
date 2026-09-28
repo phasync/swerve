@@ -875,7 +875,7 @@ test('closing the request body ends a tunnel, also while its client stopped read
     native_stop($process);
 });
 
-test('a WebSocket application works through swerve, which has no WebSocket code', function () {
+test('a WebSocket written on the two streams alone works through swerve', function () {
     [$master, $addr] = native_start(workers: 1);
     try {
         $conn = ws_connect($addr, '/ws');
@@ -907,8 +907,10 @@ test('a WebSocket application works through swerve, which has no WebSocket code'
         }
         expect([feof($conn), $errors])->toBe([true, []]);
 
+        // The server knows no WebSocket: only the application-side classes speak it
         exec('grep -rilE ' . escapeshellarg('sec-websocket|258EAFA5|websocket') . ' ' . escapeshellarg(__DIR__ . '/../src'), $files);
-        expect($files)->toBe([]);
+        sort($files);
+        expect(array_map(basename(...), $files))->toBe(['ProtocolUpgrade.php', 'WebSocket.php']);
     } finally {
         native_stop($master);
     }

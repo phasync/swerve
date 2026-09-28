@@ -527,7 +527,7 @@ function read_until($conn, string $needle, float $timeout = 5): string
 
 /*
  * A WebSocket client (RFC 6455), minimal and written from the specification: the server side
- * is the fixture's /ws, an application like any other; swerve has no WebSocket code.
+ * is the fixture's /ws, written on the two streams alone, or /websocket, swerve's WebSocket.
  */
 
 /**

@@ -10,6 +10,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\Http\WebSocket;
 use Swerve\Swerve;
 
 /*
@@ -627,6 +628,19 @@ return new class($version) implements RequestHandlerInterface {
                 return new Response(101, ['Upgrade' => 'x', 'Connection' => 'Upgrade'], $out);
             })(),
             '/ws'             => fixture_ws($request, !empty($query['bye'])),
+            // swerve's WebSocket: echoes messages as they came (text or binary); "bye" ends the
+            // callback (a close with 1000), "throw" makes it throw (1011)
+            '/websocket'      => WebSocket::from($request, static function (WebSocket $ws) {
+                foreach ($ws as $message) {
+                    if ('bye' === $message) {
+                        return;
+                    }
+                    if ('throw' === $message) {
+                        throw new RuntimeException('the WebSocket callback failed');
+                    }
+                    $ws->isBinary() ? $ws->sendBinary($message) : $ws->send($message);
+                }
+            }),
             // Server-Sent Events: ?n= events, ?ms= apart
             '/sse'            => (static function () use ($query) {
                 $out = new UnbufferedStream(65536, PHP_FLOAT_MAX);

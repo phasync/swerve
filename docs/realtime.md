@@ -2,8 +2,8 @@
 
 A request in swerve may stay open as long as it likes: the worker serves other requests
 meanwhile, since a waiting coroutine costs little (tens of kilobytes). That makes pushing to
-the browser simple. Swerve has no WebSocket or SSE code of its own; it gives every request
-two streams, and protocols are written on them:
+the browser simple. Swerve gives every request two streams, and protocols are written on
+them; `Swerve\Http\WebSocket` is one, written that way:
 
 - the **request body**: what the client sends, read as it arrives;
 - the **response body**: what goes back, sent as it is written.
@@ -92,13 +92,16 @@ A WebSocket starts as an HTTP request with `Upgrade: websocket`. When the applic
 everything the client sends and the response body everything that goes back, raw: no
 HTTP framing, no HTTP timeouts, no size limit.
 
-[`examples/websocket-chat/WebSocket.php`](../examples/websocket-chat/WebSocket.php) is a small
-complete WebSocket implementation (RFC 6455) on those two streams: handshake, framing,
-fragmented messages, ping and pong, close codes, and a limit on message size. A WebSocket
-package for swerve is planned; until then, copy it. With it:
+`Swerve\Http\WebSocket` speaks the protocol (RFC 6455): the handshake, framing, fragmented
+messages, ping and pong, close codes, UTF-8 checks, and a limit on message size (1 MiB). The
+callback runs in a coroutine of its own after the 101, and the connection closes when it
+returns (1000) or throws (1011, logged). One coroutine receives; any may send. Swerve pings
+every 15 s, so proxies keep a quiet connection open. The chat example:
 
 ```php
-return WebSocket::upgrade($request, static function (WebSocket $ws) {
+use Swerve\Http\WebSocket;
+
+return WebSocket::from($request, static function (WebSocket $ws) {
     $subscription = Swerve::subscribe('chat');
     $forward      = phasync::go(static function () use ($ws, $subscription) {
         try {
@@ -111,7 +114,7 @@ return WebSocket::upgrade($request, static function (WebSocket $ws) {
         }
     });
 
-    while (null !== ($message = $ws->receive())) {   // null: closed
+    foreach ($ws as $message) {                        // ends when the connection closes
         Swerve::publish('chat', $message);             // validate it first, see the example
     }
 
@@ -121,7 +124,14 @@ return WebSocket::upgrade($request, static function (WebSocket $ws) {
 });
 ```
 
-How the two streams behave, for writing your own protocol:
+`$ws->receive()` returns the next message, or null once closed; `isBinary()` tells a binary
+message from text, `sendBinary()` sends one, and `close($code)` says goodbye.
+
+For another protocol, extend `Swerve\Http\ProtocolUpgrade`, the base of `WebSocket`: implement
+`handshake()` (the 101's headers, or a refusal), and speak the protocol with its `read()`,
+`write()` and `end()`; `YourProtocol::from($request, $callback)` then works the same way.
+
+How the two streams behave, for writing a protocol directly on them:
 
 - **Answering 101**: set `Upgrade` and `Connection: Upgrade` yourself; swerve sends the
   headers as given. The response body's `read()` should wait for data (an `UnbufferedStream`
