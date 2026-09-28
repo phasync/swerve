@@ -94,6 +94,13 @@ abstract class ProtocolUpgrade
             return $this->in->read($length);
         } catch (IOException|HttpError) {
             return '';
+        } catch (\RuntimeException $e) {
+            // A request body reports a broken connection so, as PSR-7 says read() must
+            if (!$e->getPrevious() instanceof IOException) {
+                throw $e;
+            }
+
+            return '';
         }
     }
 

@@ -149,3 +149,22 @@ test('WebSocket: a callback that only sends (a subscription forwarded) gets ever
     }
     expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
 });
+
+test('WebSocket: a client that resets its connection (no close) ends the callback, without an error in the log', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-news');
+        usleep(100_000);
+        $socket = socket_import_stream($conn);
+        socket_set_option($socket, SOL_SOCKET, SO_LINGER, ['l_onoff' => 1, 'l_linger' => 0]);
+        socket_close($socket); // a reset, as from a killed browser tab
+        $deadline = microtime(true) + 3;
+        while (json_decode((string) probe($addr, '/news-live'), true)[1] > 0 && microtime(true) < $deadline) {
+            usleep(50_000);
+        }
+        expect(json_decode((string) probe($addr, '/news-live'), true)[1])->toBe(0);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+});
