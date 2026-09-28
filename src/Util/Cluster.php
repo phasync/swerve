@@ -2,7 +2,9 @@
 
 namespace Swerve\Util;
 
+use phasync\Util\LruCache;
 use Psr\Log\LoggerInterface;
+use Swerve\Cache;
 
 /**
  * The master process: forks one worker per slot and supervises them until stopped.
@@ -64,6 +66,9 @@ final class Cluster
      * handover goes on at once.
      */
     public const ROUND_MIN = 0.02;
+
+    /** What Swerve::cache() holds, for every worker: see Cache. */
+    private LruCache $cache;
     /** Application load and listen: a worker not ready by then is killed as a failed start. */
     public const READY_TIMEOUT = 60.0;
     /** Ready this long, or having served: not part of a crash loop, and resets the slot's failures. */
@@ -133,7 +138,9 @@ final class Cluster
         private readonly float $watchdog,
         private readonly ?string $monitorDir,
         private readonly string $serving,
+        int $cacheBytes = 64 << 20,
     ) {
+        $this->cache = new LruCache(maxBytes: $cacheBytes);
         $this->masterPid = \posix_getpid();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
         if ('0' === \trim((string) @\file_get_contents('/proc/sys/net/ipv4/tcp_migrate_req'))) {
@@ -319,8 +326,21 @@ final class Cluster
             $w->lastSeen = $now;
             $w->in .= $bytes;
             $published = false;
-            $bytes     = Topics::parse($w->in, function (string $topic, string $message, string $frame) use (&$published) {
-                $published = true;
+            $bytes     = Topics::parse($w->in, function (string $topic, string $message, string $frame) use (&$published, $w) {
+                $published = true; // also a cache request: answered at once, and the next round waits for nothing
+                if (Cache::TOPIC === $topic) {
+                    $reply = Cache::serve($this->cache, $message, function (?array $keys) {
+                        $forget = Topics::frame(Cache::FORGET, \serialize($keys));
+                        foreach ($this->workers as $other) {
+                            if (WorkerProcess::STARTING !== $other->state) {
+                                $this->send($other, $forget); // one still starting has read nothing
+                            }
+                        }
+                    });
+                    $this->send($w, Topics::frame(Cache::TOPIC, $reply));
+
+                    return;
+                }
                 $this->publish($frame);
             });
             $this->onlyHeartbeats = $this->onlyHeartbeats && !$published && '' === \trim($bytes, '.');

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a5d24c1d47fcb99cd921fccd585cb610",
+    "content-hash": "5671d124f4a7859a729f906dbabf2c85",
     "packages": [
         {
             "name": "charm/options",
@@ -129,16 +129,16 @@
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.0-alpha11",
+            "version": "2.0.0-alpha12",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "cade1769505b0d078b2d53ab224059148b66b9b0"
+                "reference": "b70eec9bfb3525a0bc61b751b0f3b4fd71229d79"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/cade1769505b0d078b2d53ab224059148b66b9b0",
-                "reference": "cade1769505b0d078b2d53ab224059148b66b9b0",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/b70eec9bfb3525a0bc61b751b0f3b4fd71229d79",
+                "reference": "b70eec9bfb3525a0bc61b751b0f3b4fd71229d79",
                 "shasum": ""
             },
             "require": {
@@ -154,7 +154,7 @@
                 "pestphp/pest": "^2.34 || ^3.0"
             },
             "suggest": {
-                "phasync/phasync-ext": "Optional C extension: transparent async I/O hooks and a growable stream_select() with no FD_SETSIZE limit, CLI only. phasync works fully without it."
+                "phasync/phasync-ext": "Optional C extension: blocking I/O in existing code waits cooperatively, and epoll instead of stream_select(). Loads itself on the CLI; enable it in php.ini for PHP-FPM. phasync works fully without it."
             },
             "type": "library",
             "extra": {
@@ -188,9 +188,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha11"
+                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha12"
             },
-            "time": "2026-09-28T07:00:25+00:00"
+            "time": "2026-09-28T17:37:48+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -462,6 +462,57 @@
                 "source": "https://github.com/php-fig/log/tree/3.0.2"
             },
             "time": "2024-09-11T13:17:53+00:00"
+        },
+        {
+            "name": "psr/simple-cache",
+            "version": "3.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-fig/simple-cache.git",
+                "reference": "764e0b3939f5ca87cb904f570ef9be2d78a07865"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-fig/simple-cache/zipball/764e0b3939f5ca87cb904f570ef9be2d78a07865",
+                "reference": "764e0b3939f5ca87cb904f570ef9be2d78a07865",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.0.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "3.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Psr\\SimpleCache\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "PHP-FIG",
+                    "homepage": "https://www.php-fig.org/"
+                }
+            ],
+            "description": "Common interfaces for simple caching",
+            "keywords": [
+                "cache",
+                "caching",
+                "psr",
+                "psr-16",
+                "simple-cache"
+            ],
+            "support": {
+                "source": "https://github.com/php-fig/simple-cache/tree/3.0.0"
+            },
+            "time": "2021-10-29T13:26:27+00:00"
         }
     ],
     "packages-dev": [
@@ -2994,57 +3045,6 @@
                 "source": "https://github.com/php-fig/event-dispatcher/tree/1.0.0"
             },
             "time": "2019-01-08T18:20:26+00:00"
-        },
-        {
-            "name": "psr/simple-cache",
-            "version": "3.0.0",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/php-fig/simple-cache.git",
-                "reference": "764e0b3939f5ca87cb904f570ef9be2d78a07865"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/php-fig/simple-cache/zipball/764e0b3939f5ca87cb904f570ef9be2d78a07865",
-                "reference": "764e0b3939f5ca87cb904f570ef9be2d78a07865",
-                "shasum": ""
-            },
-            "require": {
-                "php": ">=8.0.0"
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "3.0.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Psr\\SimpleCache\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "PHP-FIG",
-                    "homepage": "https://www.php-fig.org/"
-                }
-            ],
-            "description": "Common interfaces for simple caching",
-            "keywords": [
-                "cache",
-                "caching",
-                "psr",
-                "psr-16",
-                "simple-cache"
-            ],
-            "support": {
-                "source": "https://github.com/php-fig/simple-cache/tree/3.0.0"
-            },
-            "time": "2021-10-29T13:26:27+00:00"
         },
         {
             "name": "ralouphie/getallheaders",

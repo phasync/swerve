@@ -13,7 +13,8 @@ Read in this order when you build an application on swerve:
    request and response bodies, static files, logging.
 4. [Realtime: Server-Sent Events and WebSockets](realtime.md): long-lived responses, 101
    upgrades, and two complete chat examples.
-5. [Publish and subscribe](publish-subscribe.md): messages between the workers.
+5. [Publish and subscribe](publish-subscribe.md): messages between the workers; and the
+   [shared cache](../README.md#shared-cache), `Swerve::cache()`.
 6. [Command line](command-line.md): every option.
 7. [Production](production.md): sizing, phasync-ext, systemd, Docker, nginx and TLS,
    reloads, limits.

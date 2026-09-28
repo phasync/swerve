@@ -280,6 +280,14 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
     }
 
     /**
+     * The cache every worker shares, held by the master: see Cache.
+     */
+    public static function cache(): \Psr\SimpleCache\CacheInterface
+    {
+        return Cache::instance();
+    }
+
+    /**
      * Whether this worker drains: it is shutting down, reloading or being recycled, and finishes
      * the requests in flight. Long responses should end soon: see docs/realtime.md.
      */

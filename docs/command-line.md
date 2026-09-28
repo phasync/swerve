@@ -28,6 +28,7 @@ Limits:
   --watchdog=<seconds>    Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
   --max-memory=<size|P%>  Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
   --max-requests=<n>      Recycle a worker after about n requests; 0 = off (default: 0)
+  --cache-size=<size>     The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G (default: 64M)
 
 Information:
   -h, --help              This help

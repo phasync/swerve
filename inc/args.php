@@ -134,6 +134,13 @@ return (function () {
         validator: fn ($value) => \ctype_digit((string) $value) ? null : 'A number of requests required',
     ));
 
+    $args->add('cacheSize', new Option(
+        '', 'cache-size', 'The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G',
+        default: '64M',
+        placeholder: 'size',
+        validator: fn ($value) => \preg_match('/^[1-9]\d*[KMG]?$/i', (string) $value) ? null : 'A size such as 64M required',
+    ));
+
     $args->section('Information');
     $args->add('help', new Flag('h', 'help', 'This help'));
     $args->add('version', new Flag('', 'version', 'The versions of swerve, PHP, phasync and phasync-ext'));

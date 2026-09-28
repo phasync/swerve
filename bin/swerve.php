@@ -188,6 +188,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(), $args->swervefile,
             \implode(', ', \array_map(static fn ($a) => ($fastcgi ? 'fastcgi://' : 'http://') . $a, $addresses)),
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
+        (int) \ini_parse_quantity($args->cacheSize),
     );
     $worker = $cluster->run();
     if (\is_int($worker)) {

@@ -341,6 +341,18 @@ return new class($version) implements RequestHandlerInterface {
             '/hello'  => new Response(200, ['Content-Type' => 'text/plain'], 'Hello'),
             '/echo'   => new Response(200, ['Content-Type' => 'text/plain'], (string) $request->getBody()),
             '/big'    => new Response(200, ['Content-Type' => 'text/plain'], \str_repeat('x', (int) $query['n'])),
+            // Swerve::cache(): ?k= and ?v= (JSON), ?ttl= seconds; answers with the worker's pid
+            '/cache-set' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->set($query['k'], \json_decode($query['v'], true), isset($query['ttl']) ? (int) $query['ttl'] : null)])),
+            '/cache-get' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->get($query['k'], 'missing')])),
+            '/cache-del' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->delete($query['k'])])),
+            // Many lookups at once from one request's coroutines: each gets its own answer
+            '/cache-many' => new Response(200, [], \json_encode((static function () {
+                $cache = Swerve::cache();
+                $cache->setMultiple(\array_combine(\array_map(fn ($i) => "many$i", \range(1, 50)), \range(1, 50)));
+                $coroutines = \array_map(fn ($i) => phasync::go(fn () => $cache->get("many$i")), \range(1, 50));
+
+                return \array_map(phasync::await(...), $coroutines);
+            })())),
             // Work after the response: writes "done" to $SWERVE_TEST_DIR/after-response ?ms= later
             '/after-response' => (static function () use ($query) {
                 phasync::go(static function () use ($query) {

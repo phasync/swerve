@@ -4,10 +4,11 @@
     "type": "library",
     "require": {
         "php": "^8.2",
-        "phasync/phasync": "^2.0.0-alpha11",
+        "phasync/phasync": "^2.0.0-alpha12",
         "charm/terminal": "^1.1.5",
         "psr/log": "^3.0",
         "psr/http-message": "^1.1 || ^2.0",
+        "psr/simple-cache": "^2.0 || ^3.0",
         "ext-pcntl": "*",
         "ext-posix": "*",
         "ext-sockets": "*",

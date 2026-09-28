@@ -6,6 +6,7 @@ use Closure;
 use Composer\Autoload\ClassLoader;
 use phasync;
 use Psr\Log\LoggerInterface;
+use Swerve\Cache;
 
 /**
  * A worker process's side of the supervision, see Cluster: tells the master it is alive
@@ -380,14 +381,19 @@ final class Worker
      */
     private function awaitMaster(): void
     {
-        $buffer = '';
+        $buffer            = '';
+        Cache::$listening = true;
         while (true) {
             $bytes = (string) \fread(phasync::readable($this->pipe, \PHP_FLOAT_MAX), 65536);
             if ('' === $bytes && \feof($this->pipe)) {
                 return;
             }
             $buffer .= $bytes;
-            $status = Topics::parse($buffer, static fn (string $topic, string $message) => Topics::deliver($topic, $message));
+            $status = Topics::parse($buffer, static fn (string $topic, string $message) => match ($topic) {
+                Cache::TOPIC  => Cache::reply($message),
+                Cache::FORGET => Cache::forget($message),
+                default       => Topics::deliver($topic, $message),
+            });
             if (\str_contains($status, 'L') && $this->logger instanceof Logger) {
                 $this->logger->reopen();
             }
