@@ -10,6 +10,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\Http\Virtual;
 use Swerve\Http\WebSocket;
 use Swerve\Swerve;
 
@@ -344,6 +345,23 @@ return new class($version) implements RequestHandlerInterface {
             '/hello'  => new Response(200, ['Content-Type' => 'text/plain'], 'Hello'),
             '/echo'   => new Response(200, ['Content-Type' => 'text/plain'], (string) $request->getBody()),
             '/big'    => new Response(200, ['Content-Type' => 'text/plain'], \str_repeat('x', (int) $query['n'])),
+            // Code written for PHP-FPM, run by Virtual (needs phasync-ext): a session counter, a header,
+            // a cookie, the request body, chunks ?ms= apart; ?exit=1 exits after the first chunk
+            '/virtual' => Virtual::run($request, static function () use ($query) {
+                \session_save_path(\sys_get_temp_dir());
+                \session_start();
+                $_SESSION['n'] = ($_SESSION['n'] ?? 0) + 1;
+                \http_response_code(201);
+                \header('X-Virtual: yes');
+                \setcookie('flavour', 'oat');
+                echo 'n=', $_SESSION['n'], ' body=', \file_get_contents('php://input'), ' sid=', \session_id(), "\n";
+                \flush();
+                if (!empty($query['exit'])) {
+                    exit(1);
+                }
+                \phasync::sleep((int) ($query['ms'] ?? 0) / 1000);
+                echo "last\n";
+            }),
             // A WebSocket that only sends: what is published to 'news' goes to the browser
             '/websocket-news' => WebSocket::from($request, function (WebSocket $ws) {
                 ++$this->newsLive;

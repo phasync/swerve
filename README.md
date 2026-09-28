@@ -347,6 +347,24 @@ $cache->set("user:$id", $user, 60);
 - Available once the worker serves, not while `swerve.php` loads. Without the master (swerve
   embedded in your own process), the cache is the process's own.
 
+## Code written for PHP-FPM
+
+With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-alpha10 or later),
+`Swerve\Http\Virtual::run()` runs code that echoes and calls `header()` as a request of its own:
+its output, status, headers, cookies and session become the PSR-7 response, streamed, and
+`exit()` ends the request, not the worker.
+
+```php
+return Virtual::run($request, static function () {
+    session_start();
+    echo 'Hello ', $_SESSION['name'] ?? 'stranger';
+});
+```
+
+`$_GET`, `$_POST`, `$_COOKIE` and `$_SERVER` are set from the request as it starts; they are
+shared by a worker's requests, like any global state, so code that reads them after waiting on
+I/O should run one request at a time.
+
 ## Supervision
 
 A master process starts the workers and looks after them. It never loads the application
