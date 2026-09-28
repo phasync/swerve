@@ -124,6 +124,13 @@ return WebSocket::from($request, static function (WebSocket $ws) {
 });
 ```
 
+Make the callback `static` when you write it in a controller method: a plain closure keeps
+`$this`, and with it the controller and often the whole application, alive for as long as the
+socket is open (measured in a Laminas controller: 380 KiB a socket, against 84 KiB).
+
+A callback that only sends, such as a loop over a subscription, ends when its client leaves:
+the connection is read all the time, and the callback is cancelled when it closes.
+
 `$ws->receive()` returns the next message, or null once closed; `isBinary()` tells a binary
 message from text, `sendBinary()` sends one, and `close($code)` says goodbye.
 

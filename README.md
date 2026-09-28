@@ -7,7 +7,7 @@
 ```php
 public function chat(ServerRequestInterface $request): ResponseInterface
 {
-    return WebSocket::from($request, function (WebSocket $ws) {
+    return WebSocket::from($request, static function (WebSocket $ws) {
         foreach ($ws as $message) {
             $ws->send("echo: $message");
         }
