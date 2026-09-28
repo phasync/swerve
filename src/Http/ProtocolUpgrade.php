@@ -126,6 +126,20 @@ abstract class ProtocolUpgrade
     }
 
     /**
+     * Send a few bytes at once, without waiting for a client that reads slowly: for a heartbeat
+     * sent to many connections from one coroutine. False once the output has ended.
+     */
+    protected function writeNow(string $bytes): bool
+    {
+        if (!$this->writable) {
+            return false;
+        }
+        $this->out->appendNow($bytes);
+
+        return true;
+    }
+
+    /**
      * No more bytes to send: the connection closes once those written are sent, after reading
      * the client's last bytes for a moment so that a goodbye arrives.
      */

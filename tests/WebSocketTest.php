@@ -168,3 +168,21 @@ test('WebSocket: a client that resets its connection (no close) ends the callbac
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
 });
+
+test('WebSocket: quiet connections are pinged every PING_INTERVAL seconds, by one coroutine for all', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $a = ws_connect($addr, '/websocket');
+        $b = ws_connect($addr, '/websocket-news');
+        foreach ([$a, $b] as $conn) {
+            stream_set_timeout($conn, (int) Swerve\Http\WebSocket::PING_INTERVAL + 3);
+            expect(ws_read($conn))->toBe([9, '']);
+            ws_send($conn, 10, '');
+        }
+        ws_send($a, 1, 'still here');
+        expect(ws_read($a))->toBe([1, 'still here']);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+});

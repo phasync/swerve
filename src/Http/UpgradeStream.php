@@ -45,6 +45,13 @@ final class UpgradeStream implements StreamInterface
         }
     }
 
+    /** Add bytes without waiting, even past the buffer's size: for a few bytes such as a ping. */
+    public function appendNow(string $bytes): void
+    {
+        $this->buffer .= $bytes;
+        phasync::raiseFlag($this->written);
+    }
+
     /** No more bytes: swerve closes the connection once the buffer is sent. */
     public function end(): void
     {

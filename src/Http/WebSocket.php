@@ -29,8 +29,8 @@ use Swerve\Http\Message\Response;
  *         $ws->send($message);
  *     }
  *
- * ends with its client. The server pings every PING_INTERVAL seconds, so proxies don't close a
- * quiet connection.
+ * ends with its client. The server pings every connection every PING_INTERVAL seconds, from
+ * one coroutine for all of them, so proxies don't close a quiet connection.
  */
 class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
 {
@@ -48,6 +48,10 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
 
     /** @var list<array{0: string, 1: bool}> */
     private array $inbox = [];
+
+    /** @var array<int, self> the open WebSockets of this process, see keepAlive() */
+    private static array $open = [];
+    private static bool $pinging = false;
 
     /** The reader saw the connection end: receive() returns null once the inbox is empty. */
     private bool $readerDone = false;
@@ -228,16 +232,8 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
                 phasync::raiseFlag($this); // the reader may wait for room nobody will make now
             }
         });
-        $keepalive = phasync::go(function () {
-            try {
-                while (!$this->closed) {
-                    phasync::sleep(static::PING_INTERVAL);
-                    $this->frame(9, '');
-                }
-            } catch (CancelledException) {
-                // The connection ended
-            }
-        });
+        self::$open[\spl_object_id($this)] = $this;
+        self::keepAlive();
         try {
             while (null !== ($message = $this->readMessage())) {
                 while (\count($this->inbox) >= self::INBOX && !$app->isTerminated()) {
@@ -251,14 +247,39 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
         } finally {
             $this->readerDone = true;
             phasync::raiseFlag($this);
-            if (!$keepalive->isTerminated()) {
-                phasync::cancel($keepalive);
-            }
+            unset(self::$open[\spl_object_id($this)]);
             if (!$app->isTerminated()) {
                 phasync::cancel($app);
             }
         }
         phasync::await($app); // its exception, if any, for swerve's log
+    }
+
+    /**
+     * Ping every open WebSocket of this process every PING_INTERVAL seconds, from one coroutine
+     * for all of them, which ends when none is open. A ping doesn't wait for a client that reads
+     * slowly: that one's own sends time out and give it up.
+     */
+    private static function keepAlive(): void
+    {
+        if (self::$pinging) {
+            return;
+        }
+        self::$pinging = true;
+        phasync::go(static function () {
+            try {
+                while (self::$open) {
+                    phasync::sleep(self::PING_INTERVAL);
+                    foreach (self::$open as $ws) {
+                        if (!$ws->closed) {
+                            $ws->writeNow("\x89\x00"); // a ping with no payload
+                        }
+                    }
+                }
+            } finally {
+                self::$pinging = false;
+            }
+        });
     }
 
     private function frame(int $opcode, string $payload): void
