@@ -54,3 +54,23 @@ test('Virtual: concurrent requests in one worker keep their own session, and exi
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
 })->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Virtual: concurrent requests each have their own $_GET, $_COOKIE, $_SERVER and $_POST, also after waiting', function () {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        $conns = [];
+        for ($i = 0; $i < 8; ++$i) {
+            $conns[$i] = native_connect($addr);
+            $body      = "p=post$i";
+            fwrite($conns[$i], "POST /virtual-globals?q=get$i&ms=200 HTTP/1.1\r\nHost: t\r\nCookie: c=cookie$i\r\nX-T: header$i\r\n"
+                . "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: " . strlen($body) . "\r\n\r\n$body");
+        }
+        foreach ($conns as $i => $conn) {
+            $own = "get$i|cookie$i|header$i|post$i";
+            expect(native_read_response($conn)['body'])->toBe("$own $own");
+        }
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');

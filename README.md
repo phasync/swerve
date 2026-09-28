@@ -349,7 +349,7 @@ $cache->set("user:$id", $user, 60);
 
 ## Code written for PHP-FPM
 
-With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-alpha10 or later),
+With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-alpha11 or later),
 `Swerve\Http\Virtual::run()` runs code that echoes and calls `header()` as a request of its own:
 its output, status, headers, cookies and session become the PSR-7 response, streamed, and
 `exit()` ends the request, not the worker.
@@ -361,9 +361,9 @@ return Virtual::run($request, static function () {
 });
 ```
 
-`$_GET`, `$_POST`, `$_COOKIE` and `$_SERVER` are set from the request as it starts; they are
-shared by a worker's requests, like any global state, so code that reads them after waiting on
-I/O should run one request at a time.
+`$_GET`, `$_POST`, `$_COOKIE`, `$_FILES` and `$_SERVER` are the request's own, as under
+PHP-FPM, also with many requests at once in a worker. The application's own global variables and
+static properties are not: code that keeps request state there should run one request at a time.
 
 ## Supervision
 

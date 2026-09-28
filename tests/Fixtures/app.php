@@ -362,6 +362,13 @@ return new class($version) implements RequestHandlerInterface {
                 \phasync::sleep((int) ($query['ms'] ?? 0) / 1000);
                 echo "last\n";
             }),
+            // The request's own superglobals, read before and after waiting ?ms= (needs phasync-ext)
+            '/virtual-globals' => Virtual::run($request, static function () {
+                $read = static fn () => ($_GET['q'] ?? '-') . '|' . ($_COOKIE['c'] ?? '-') . '|' . ($_SERVER['HTTP_X_T'] ?? '-') . '|' . ($_POST['p'] ?? '-');
+                $before = $read();
+                \phasync::sleep((int) ($_GET['ms'] ?? 0) / 1000);
+                echo $before, ' ', $read();
+            }),
             // A WebSocket that only sends: what is published to 'news' goes to the browser
             '/websocket-news' => WebSocket::from($request, function (WebSocket $ws) {
                 ++$this->newsLive;

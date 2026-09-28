@@ -21,14 +21,13 @@ use Swerve\Http\Message\Response;
  * With phasync-ext's phasync\ext\virtualize(), each run is a request of its own, also while
  * others run in the same worker: output buffers, header() and setcookie(), http_response_code(),
  * the session functions, php://input, shutdown functions, error and exception handlers, and
- * exit(), which ends the request instead of the worker. $_GET, $_POST, $_COOKIE, $_REQUEST and
- * $_SERVER are set from $request as the request starts, which is when session_start() and most
- * front controllers read them; but they are shared by the requests of a worker, so code that
- * reads them after it first waits (on I/O, with phasync-ext) may see another request's. The same
- * holds for the application's own global variables and static properties: run such code one
- * request at a time.
+ * exit(), which ends the request instead of the worker. $_GET, $_POST, $_COOKIE, $_FILES,
+ * $_REQUEST and $_SERVER are the request's own, built by PHP from $request as under PHP-FPM; a
+ * form body is parsed into $_POST and $_FILES as the request starts. The application's own global
+ * variables and static properties are shared by the requests of a worker: run code that keeps
+ * request state in them one request at a time.
  *
- * Needs phasync-ext 0.5.0-alpha10 or later: see available().
+ * Needs phasync-ext 0.5.0-alpha11 or later: see available().
  */
 final class Virtual
 {
@@ -37,7 +36,7 @@ final class Virtual
 
     public static function available(): bool
     {
-        return \function_exists('phasync\ext\virtualize');
+        return \function_exists('phasync\ext\virtualize') && \version_compare((string) \phpversion('phasync'), '0.5.0-alpha11', '>=');
     }
 
     /**
@@ -51,7 +50,7 @@ final class Virtual
     public static function run(ServerRequestInterface $request, \Closure $code): ResponseInterface
     {
         if (!self::available()) {
-            throw new \LogicException('Virtual::run() needs phasync-ext 0.5.0-alpha10 or later');
+            throw new \LogicException('Virtual::run() needs phasync-ext 0.5.0-alpha11 or later');
         }
         $sapi = new class($request) {
             public UpgradeStream $body;
@@ -105,7 +104,30 @@ final class Virtual
                     'method'         => $this->request->getMethod(),
                     'content_type'   => $this->request->getHeaderLine('Content-Type') ?: null,
                     'content_length' => '' === $length ? null : (int) $length,
+                    'query_string'   => $this->request->getUri()->getQuery(),
+                    'request_uri'    => $this->request->getRequestTarget(),
                 ];
+            }
+
+            public function read_cookies(): ?string
+            {
+                return $this->request->getHeaderLine('Cookie') ?: null;
+            }
+
+            /** $_SERVER, as PHP-FPM fills it: the server's parameters and the request's headers */
+            public function register_server_variables(): array
+            {
+                $server = $this->request->getServerParams();
+                foreach ($this->request->getHeaders() as $name => $values) {
+                    $key          = \strtoupper(\str_replace('-', '_', $name));
+                    $key          = 'CONTENT_TYPE' === $key || 'CONTENT_LENGTH' === $key ? $key : "HTTP_$key";
+                    $server[$key] = \implode(', ', $values);
+                }
+                $server['REQUEST_METHOD'] = $this->request->getMethod();
+                $server['REQUEST_URI']    = $this->request->getRequestTarget();
+                $server['QUERY_STRING']   = $this->request->getUri()->getQuery();
+
+                return $server;
             }
 
             public function connection_aborted(): bool
@@ -113,24 +135,9 @@ final class Virtual
                 return $this->aborted;
             }
         };
-        // PHP fills these from the SAPI in each request; virtualize() shares them between
-        // requests, so they are set as the request starts, and hold until it first waits
-        $globals = static function () use ($request, $code) {
-            $_GET     = $request->getQueryParams();
-            $_POST    = \is_array($parsed = $request->getParsedBody()) ? $parsed : [];
-            $_COOKIE  = $request->getCookieParams();
-            $_REQUEST = $_GET + $_POST;
-            $_SERVER  = $request->getServerParams();
-            foreach ($request->getHeaders() as $name => $values) {
-                $key                                                                           = \strtoupper(\str_replace('-', '_', $name));
-                $_SERVER[\in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true) ? $key : "HTTP_$key"] = \implode(', ', $values);
-            }
-
-            return $code();
-        };
-        $run = phasync::go(static function () use ($globals, $sapi) {
+        $run = phasync::go(static function () use ($code, $sapi) {
             try {
-                \phasync\ext\virtualize($globals, $sapi);
+                \phasync\ext\virtualize($code, $sapi);
             } finally {
                 $sapi->body->end();
                 phasync::raiseFlag($sapi); // in case it ended by throwing, before any headers
