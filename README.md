@@ -29,6 +29,8 @@ requests and connections at once on [phasync](https://github.com/phasync/phasync
   starts share, so request-scoped state stays separate even with thousands in flight.
 - **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
   workers that grow are recycled, and reloads roll one worker at a time.
+- **Yours to own.** MIT, with no third-party dependencies beyond PSR interfaces. See
+  [the Ennerd philosophy](PHILOSOPHY.md).
 
 Hello world over HTTP/1.1 with keep-alive on one 2-socket, 56-thread server, load from a
 second machine, each server at its fastest worker or thread count (requests per second;

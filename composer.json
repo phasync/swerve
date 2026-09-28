@@ -17,7 +17,7 @@
     "bin": [
         "bin/swerve"
     ],
-    "license": "GPL-2.0",
+    "license": "MIT",
     "autoload": {
         "psr-4": {
             "Swerve\\": "src/"
