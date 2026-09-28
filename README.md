@@ -2,14 +2,42 @@
 
 ![SWERVE](swerve-logo.png)
 
-A PHP application server for PSR-15 applications, built on [phasync](https://github.com/phasync/phasync)
+**WebSockets for PHP, in your own controllers.** A WebSocket is a route like any other: it has
+the request, the route and the logged-in user at hand, and the connection is a loop you write
+top to bottom.
+
+```php
+public function chat(ServerRequestInterface $request): ResponseInterface
+{
+    $user = $request->getAttribute('user');
+
+    return WebSocket::from($request, function (WebSocket $ws) use ($user) {
+        foreach ($ws as $message) {                  // until the browser leaves
+            $ws->send("$user->name said: $message");
+        }
+    });
+}
+```
+
+The same server, port and process serve your pages and your WebSockets, and
+[publish/subscribe](docs/publish-subscribe.md) reaches the connections in every worker: no
+separate WebSocket server, no broker, no client SDK. Adapters bring it to
+[Laravel](https://github.com/phasync/swerve-laravel),
+[Symfony](https://github.com/phasync/swerve-symfony), [Yii](https://github.com/phasync/swerve-yii),
+[CakePHP](https://github.com/phasync/swerve-cakephp),
+[Spiral](https://github.com/phasync/swerve-spiral),
+[CodeIgniter](https://github.com/phasync/swerve-codeigniter) and
+[Laminas](https://github.com/phasync/swerve-laminas); Slim, Mezzio and other PSR-15 frameworks
+need none.
+
+Swerve is a PHP application server, built on [phasync](https://github.com/phasync/phasync)
 coroutines. Your application stays loaded between requests, every worker serves many requests
-at once, and request and response bodies stream.
+and connections at once, and request and response bodies stream.
 
 > Alpha: APIs and options may change until 1.0.
 
 **[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
-[Server-Sent Events](examples/sse-chat) and over [WebSockets](examples/websocket-chat).
+[WebSockets](examples/websocket-chat) and over [Server-Sent Events](examples/sse-chat).
 
 ## Why swerve
 
@@ -18,13 +46,14 @@ container, database connection), runs one request per process, and throws it all
 keeps the application loaded in long-running workers, and each worker serves thousands of
 requests and connections at once on [phasync](https://github.com/phasync/phasync) coroutines.
 
+- **Connections that stay open.** WebSockets and Server-Sent Events from ordinary request
+  handlers, streaming request and response bodies, and
+  [publish/subscribe](docs/publish-subscribe.md) between workers, so live features need no
+  separate Node or Go service.
 - **Boot once, serve forever.** The framework, routes and connection pools are built once per
   worker. A Slim app costs swerve about 10% over a bare handler; Express costs Node half or more.
 - **Waiting is free.** While one request waits for the database or an API, the same worker serves
   others. Your handler stays ordinary sequential PHP: no promises, no callbacks.
-- **Connections that stay open.** Streaming request and response bodies, Server-Sent Events,
-  WebSockets, and [publish/subscribe](docs/publish-subscribe.md) between workers, so live
-  features need no separate Node or Go service.
 - **Isolated requests.** Each request runs in a phasync context of its own, which the coroutines it
   starts share, so request-scoped state stays separate even with thousands in flight.
 - **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
@@ -304,6 +333,27 @@ foreach (Swerve::subscribe('chat') as $message) {
   `Swerve::subscribe('prices', maxLag: 5)`) gets a `SubscriberLagException` from its loop.
 - Topics are 1 to 255 bytes, messages at most 1 MiB. A worker that leaves messages unread for
   30 s (its event loop stuck) is killed, also with `--watchdog=0`.
+
+## Shared cache
+
+`Swerve::cache()` is a PSR-16 cache every worker shares, held by the master: sessions, rate
+limits, results that are costly to make.
+
+```php
+$cache = Swerve::cache();
+$user  = $cache->get("user:$id") ?? load_user($id);
+$cache->set("user:$id", $user, 60);
+```
+
+- Each worker keeps what it read in a local layer (8 MiB), so a repeated read costs about a
+  microsecond. A write goes to the master, which tells every worker to forget those keys; a
+  worker never keeps a value older than the last write it was told of. A trip to the master
+  costs about 0.1 ms, and only the calling coroutine waits.
+- The master evicts the least recently used entries past `--cache-size` (64 MiB). It keeps
+  values serialized and never loads your classes. A rolling reload keeps the contents; a
+  restart empties them.
+- Available once the worker serves, not while `swerve.php` loads. Without the master (swerve
+  embedded in your own process), the cache is the process's own.
 
 ## Supervision
 
