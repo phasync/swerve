@@ -43,11 +43,12 @@ A call that blocks the process, instead of letting phasync switch coroutines, st
 - CPU-heavy work: a long loop, image processing, a big `json_decode()`
 
 With [phasync-ext](production.md#phasync-ext) loaded, almost all of that waits as a coroutine
-instead of blocking the process: sockets and TLS, mysqli and PDO (over the network), `curl_exec()`
+instead of blocking the process: sockets and TLS, MySQL through mysqli or PDO, `curl_exec()`
 and curl-multi loops such as Guzzle's, `file_get_contents('https://...')`, pipes and child
 processes, file and DNS functions, `sleep()` and `usleep()`. The
 [extension's README](https://github.com/phasync/phasync-ext#readme) has the full list.
-CPU-bound code still blocks, and so does I/O in extensions that bypass PHP's streams.
+CPU-bound code still blocks, and so do clients with their own network code instead of PHP's
+streams, such as PostgreSQL's libpq (pdo_pgsql, pgsql) and phpredis.
 
 What that means in practice:
 
@@ -90,7 +91,8 @@ $db->exec('CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, room TEX
 Every worker runs this at start, at the same time: keep it idempotent (`IF NOT EXISTS`). A
 SQLite query blocks the worker while it runs, usually well under a millisecond; a writer waiting
 for the lock blocks it up to the busy timeout. For many concurrent writers, a database server
-(MySQL, PostgreSQL) does better; its queries block the worker the same way, for their duration.
+(MySQL, PostgreSQL) does better. Its queries block the worker the same way, for their duration,
+unless phasync-ext is loaded and the database is MySQL: then they wait as a coroutine.
 
 ## Things that work differently from PHP-FPM
 

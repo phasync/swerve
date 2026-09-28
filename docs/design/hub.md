@@ -25,6 +25,9 @@ Measured with today's swerve (56 workers, "Hello, World", `wrk` from another mac
 | keep-alive, 16,384 connections | 86k (1,063 timeouts) | 88k (19 timeouts) | 112k (0 timeouts) |
 | 4 workers, 64 connections + 3,000 idle | 16% below no idle | 13% below | 0.6% below |
 
+These figures predate phasync 2.0.0-alpha11 and a tuned network; current ones are in
+[benchmarks/](../../benchmarks/).
+
 What limits today's model, and what the in-process `tcp_server()` of phasync-ext only partly
 fixes:
 

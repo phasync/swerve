@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Node servers for swerve's HTTP benchmark",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

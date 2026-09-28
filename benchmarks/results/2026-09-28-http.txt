@@ -1,0 +1,136 @@
+# swerve HTTP benchmark, 2026-09-28: raw wrk results (run.sh), one 10 s run per line
+#
+# Server: 2 x Xeon E5-2697 v3 (56 hardware threads, 2 NUMA nodes), Ubuntu, kernel 6.8, 1 GbE.
+# Client: a second machine (32 cores), wrk 4.1, 32 threads, over the LAN.
+# Both machines: qdisc fq (limit 200000, flow_limit 10000), NIC rings 4096.
+# PHP 8.5.11 with opcache and the tracing JIT; Node 22.19; Go 1.22.2.
+# swerve and Node: 56 worker processes. Go, first block: one process, GOMAXPROCS=56.
+# hello-*: /hello of tests/Fixtures/app.php ("Hello"); slim-*: ../swerve.php ("Hello, World");
+# node-express answers "Hello, World", the others "Hello".
+# *-old: phasync before 2.0.0-alpha11 with phasync-ext 0.4.0-alpha11;
+# *-new-ext: phasync 2.0.0-alpha11 + phasync-ext 0.5.0-alpha7; *-new: no extension.
+# At 50,000 connections the client held about 28,000 (its local port range): every server shows
+# about 21,850 connect errors.
+
+go-http        c=64       39254.31 req/s  p50=1.62ms    p99=9.17ms     
+go-http        c=1024    135483.91 req/s  p50=6.66ms    p99=16.82ms    
+go-http        c=10000   112380.77 req/s  p50=98.39ms   p99=196.98ms   
+go-http        c=50000    96064.57 req/s  p50=336.59ms  p99=580.96ms  Socket errors: connect 21843, read 0, write 0, timeout 0 
+node-http      c=64      132145.50 req/s  p50=481.00us  p99=1.13ms     
+node-http      c=1024    136836.64 req/s  p50=7.41ms    p99=18.61ms    
+node-http      c=10000   112588.05 req/s  p50=48.80ms   p99=466.70ms  Socket errors: connect 0, read 0, write 0, timeout 729 
+node-http      c=50000   100130.70 req/s  p50=155.12ms  p99=607.34ms  Socket errors: connect 21847, read 0, write 0, timeout 3204 
+node-express   c=64       67445.68 req/s  p50=736.00us  p99=17.87ms    
+node-express   c=1024     92364.82 req/s  p50=10.34ms   p99=60.29ms    
+node-express   c=10000    85380.99 req/s  p50=110.04ms  p99=832.76ms  Socket errors: connect 0, read 0, write 0, timeout 526 
+node-express   c=50000    73970.50 req/s  p50=330.78ms  p99=697.03ms  Socket errors: connect 21849, read 0, write 0, timeout 5928 
+hello-old      c=64      175533.24 req/s  p50=342.00us  p99=2.75ms     
+hello-old      c=1024    166099.03 req/s  p50=6.13ms    p99=8.18ms     
+hello-old      c=10000   122338.37 req/s  p50=111.24ms  p99=181.81ms   
+hello-old      c=50000    32151.31 req/s  p50=1.04s     p99=1.64s     Socket errors: connect 21848, read 0, write 0, timeout 0 
+hello-new-ext  c=64      193041.45 req/s  p50=337.00us  p99=583.00us   
+hello-new-ext  c=1024    177443.42 req/s  p50=5.73ms    p99=7.14ms     
+hello-new-ext  c=10000   139988.43 req/s  p50=95.27ms   p99=149.50ms   
+hello-new-ext  c=50000   131385.57 req/s  p50=263.35ms  p99=392.13ms  Socket errors: connect 21854, read 0, write 0, timeout 0 
+hello-new      c=64      183005.14 req/s  p50=343.00us  p99=612.00us   
+hello-new      c=1024    162331.14 req/s  p50=6.28ms    p99=7.19ms     
+hello-new      c=10000   115636.62 req/s  p50=109.38ms  p99=171.52ms   
+hello-new      c=50000    34097.75 req/s  p50=930.83ms  p99=1.50s     Socket errors: connect 21852, read 0, write 0, timeout 0 
+slim-old       c=64      164448.58 req/s  p50=387.00us  p99=3.33ms     
+slim-old       c=1024    162713.17 req/s  p50=6.27ms    p99=7.44ms     
+slim-old       c=10000   124433.78 req/s  p50=111.90ms  p99=182.12ms   
+slim-old       c=50000    29868.05 req/s  p50=1.13s     p99=1.71s     Socket errors: connect 21848, read 0, write 0, timeout 0 
+slim-new-ext   c=64      187861.15 req/s  p50=341.00us  p99=578.00us   
+slim-new-ext   c=1024    168757.79 req/s  p50=6.03ms    p99=7.21ms     
+slim-new-ext   c=10000   132130.08 req/s  p50=105.03ms  p99=161.85ms   
+slim-new-ext   c=50000   122366.30 req/s  p50=280.72ms  p99=419.45ms  Socket errors: connect 21854, read 0, write 0, timeout 0 
+slim-new       c=64      184378.00 req/s  p50=341.00us  p99=6.67ms     
+slim-new       c=1024    153529.70 req/s  p50=6.66ms    p99=7.53ms     
+slim-new       c=10000   113408.01 req/s  p50=119.89ms  p99=210.50ms   
+slim-new       c=50000    31460.82 req/s  p50=1.08s     p99=1.64s     Socket errors: connect 21854, read 0, write 0, timeout 0 
+
+# Go in NUMA-pinned layouts (numactl --cpunodebind=N --membind=N, SO_REUSEPORT), same client:
+go 1 x 56       c=64       38285 req/s  p50=1.68ms  p99=9.22ms
+go 1 x 56       c=1024    140007 req/s  p50=6.34ms  p99=16.23ms
+go 1 x 56       c=10000   111324 req/s  p50=96.14ms p99=196.18ms
+go 2 x 28       c=64      101064 req/s  p50=553us   p99=2.23ms
+go 2 x 28       c=1024    161388 req/s  p50=6.22ms  p99=9.61ms
+go 2 x 28       c=10000   124916 req/s  p50=104.42ms p99=147.42ms
+go 4 x 14       c=64      157249 req/s  p50=393us   p99=829us
+go 4 x 14       c=1024    154872 req/s  p50=6.61ms  p99=8.14ms
+go 4 x 14       c=10000   121317 req/s  p50=109.97ms p99=187.76ms
+
+# Worker and thread counts: each server at 8/16/28/56 workers (swerve with phasync-ext 0.5.0-alpha7
+# unless marked), Go in more layouts, run.sh with WORKERS / GO_LAYOUT. 50000 = about 28,000 held.
+# workers 8
+node-http      c=64      193691.77 req/s  p50=299.00us  p99=1.37ms    
+node-http      c=1024    189704.84 req/s  p50=4.96ms    p99=120.45ms  
+node-http      c=10000   163443.50 req/s  p50=27.05ms   p99=157.86ms  Socket errors: connect 0, read 0, write 0, timeout 2840
+swerve-hello   c=64      139668.86 req/s  p50=392.00us  p99=1.14ms    
+swerve-hello   c=1024    153347.17 req/s  p50=6.52ms    p99=8.57ms    
+swerve-hello   c=10000   118902.29 req/s  p50=79.48ms   p99=127.40ms  
+# workers 16
+node-http      c=64      246023.89 req/s  p50=242.00us  p99=1.96ms    
+node-http      c=1024    216529.08 req/s  p50=4.66ms    p99=21.58ms   
+node-http      c=10000   154412.62 req/s  p50=57.09ms   p99=435.17ms  Socket errors: connect 0, read 0, write 0, timeout 1272
+swerve-hello   c=64      235568.39 req/s  p50=248.00us  p99=3.24ms    
+swerve-hello   c=1024    276114.01 req/s  p50=3.62ms    p99=5.93ms    
+swerve-hello   c=10000   185505.02 req/s  p50=65.95ms   p99=105.28ms  
+# workers 28
+node-http      c=64      181553.35 req/s  p50=342.00us  p99=778.00us  
+node-http      c=1024    180607.68 req/s  p50=5.48ms    p99=21.92ms   
+node-http      c=10000   129223.62 req/s  p50=49.78ms   p99=553.76ms  Socket errors: connect 0, read 0, write 0, timeout 1688
+swerve-hello   c=64      217652.26 req/s  p50=291.00us  p99=0.98ms    
+swerve-hello   c=1024    212008.82 req/s  p50=5.05ms    p99=6.03ms    
+swerve-hello   c=10000   148271.03 req/s  p50=80.21ms   p99=152.39ms  
+# workers 56
+node-http      c=64      133892.74 req/s  p50=447.00us  p99=1.24ms    
+node-http      c=1024    134435.34 req/s  p50=7.50ms    p99=18.07ms   
+node-http      c=10000   110723.92 req/s  p50=74.98ms   p99=563.42ms  Socket errors: connect 0, read 0, write 0, timeout 603
+swerve-hello   c=64      193493.46 req/s  p50=337.00us  p99=588.00us  
+swerve-hello   c=1024    180434.21 req/s  p50=5.64ms    p99=6.71ms    
+swerve-hello   c=10000   141639.79 req/s  p50=95.46ms   p99=143.04ms  
+# swerve without extension, workers 16
+swerve-hello   c=64      223493.51 req/s  p50=282.00us  p99=1.96ms    
+swerve-hello   c=1024    284561.73 req/s  p50=3.55ms    p99=5.24ms    
+swerve-hello   c=10000   210985.79 req/s  p50=57.14ms   p99=91.94ms   
+# swerve without extension, workers 56
+swerve-hello   c=64      182364.02 req/s  p50=343.00us  p99=693.00us  
+swerve-hello   c=1024    150788.36 req/s  p50=6.76ms    p99=8.39ms    
+swerve-hello   c=10000   116863.37 req/s  p50=107.89ms  p99=177.87ms  
+# go 1x16
+go             c=64      127621.57 req/s  p50=440.00us  p99=2.10ms    
+go             c=1024    317434.11 req/s  p50=3.09ms    p99=6.03ms    
+go             c=10000   183373.70 req/s  p50=63.56ms   p99=112.46ms  
+# go 2x8
+go             c=64      196816.29 req/s  p50=298.00us  p99=1.04ms    
+go             c=1024    198211.59 req/s  p50=5.00ms    p99=8.08ms    
+go             c=10000   149764.05 req/s  p50=78.05ms   p99=129.32ms  
+# go 2x14
+go             c=64      158496.58 req/s  p50=390.00us  p99=1.49ms    
+go             c=1024    168518.79 req/s  p50=5.95ms    p99=8.92ms    
+go             c=10000   139821.91 req/s  p50=86.47ms   p99=135.57ms  
+# swerve + ext, 16 workers
+swerve-hello   c=50000   157152.12 req/s  p50=51.64ms   p99=368.15ms  Socket errors: connect 21852, read 0, write 0, timeout 0
+# swerve without ext, 16 workers
+swerve-hello   c=50000    83303.92 req/s  p50=164.42ms  p99=1.52s     Socket errors: connect 24220, read 76734, write 0, timeout 571
+# node, 16 workers
+node-http      c=50000   135011.37 req/s  p50=67.70ms   p99=562.77ms  Socket errors: connect 22125, read 0, write 0, timeout 3723
+# go 1x16
+go             c=50000   162497.04 req/s  p50=78.56ms   p99=371.39ms  Socket errors: connect 22146, read 0, write 0, timeout 0
+# go 2x8
+go             c=50000   137150.97 req/s  p50=195.92ms  p99=399.94ms  Socket errors: connect 22149, read 0, write 0, timeout 0
+# node-express, 16 workers
+node-express   c=64       52112.20 req/s  p50=1.09ms    p99=6.34ms    
+node-express   c=1024     65118.47 req/s  p50=14.41ms   p99=268.65ms  
+node-express   c=10000    65940.40 req/s  p50=55.30ms   p99=127.14ms  Socket errors: connect 0, read 0, write 0, timeout 2308
+node-express   c=50000    63945.43 req/s  p50=86.01ms   p99=137.56ms  Socket errors: connect 21833, read 0, write 0, timeout 1440
+# swerve-slim + ext, 16 workers
+swerve-slim    c=64      212234.63 req/s  p50=290.00us  p99=2.14ms    
+swerve-slim    c=1024    236371.45 req/s  p50=4.18ms    p99=7.45ms    
+swerve-slim    c=10000   174651.51 req/s  p50=61.70ms   p99=99.49ms   
+swerve-slim    c=50000   160220.55 req/s  p50=108.17ms  p99=334.87ms  Socket errors: connect 21868, read 0, write 0, timeout 0
+# swerve-slim without ext, 16 workers
+swerve-slim    c=64      199622.69 req/s  p50=288.00us  p99=2.62ms    
+swerve-slim    c=1024    248131.60 req/s  p50=4.07ms    p99=6.37ms    
+swerve-slim    c=10000   194925.93 req/s  p50=55.62ms   p99=117.79ms  

@@ -19,7 +19,7 @@ keeps the application loaded in long-running workers, and each worker serves tho
 requests and connections at once on [phasync](https://github.com/phasync/phasync) coroutines.
 
 - **Boot once, serve forever.** The framework, routes and connection pools are built once per
-  worker. A Slim route costs swerve 3–7% over a bare handler; Express costs Node 30–50%.
+  worker. A Slim app costs swerve about 10% over a bare handler; Express costs Node half or more.
 - **Waiting is free.** While one request waits for the database or an API, the same worker serves
   others. Your handler stays ordinary sequential PHP: no promises, no callbacks.
 - **Connections that stay open.** Streaming request and response bodies, Server-Sent Events,
@@ -30,15 +30,19 @@ requests and connections at once on [phasync](https://github.com/phasync/phasync
 - **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
   workers that grow are recycled, and reloads roll one worker at a time.
 
-Measured on one 56-core server (56 workers or all cores), hello world over HTTP/1.1 with
-keep-alive, load from a separate machine, in requests per second. Go is shown in its fastest
-process layout (NUMA-pinned processes); its default single process is slower.
+Hello world over HTTP/1.1 with keep-alive on one 2-socket, 56-thread server, load from a
+second machine, each server at its fastest worker or thread count (requests per second;
+[method, scripts and raw results](benchmarks/)):
 
-| Connections | swerve + phasync-ext | swerve + Slim | Node http | Node + Express | Go net/http |
+| Connections | Node http | Go net/http | swerve | Node + Express | swerve + Slim |
 |---|---:|---:|---:|---:|---:|
-| 64 | 193,041 | 187,861 | 132,146 | 67,446 | 157,249 |
-| 1,024 | 177,443 | 168,758 | 136,837 | 92,365 | 161,388 |
-| 10,000 | 139,988 | 132,130 | 112,588 | 85,381 | 124,916 |
+| 64 | 246,024 | 196,816 | 235,568 | 67,446 | 212,235 |
+| 1,024 | 216,529 | 317,434 | 284,562 | 92,365 | 248,132 |
+| 10,000 | 163,444 | 183,374 | 210,986 | 85,381 | 194,926 |
+| ~28,000 | 135,011 | 162,497 | 157,152 | 73,971 | 160,221 |
+
+Below about 1,000 connections per worker swerve is fastest on PHP's own `stream_select()`;
+above that it needs phasync-ext, which waits with epoll.
 
 ### Coming from PHP-FPM
 
@@ -51,7 +55,7 @@ process layout (NUMA-pinned processes); its default single process is slower.
 3. **Return a PSR-15 request handler** from `swerve.php`: a Slim app, mini's dispatcher, or any
    other PSR-15 stack.
 4. **Load [phasync-ext](https://github.com/phasync/phasync-ext)** in production. Blocking calls in
-   libraries you did not write (PDO, mysqli, curl, Guzzle, file and DNS functions) then wait as a
+   libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
    coroutine instead of stalling the worker, and a worker can hold far more than 1,024
    connections.
 

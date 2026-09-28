@@ -14,9 +14,11 @@ With it:
 
 - A worker waits on its sockets with epoll, and is not limited to about 1,000 open connections
   (PHP's own `stream_select()` fails for file descriptors of 1024 and up; see sizing below).
-  At 50,000 connections a hello-world worker pool served 4 times as many requests as without it.
-- Code that is not written for phasync cooperates: inside a coroutine, sockets and TLS, mysqli and
-  PDO, `curl_exec()` and Guzzle, pipes, file and DNS functions, `sleep()` and `usleep()` let other
+  At 50,000 connections a hello-world server served 2 to 4 times as many requests as without it,
+  depending on the number of workers. Below about 1,000 connections per worker, PHP's own
+  `stream_select()` is as fast or a little faster.
+- Code that is not written for phasync cooperates: inside a coroutine, sockets and TLS, MySQL through
+  mysqli or PDO, `curl_exec()` and Guzzle, pipes, file and DNS functions, `sleep()` and `usleep()` let other
   requests run instead of blocking the worker. CPU-bound code still blocks. See
   [the rule](how-it-runs.md#the-rule-never-block-a-worker).
 
@@ -24,9 +26,10 @@ Your application behaves the same with and without it; it only waits better.
 
 ## Sizing
 
-**Workers.** `--workers=auto` (the default) is one per CPU core, the best for ordinary
-request/response traffic: more workers only compete for the cores. Each worker holds its own
-copy of your application in memory.
+**Workers.** `--workers=auto` (the default) is one per CPU (hardware thread). On large machines
+fewer can be faster: on a 2-socket server with 56 hardware threads, a hello-world app served the
+most requests with 16 workers. Measure with your own application. Each worker holds its own copy
+of your application in memory.
 
 **Connections per worker.**
 
