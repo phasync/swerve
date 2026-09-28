@@ -145,6 +145,31 @@ final class NativeHttpConnection
     public static bool $exiting = false;
 
     /**
+     * The contexts of the requests served, as long as a coroutine of theirs lives: see
+     * pendingWork().
+     *
+     * @var \WeakMap<LoggingContext, true>|null
+     */
+    private static ?\WeakMap $contexts = null;
+
+    /**
+     * The coroutines requests started that still run, such as work a handler goes on with after
+     * its response (what PHP-FPM allows after fastcgi_finish_request()): a draining worker waits
+     * for them before it exits.
+     */
+    public static function pendingWork(): int
+    {
+        $n = 0;
+        foreach (self::$contexts ?? [] as $context => $_) {
+            foreach ($context->getFibers() as $fiber => $__) {
+                $n += (int) !$fiber->isTerminated();
+            }
+        }
+
+        return $n;
+    }
+
+    /**
      * Data read from the socket; the unconsumed part is $buffer from $offset on: the next
      * request head, or the start of the current request's body. An offset instead of cutting
      * the string on every read avoids copying the rest of the buffer each time.
@@ -949,7 +974,10 @@ final class NativeHttpConnection
         // request-scoped state can hang on phasync::getContext() (mini's does). It runs in this
         // connection's coroutine: a coroutine per request cost about half of a hello-world request.
         $this->fiber = \Fiber::getCurrent();
-        $response    = phasync::withContext(fn () => $this->handler->handle($request), new LoggingContext($this->logger));
+        $context     = new LoggingContext($this->logger);
+        self::$contexts ??= new \WeakMap();
+        self::$contexts[$context] = true;
+        $response    = phasync::withContext(fn () => $this->handler->handle($request), $context);
         if (null !== $this->ioError) {
             return false; // the application swallowed our socket failure: the client is gone
         }

@@ -16,6 +16,7 @@ use Swerve\CLI\Args;
 use Swerve\Connection;
 use Swerve\ConnectionInterface;
 use Swerve\FastCGI\FastCGIServer;
+use Swerve\Http\NativeHttpConnection;
 use Swerve\Http\NativeHttpServer;
 use Swerve\Runners\Psr15Runner;
 use Swerve\StaticFiles;
@@ -295,7 +296,8 @@ foreach ([\STDOUT, \STDERR] as $out) {
                     }
                 }
             };
-            $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
+            $worker->pendingWork = NativeHttpConnection::pendingWork(...);
+            $maxBody             = (int) $args->maxBody ?: \PHP_INT_MAX;
             $servers = [];
             foreach ($http as $address) {
                 $server = new NativeHttpServer($address, $handler, $logger, (bool) $args->bufferResponses, $maxBody);

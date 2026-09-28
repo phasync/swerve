@@ -1487,6 +1487,24 @@ test('faults under concurrent load: the others serve on, and the workers are rep
     native_stop($process);
 })->skip(fn () => (int) shell_exec('nproc') < 2, 'needs 2 cores');
 
+test('a drain waits for the coroutines a request started after its response, up to the deadline', function () {
+    $dir                    = test_dir(null);
+    [$process, $addr, $log] = swerve_start(['--grace=2'], workers: 1, env: ['SWERVE_TEST_DIR' => $dir]);
+    expect(probe($addr, '/after-response?ms=500'))->toBe('ok');
+    swerve_signal($process, SIGTERM);
+    [$code] = swerve_wait($process, 5);
+    expect([$code, @file_get_contents("$dir/after-response")])->toBe([0, 'done']);
+
+    // Past the drain deadline (a second before the grace period ends) the work is dropped, and said so
+    [$process, $addr, $log] = swerve_start(['--grace=2'], workers: 1, env: ['SWERVE_TEST_DIR' => $dir]);
+    unlink("$dir/after-response");
+    expect(probe($addr, '/after-response?ms=5000'))->toBe('ok');
+    swerve_signal($process, SIGTERM);
+    [$code, $took] = swerve_wait($process, 5);
+    expect([$code, file_exists("$dir/after-response"), $took < 2])->toBe([0, false, true]);
+    log_wait($log, '/Drain deadline reached .* 1 coroutines requests started/');
+});
+
 test('shutdown under concurrent load fails no request in flight', function () {
     [$process, $addr] = swerve_start();
     $signalled        = 0.0;

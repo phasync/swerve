@@ -341,6 +341,15 @@ return new class($version) implements RequestHandlerInterface {
             '/hello'  => new Response(200, ['Content-Type' => 'text/plain'], 'Hello'),
             '/echo'   => new Response(200, ['Content-Type' => 'text/plain'], (string) $request->getBody()),
             '/big'    => new Response(200, ['Content-Type' => 'text/plain'], \str_repeat('x', (int) $query['n'])),
+            // Work after the response: writes "done" to $SWERVE_TEST_DIR/after-response ?ms= later
+            '/after-response' => (static function () use ($query) {
+                phasync::go(static function () use ($query) {
+                    phasync::sleep((int) $query['ms'] / 1000);
+                    \file_put_contents(\getenv('SWERVE_TEST_DIR') . '/after-response', 'done');
+                });
+
+                return new Response(200, [], 'ok');
+            })(),
             '/sleep'  => (static function () use ($query) {
                 phasync::sleep(((int) $query['ms']) / 1000);
 
