@@ -1,0 +1,11 @@
+connected 100000, failed 0, in 23.3 s
+msg   received       p50       p99     p99.9      last
+0       100000   281.4ms   505.1ms   508.7ms   509.0ms
+1       100000   205.2ms   381.9ms   385.1ms   385.7ms
+2       100000   223.2ms   398.3ms   401.7ms   401.8ms
+3       100000   251.7ms   444.0ms   447.6ms   447.7ms
+4       100000   727.8ms  1183.9ms  1193.2ms  1194.3ms
+5       100000   291.8ms   468.6ms   473.0ms   473.4ms
+6       100000   249.2ms   422.1ms   425.0ms   425.2ms
+7       100000   235.0ms   415.9ms   419.4ms   419.8ms
+still connected at the end: 100000 (closed by the server: 0)
