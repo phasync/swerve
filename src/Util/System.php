@@ -55,6 +55,56 @@ final class System {
     }
 
     /**
+     * Pin this process to NUMA node $index mod the number of nodes, and return that node's CPU
+     * list; null on a machine with one node, or when it can't be done (then the process stays
+     * unpinned: the same, only slower on a machine with several sockets). Call right after fork,
+     * before the process allocates much: memory then comes from the node's own, and threads
+     * started later (phasync-ext's) inherit the pinning.
+     *
+     * With several sockets, a scheduler free to move a worker between them takes it away from
+     * the memory it allocated; pinned, swerve served about a quarter more at 10,000 connections
+     * on a 2-socket machine (phasync/phasync#50).
+     */
+    public static function pinToNumaNode(int $index): ?string
+    {
+        $nodes = \glob('/sys/devices/system/node/node[0-9]*', \GLOB_ONLYDIR) ?: [];
+        \natsort($nodes);
+        if (\count($nodes) < 2) {
+            return null;
+        }
+        $cpus = \trim((string) @\file_get_contents(\array_values($nodes)[$index % \count($nodes)] . '/cpulist'));
+        if ('' === $cpus) {
+            return null;
+        }
+        // FFI where it may be used (in the CLI by default): no process started
+        if (\class_exists(\FFI::class, false)) {
+            try {
+                $libc = \FFI::cdef('int sched_setaffinity(int pid, size_t size, const unsigned char *mask);', 'libc.so.6');
+                $mask = $libc->new('unsigned char[128]'); // cpu_set_t: 1024 CPUs
+                foreach (\explode(',', $cpus) as $range) {
+                    [$first, $last] = \array_map('intval', \explode('-', $range) + [1 => $range]);
+                    for ($cpu = $first; $cpu <= $last; ++$cpu) {
+                        $mask[$cpu >> 3] |= 1 << ($cpu & 7);
+                    }
+                }
+                if (0 === $libc->sched_setaffinity(0, 128, $mask)) {
+                    return $cpus;
+                }
+            } catch (\Throwable) {
+                // FFI disabled (ffi.enable=0), or no libc.so.6 (musl): try taskset
+            }
+        }
+        if (\function_exists('exec')) {
+            \exec('taskset -a -cp ' . \escapeshellarg($cpus) . ' ' . \getmypid() . ' 2>/dev/null', $output, $status);
+            if (0 === $status) {
+                return $cpus;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * A connected pair of Unix sockets, close-on-exec where possible, see listen(): a process
      * the application starts must not hold the worker's end of its pipe to the master.
      *

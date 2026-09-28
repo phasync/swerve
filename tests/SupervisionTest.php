@@ -1505,6 +1505,25 @@ test('a drain waits for the coroutines a request started after its response, up 
     log_wait($log, '/Drain deadline reached .* 1 coroutines requests started/');
 });
 
+test('on a machine with several NUMA nodes, the workers are pinned to them in turn', function () {
+    $nodes = glob('/sys/devices/system/node/node[0-9]*', GLOB_ONLYDIR);
+    natsort($nodes);
+    $lists = array_map(static fn ($node) => trim(file_get_contents("$node/cpulist")), array_values($nodes));
+    [$process, $addr] = swerve_start([], count($lists));
+    try {
+        $pinned = array_map(static function (int $pid): string {
+            preg_match('/^Cpus_allowed_list:\s*(\S+)/m', file_get_contents("/proc/$pid/status"), $m);
+
+            return $m[1];
+        }, worker_pids($addr, count($lists)));
+        sort($pinned);
+        sort($lists);
+        expect($pinned)->toBe($lists); // one worker on each node
+    } finally {
+        native_stop($process);
+    }
+})->skip(fn () => count(glob('/sys/devices/system/node/node[0-9]*', GLOB_ONLYDIR)) < 2, 'needs several NUMA nodes');
+
 test('shutdown under concurrent load fails no request in flight', function () {
     [$process, $addr] = swerve_start();
     $signalled        = 0.0;

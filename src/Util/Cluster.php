@@ -251,6 +251,9 @@ final class Cluster
             }
             $this->workers = [];
             $logger        = $this->logger instanceof Logger ? $this->logger->withSource((string) $slot) : $this->logger;
+            if (null !== $cpus = System::pinToNumaNode($slot)) {
+                $logger->info('Pinned to the NUMA node of CPUs {cpus}', ['cpus' => $cpus]);
+            }
 
             return new Worker($slot, $child, $this->masterPid, $this->grace, $this->watchdog, $logger);
         }

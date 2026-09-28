@@ -31,6 +31,12 @@ fewer can be faster: on a 2-socket server with 56 hardware threads, a hello-worl
 most requests with 16 workers. Measure with your own application. Each worker holds its own copy
 of your application in memory.
 
+**Several sockets.** On a machine with more than one NUMA node, worker *i* pins itself to node
+*i* mod the number of nodes, so it stays near the memory it allocated: about a quarter more
+throughput at 10,000 connections on a 2-socket server. It uses FFI when PHP allows it (the CLI
+does by default), else `taskset`; without either, workers stay unpinned. With `-v` the log shows
+each worker's CPUs.
+
 **Connections per worker.**
 
 - *Without phasync-ext*, a worker holds at most about **960 connections** (1024 file descriptors,
