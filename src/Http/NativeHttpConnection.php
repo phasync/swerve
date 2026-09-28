@@ -945,13 +945,11 @@ final class NativeHttpConnection
             $request = $request->withCookieParams(ServerRequest::cookies($cookie));
         }
 
-        // Each request runs in a coroutine and a phasync context of its own, which the coroutines it
-        // starts share: request-scoped state can hang on phasync::getContext() (mini's does)
-        $response = phasync::await(phasync::go(function () use ($request) {
-            $this->fiber = \Fiber::getCurrent();
-
-            return $this->handler->handle($request);
-        }, context: new LoggingContext($this->logger)));
+        // Each request runs in a phasync context of its own, which the coroutines it starts share:
+        // request-scoped state can hang on phasync::getContext() (mini's does). It runs in this
+        // connection's coroutine: a coroutine per request cost about half of a hello-world request.
+        $this->fiber = \Fiber::getCurrent();
+        $response    = phasync::withContext(fn () => $this->handler->handle($request), new LoggingContext($this->logger));
         if (null !== $this->ioError) {
             return false; // the application swallowed our socket failure: the client is gone
         }
