@@ -5,6 +5,7 @@ namespace Swerve\Http;
 use phasync;
 use phasync\CancelledException;
 use phasync\IOException;
+use phasync\Psr\ServerRequest;
 use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamInterface;
@@ -957,7 +958,7 @@ final class NativeHttpConnection
 
         $body = new RequestBody($this, null !== $te ? null : ($length ?? 0), $continue, $this->maxBodySize, $upgrade);
         $now     = \microtime(true);
-        $request = new ServerRequest($method, $target, $body, $headers, [
+        $server  = [
             'REMOTE_ADDR'        => $this->remoteAddr,
             'REMOTE_PORT'        => $this->remotePort,
             'REQUEST_METHOD'     => $method,
@@ -965,7 +966,11 @@ final class NativeHttpConnection
             'SERVER_PROTOCOL'    => $protocol,
             'REQUEST_TIME'       => (int) $now,
             'REQUEST_TIME_FLOAT' => $now,
-        ], $version, $upgrade ? null : FormBody::for($method, $contentType, $body));
+        ];
+        $request = $upgrade || null === ($form = FormBody::for($method, $contentType, $body))
+            ? new ServerRequest($method, $target, $body, $headers, null, $server, protocolVersion: $version)
+            // Form data is parsed when first asked for
+            : new ServerRequest($method, $target, $form->input(...), $headers, null, $server, [], $form->files(...), $form->fields(...), protocolVersion: $version);
         if (null !== $cookie) {
             $request = $request->withCookieParams(ServerRequest::cookies($cookie));
         }

@@ -26,7 +26,7 @@ use Swerve\Swerve;
  * underscores), by handing them to parse_str(). One difference: parse_str() keeps exactly
  * max_input_vars fields, where PHP's own POST parser keeps one more.
  *
- * @internal see ServerRequest
+ * @internal the ServerRequest's form data, parsed when first asked for
  */
 final class FormBody
 {

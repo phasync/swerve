@@ -7,7 +7,7 @@ use RuntimeException;
 use Swerve\ConnectionInterface;
 use phasync\Psr\ComposableStream;
 use Swerve\Http\FormBody;
-use Swerve\Http\ServerRequest;
+use phasync\Psr\ServerRequest;
 use Swerve\SwerveInterface;
 
 /**
@@ -48,7 +48,12 @@ final class Psr15Runner implements SwerveInterface
         }
         $method  = $connection->getRequestMethod();
         $body    = new ComposableStream(readFunction: $connection->read(...), eofFunction: $connection->eof(...));
-        $request = new ServerRequest($method, $connection->getRequestTarget(), $body, $headers, $params, $connection->getProtocolVersion(), FormBody::for($method, $headers['content-type'][0] ?? '', $body));
+        $target  = $connection->getRequestTarget();
+        $version = $connection->getProtocolVersion();
+        $request = null === ($form = FormBody::for($method, $headers['content-type'][0] ?? '', $body))
+            ? new ServerRequest($method, $target, $body, $headers, null, $params, protocolVersion: $version)
+            // Form data is parsed when first asked for
+            : new ServerRequest($method, $target, $form->input(...), $headers, null, $params, [], $form->files(...), $form->fields(...), protocolVersion: $version);
         if (isset($headers['cookie'])) {
             $request = $request->withCookieParams(ServerRequest::cookies(\implode('; ', $headers['cookie'])));
         }
