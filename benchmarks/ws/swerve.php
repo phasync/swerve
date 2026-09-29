@@ -9,7 +9,7 @@
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 use Swerve\Http\WebSocket;
 use Swerve\Swerve;
 
@@ -33,10 +33,10 @@ return new class implements RequestHandlerInterface {
             '/publish' => (function () use ($request) {
                 Swerve::publish('news', (string) $request->getBody());
 
-                return new Response('ok');
+                return new Response(200, [], 'ok');
             })(),
-            '/stats' => new Response(\json_encode(['pid' => \getmypid(), 'sockets' => $this->sockets, 'memory' => \memory_get_usage(true)])),
-            default => new Response('Not found', [], 404),
+            '/stats' => new Response(200, [], \json_encode(['pid' => \getmypid(), 'sockets' => $this->sockets, 'memory' => \memory_get_usage(true)])),
+            default => new Response(404, [], 'Not found'),
         };
     }
 };

@@ -8,7 +8,7 @@ use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 
 /**
  * A connection that switches from HTTP to another protocol (RFC 9110, section 7.8): the base
@@ -63,7 +63,7 @@ abstract class ProtocolUpgrade
             }
         });
 
-        return new Response($connection->out, ['Connection' => 'Upgrade'] + $headers, 101);
+        return new Response(101, ['Connection' => 'Upgrade'] + $headers, $connection->out);
     }
 
     /**

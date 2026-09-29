@@ -4,6 +4,8 @@
  * swerve --http: every worker speaks HTTP/1.1 on the socket itself.
  */
 
+use phasync\Psr\Response;
+
 beforeEach(function () {
     [$this->master, $this->addr] = native_start();
 });
@@ -478,8 +480,7 @@ test('200 pipelined requests in one write get their responses in order', functio
     expect($bodies)->toBe(array_fill(0, 200, 'Hello'));
 });
 
-test('Nyholm validates request header values (the server relies on it, see handleRequest)', function () {
-    // If the PSR-7 implementation changes, this fails: the server needs another header check
+test('a header value with a control character is rejected with 400 (handleRequest\'s own check, not the PSR-7 implementation\'s)', function () {
     $conn = native_connect($this->addr);
     fwrite($conn, "GET /hello HTTP/1.1\r\nHost: t\r\nX-A: a\x01b\r\n\r\n");
 
@@ -648,8 +649,12 @@ test('a large file-backed response body goes out in writes of up to 64 KiB, not 
     $handler = new class implements Psr\Http\Server\RequestHandlerInterface {
         public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface
         {
-            // Over 2 MB: Nyholm keeps it in a temporary file, which PHP reads 8 KiB at a time
-            return new Nyholm\Psr7\Response(200, [], Nyholm\Psr7\Stream::create(str_repeat('x', 3000000)));
+            // Forced to disk from the start (php://temp reads 8 KiB at a time by default)
+            $fp = fopen('php://temp/maxmemory:0', 'r+');
+            fwrite($fp, str_repeat('x', 3000000));
+            rewind($fp);
+
+            return new Response(200, [], phasync\Psr\StreamFactory::create($fp));
         }
     };
     $packets = native_serve_packets($handler, "GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
@@ -813,7 +818,7 @@ function read_in_pieces_handler(int $size): Psr\Http\Server\RequestHandlerInterf
                 $data .= $body->read($this->size);
             }
 
-            return new Nyholm\Psr7\Response(200, [], strlen($data) . ' ' . md5($data));
+            return new Response(200, [], strlen($data) . ' ' . md5($data));
         }
     };
 }
@@ -875,7 +880,7 @@ test('a client leaving mid-body makes the body throw a RuntimeException, as PSR-
                 $this->caught = $e::class;
             }
 
-            return new Nyholm\Psr7\Response(400);
+            return new Response(400);
         }
     };
     native_serve_packets($handler, ["POST / HTTP/1.1\r\nHost: t\r\nContent-Length: 100\r\n\r\n", 'abc'], true);
@@ -947,7 +952,7 @@ test('pipelined requests already buffered let the worker\'s other coroutines run
         {
             usleep(1000); // 1 ms of work that never suspends
 
-            return new Nyholm\Psr7\Response(200, [], 'ok');
+            return new Response(200, [], 'ok');
         }
     };
     $gap = phasync::run(function () use ($handler) {
@@ -990,7 +995,7 @@ test('a request body the kernel already holds is read without an event-loop wait
                 $size += strlen($body->read(65536));
             }
 
-            return new Nyholm\Psr7\Response(200, [], "$size " . ($this->ticks - $start));
+            return new Response(200, [], "$size " . ($this->ticks - $start));
         }
     };
     $body = phasync::run(function () use ($handler) {
@@ -1081,7 +1086,7 @@ test('a chunked response body is copied once into its chunk framing', function (
                 return $piece;
             };
 
-            return new Nyholm\Psr7\Response(200, [], fixture_callback_stream($read, function () use (&$i) {
+            return new Response(200, [], fixture_callback_stream($read, function () use (&$i) {
                 return $i > 3;
             }));
         }
@@ -1158,7 +1163,7 @@ test('a request head arriving a byte at a time takes linear time, not quadratic'
     $handler = new class implements Psr\Http\Server\RequestHandlerInterface {
         public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface
         {
-            return new Nyholm\Psr7\Response(200, [], 'ok');
+            return new Response(200, [], 'ok');
         }
     };
     $time = function (int $size) use ($handler): float {

@@ -5,7 +5,7 @@ namespace Swerve\Http;
 use Psr\Http\Message\MessageInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
-use Swerve\Http\Message\ServerRequest as Message;
+use phasync\Psr\ServerRequest as Message;
 
 /**
  * A request in HTTP mode: its form data is parsed when first asked for, see FormBody.

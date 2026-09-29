@@ -6,7 +6,7 @@ require __DIR__ . '/../common/page.php';
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 
 return new class implements RequestHandlerInterface {
     private bool $ext;
@@ -20,15 +20,15 @@ return new class implements RequestHandlerInterface {
     {
         switch ($request->getUri()->getPath()) {
             case '/json':
-                return new Response(\json_encode(['hello' => 'world']), ['Content-Type' => 'application/json']);
+                return new Response(200, ['Content-Type' => 'application/json'], \json_encode(['hello' => 'world']));
             case '/wait':
                 $this->ext ? \usleep(10000) : \phasync\sleep(0.01);
 
-                return new Response('Waited', ['Content-Type' => 'text/plain']);
+                return new Response(200, ['Content-Type' => 'text/plain'], 'Waited');
             case '/page':
-                return new Response(render_page(), ['Content-Type' => 'text/html; charset=utf-8']);
+                return new Response(200, ['Content-Type' => 'text/html; charset=utf-8'], render_page());
             default:
-                return new Response('Hello', ['Content-Type' => 'text/plain']);
+                return new Response(200, ['Content-Type' => 'text/plain'], 'Hello');
         }
     }
 };

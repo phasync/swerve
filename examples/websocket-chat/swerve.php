@@ -12,7 +12,7 @@ use phasync\CancelledException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 use Swerve\Http\WebSocket;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
@@ -21,7 +21,7 @@ return new class implements RequestHandlerInterface {
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         if ('/chat' !== $request->getUri()->getPath()) {
-            return new Response('Not found', [], 404);
+            return new Response(404, [], 'Not found');
         }
 
         return WebSocket::from($request, static function (WebSocket $ws) {

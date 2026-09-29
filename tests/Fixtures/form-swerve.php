@@ -5,7 +5,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\UploadedFileInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 
 return new class implements RequestHandlerInterface {
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -19,6 +19,6 @@ return new class implements RequestHandlerInterface {
             return array_map($walk, $f);
         };
 
-        return new Response(json_encode(['post' => $request->getParsedBody(), 'files' => $walk($request->getUploadedFiles()), 'input' => (string) $request->getBody()]), ['Content-Type' => 'application/json']);
+        return new Response(200, ['Content-Type' => 'application/json'], json_encode(['post' => $request->getParsedBody(), 'files' => $walk($request->getUploadedFiles()), 'input' => (string) $request->getBody()]));
     }
 };

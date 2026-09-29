@@ -4,7 +4,7 @@
  * The application the tests serve, returned the way a project's swerve.php returns it.
  */
 
-use Nyholm\Psr7\Response;
+use phasync\Psr\Response;
 use phasync\Psr\UnbufferedStream;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -311,7 +311,7 @@ function fixture_ws(ServerRequestInterface $request, bool $bye): ResponseInterfa
 }
 
 /**
- * A response whose getHeaders() returns $headers as they are, bypassing Nyholm's validation.
+ * A response whose getHeaders() returns $headers as they are, bypassing header normalization.
  */
 function fixture_raw_headers(array $headers): ResponseInterface
 {
@@ -483,11 +483,11 @@ return new class($version) implements RequestHandlerInterface {
                     \fclose($b);
                 });
 
-                return new Response(200, isset($query['cl']) ? ['Content-Length' => $query['cl']] : [], Nyholm\Psr7\Stream::create($a));
+                return new Response(200, isset($query['cl']) ? ['Content-Length' => $query['cl']] : [], phasync\Psr\StreamFactory::create($a));
             })(),
             // Streams whose getSize() is 0 although they have data
-            '/pipe'        => new Response(200, [], Nyholm\Psr7\Stream::create(\popen('echo from-pipe', 'r'))),
-            '/proc'        => new Response(200, [], Nyholm\Psr7\Stream::create(\fopen('/proc/self/stat', 'r'))),
+            '/pipe'        => new Response(200, [], phasync\Psr\StreamFactory::create(\popen('echo from-pipe', 'r'))),
+            '/proc'        => new Response(200, [], phasync\Psr\StreamFactory::create(\fopen('/proc/self/stat', 'r'))),
             // phasync::finally() in handle(): runs after the whole (streamed) response, before the
             // next request on the connection
             '/finally-stream' => (static function () {
@@ -580,7 +580,10 @@ return new class($version) implements RequestHandlerInterface {
 
                 return new Response(200, [], (string) \memory_get_usage(true));
             })(),
-            '/spin'        => (static function () {
+            // Uninterruptible: with phasync-ext, checkpoint preemption would let other
+            // coroutines (the heartbeat among them) run between iterations, healing the
+            // very stall this route exists to simulate for the watchdog tests.
+            '/spin'        => (#[\phasync\Uninterruptible] static function () {
                 while (true) {
                 }
             })(),

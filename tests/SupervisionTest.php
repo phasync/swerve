@@ -8,6 +8,8 @@
  * processes are killed by process group afterwards (see Pest.php).
  */
 
+use phasync\Psr\Response;
+
 /**
  * A fresh directory for the fixture's SWERVE_TEST_DIR, with version.php returning $version.
  */
@@ -977,7 +979,7 @@ test('drain answers a request that reached an idle keep-alive connection before 
     $handler = new class implements Psr\Http\Server\RequestHandlerInterface {
         public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface
         {
-            return new Nyholm\Psr7\Response(200, [], 'Hello');
+            return new Response(200, [], 'Hello');
         }
     };
     [$first, $rest] = phasync::run(function () use ($handler) {

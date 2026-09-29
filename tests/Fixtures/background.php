@@ -4,7 +4,7 @@
  * An application that starts a coroutine as it loads, running for the worker's life.
  */
 
-use Nyholm\Psr7\Response;
+use phasync\Psr\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;

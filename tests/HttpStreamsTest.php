@@ -8,7 +8,7 @@
  * built on the two streams (see the fixture), not code of swerve's.
  */
 
-use Nyholm\Psr7\Response;
+use phasync\Psr\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;

@@ -1,7 +1,7 @@
 <?php
 
-use Nyholm\Psr7\Response;
-use Nyholm\Psr7\ServerRequest;
+use phasync\Psr\Response;
+use phasync\Psr\ServerRequest;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
@@ -38,7 +38,7 @@ function static_get(StaticFiles $files, string $target, array $headers = [], str
         }
     };
 
-    return $files->process(new ServerRequest($method, $target, $headers), $app);
+    return $files->process(new ServerRequest($method, $target, '', $headers), $app);
 }
 
 test('a file is served with its type, length, Last-Modified and ETag; anything else goes to the application', function () {

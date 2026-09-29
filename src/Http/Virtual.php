@@ -6,7 +6,7 @@ use phasync;
 use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 
 /**
  * Run code written for PHP-FPM inside a swerve request: what it echoes, the headers, cookies and
@@ -163,6 +163,6 @@ final class Virtual
         }
         $reason = null !== $statusLine && \preg_match('/^HTTP\/\S+\s+\d{3}\s+(.+)$/', $statusLine, $m) ? $m[1] : null;
 
-        return new Response($sapi->body, $headers, $status, $reason);
+        return new Response($status, $headers, $sapi->body, '1.1', $reason);
     }
 }

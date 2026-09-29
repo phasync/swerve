@@ -13,7 +13,7 @@ use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
 
@@ -23,7 +23,7 @@ return new class implements RequestHandlerInterface {
         return match ([$request->getMethod(), $request->getUri()->getPath()]) {
             ['GET', '/events']    => $this->events(),
             ['POST', '/messages'] => $this->post($request),
-            default               => new Response('Not found', [], 404),
+            default               => new Response(404, [], 'Not found'),
         };
     }
 
@@ -56,7 +56,7 @@ return new class implements RequestHandlerInterface {
             }
         });
 
-        return new Response($out, ['Content-Type' => 'text/event-stream', 'Cache-Control' => 'no-cache'], 200);
+        return new Response(200, ['Content-Type' => 'text/event-stream', 'Cache-Control' => 'no-cache'], $out);
     }
 
     private function post(ServerRequestInterface $request): ResponseInterface
@@ -65,10 +65,10 @@ return new class implements RequestHandlerInterface {
         $name = \trim((string) ($data['name'] ?? ''));
         $text = \trim((string) ($data['text'] ?? ''));
         if ('' === $name || '' === $text || \mb_strlen($name) > 40 || \mb_strlen($text) > 2000) {
-            return new Response('name (1-40) and text (1-2000) required', ['Content-Type' => 'text/plain'], 422);
+            return new Response(422, ['Content-Type' => 'text/plain'], 'name (1-40) and text (1-2000) required');
         }
         Swerve::publish('chat', \json_encode(['name' => $name, 'text' => $text, 'at' => \time()]));
 
-        return new Response('', [], 204);
+        return new Response(204, [], '');
     }
 };

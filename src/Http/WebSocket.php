@@ -7,7 +7,7 @@ use phasync\CancelledException;
 use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Swerve\Http\Message\Response;
+use phasync\Psr\Response;
 
 /**
  * A WebSocket connection (RFC 6455), server side.
@@ -201,11 +201,11 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
     protected function handshake(ServerRequestInterface $request): array|ResponseInterface
     {
         if ('websocket' !== \strtolower($request->getHeaderLine('Upgrade'))) {
-            return new Response('This address speaks WebSocket', ['Content-Type' => 'text/plain', 'Upgrade' => 'websocket'], 426);
+            return new Response(426, ['Content-Type' => 'text/plain', 'Upgrade' => 'websocket'], 'This address speaks WebSocket');
         }
         $key = $request->getHeaderLine('Sec-WebSocket-Key');
         if ('GET' !== $request->getMethod() || '13' !== $request->getHeaderLine('Sec-WebSocket-Version') || 16 !== \strlen((string) \base64_decode($key, true))) {
-            return new Response('Not a WebSocket handshake', ['Content-Type' => 'text/plain', 'Sec-WebSocket-Version' => '13'], 400);
+            return new Response(400, ['Content-Type' => 'text/plain', 'Sec-WebSocket-Version' => '13'], 'Not a WebSocket handshake');
         }
 
         return ['Upgrade' => 'websocket', 'Sec-WebSocket-Accept' => \base64_encode(\sha1($key . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true))];
