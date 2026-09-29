@@ -1,0 +1,62 @@
+00:29:13 r1 N=2 swerve c=1000: 95348 req/s, p99 10.90ms  
+00:29:27 r1 N=2 swerve c=10000: 172775 req/s, p99 12.20ms   Socket errors: connect 0, read 270, write 0, timeout 0 
+00:29:41 r1 N=2 swerve c=25000: 165797 req/s, p99 11.93ms   Socket errors: connect 0, read 2496, write 0, timeout 0 
+00:29:57 r1 N=2 swerve-ext c=1000: 73707 req/s, p99 14.96ms  
+00:30:10 r1 N=2 swerve-ext c=10000: 148088 req/s, p99 73.89ms  
+00:30:24 r1 N=2 swerve-ext c=25000: 130497 req/s, p99 193.11ms  
+00:30:40 r1 N=2 swoole c=1000: 89070 req/s, p99 12.60ms  
+00:30:54 r1 N=2 swoole c=10000: 143169 req/s, p99 73.70ms  
+00:31:08 r1 N=2 swoole c=25000: 143506 req/s, p99 192.67ms  
+00:31:23 r1 N=2 openswoole c=1000: 88152 req/s, p99 12.94ms  
+00:31:37 r1 N=2 openswoole c=10000: 120205 req/s, p99 87.01ms  
+00:31:51 r1 N=2 openswoole c=25000: 92762 req/s, p99 336.50ms  
+00:32:07 r1 N=2 react c=1000: 70872 req/s, p99 15.80ms  
+00:32:21 r1 N=2 react c=10000: 73348 req/s, p99 3.41s  
+00:32:36 r1 N=8 swerve c=1000: 95922 req/s, p99 10.46ms  
+00:32:50 r1 N=8 swerve c=10000: 548056 req/s, p99 619.94ms   Socket errors: connect 0, read 1314, write 0, timeout 0 
+00:33:04 r1 N=8 swerve c=25000: 528573 req/s, p99 695.71ms   Socket errors: connect 0, read 11521, write 0, timeout 0 
+00:33:20 r1 N=8 swerve-ext c=1000: 86079 req/s, p99 12.02ms  
+00:33:33 r1 N=8 swerve-ext c=10000: 501246 req/s, p99 22.16ms  
+00:33:47 r1 N=8 swerve-ext c=25000: 434825 req/s, p99 59.47ms  
+00:34:03 r1 N=8 swoole c=1000: 94882 req/s, p99 11.69ms  
+00:34:17 r1 N=8 swoole c=10000: 624154 req/s, p99 19.47ms  
+00:34:30 r1 N=8 swoole c=25000: 478751 req/s, p99 107.50ms  
+00:34:46 r1 N=8 openswoole c=1000: 93806 req/s, p99 11.89ms  
+00:35:00 r1 N=8 openswoole c=10000: 561733 req/s, p99 20.55ms  
+00:35:14 r1 N=8 openswoole c=25000: 405410 req/s, p99 128.43ms  
+00:35:29 r1 N=8 react c=1000: 85000 req/s, p99 12.65ms  
+00:35:43 r1 N=8 react c=10000: 223155 req/s, p99 1.33s  
+00:35:57 r1 N=8 react c=25000: 201674 req/s, p99 4.69s  
+00:36:13 r2 N=2 swerve c=1000: 95189 req/s, p99 10.85ms  
+00:36:26 r2 N=2 swerve c=10000: 169561 req/s, p99 12.76ms   Socket errors: connect 0, read 450, write 0, timeout 0 
+00:36:40 r2 N=2 swerve c=25000: 163810 req/s, p99 11.80ms   Socket errors: connect 0, read 1897, write 0, timeout 0 
+00:36:56 r2 N=2 swerve-ext c=1000: 68219 req/s, p99 14.87ms  
+00:37:09 r2 N=2 swerve-ext c=10000: 148143 req/s, p99 72.37ms  
+00:37:24 r2 N=2 swerve-ext c=25000: 126392 req/s, p99 202.85ms  
+00:37:39 r2 N=2 swoole c=1000: 89364 req/s, p99 12.57ms  
+00:37:53 r2 N=2 swoole c=10000: 146110 req/s, p99 73.63ms  
+00:38:07 r2 N=2 swoole c=25000: 143512 req/s, p99 190.38ms  
+00:38:23 r2 N=2 openswoole c=1000: 86997 req/s, p99 13.04ms  
+00:38:36 r2 N=2 openswoole c=10000: 120679 req/s, p99 88.93ms  
+00:38:50 r2 N=2 openswoole c=25000: 93996 req/s, p99 597.30ms  
+00:39:06 r2 N=2 react c=1000: 74137 req/s, p99 15.45ms  
+00:39:20 r2 N=2 react c=10000: 68541 req/s, p99 3.29s  
+00:39:35 r2 N=8 swerve c=1000: 95663 req/s, p99 10.48ms  
+00:39:49 r2 N=8 swerve c=10000: 543595 req/s, p99 2.98s   Socket errors: connect 0, read 2396, write 0, timeout 0 
+00:40:03 r2 N=8 swerve c=25000: 531114 req/s, p99 17.22ms   Socket errors: connect 0, read 11120, write 0, timeout 0 
+00:40:19 r2 N=8 swerve-ext c=1000: 85741 req/s, p99 12.01ms  
+00:40:32 r2 N=8 swerve-ext c=10000: 500470 req/s, p99 22.02ms  
+00:40:46 r2 N=8 swerve-ext c=25000: 434140 req/s, p99 60.42ms  
+00:41:02 r2 N=8 swoole c=1000: 94822 req/s, p99 11.70ms  
+00:41:16 r2 N=8 swoole c=10000: 617927 req/s, p99 20.34ms  
+00:41:30 r2 N=8 swoole c=25000: 477490 req/s, p99 111.77ms  
+00:41:45 r2 N=8 openswoole c=1000: 93552 req/s, p99 11.94ms  
+00:41:59 r2 N=8 openswoole c=10000: 552990 req/s, p99 20.91ms  
+00:42:13 r2 N=8 openswoole c=25000: 403918 req/s, p99 122.38ms  
+00:42:29 r2 N=8 react c=1000: 83585 req/s, p99 12.66ms  
+00:42:42 r2 N=8 react c=10000: 222635 req/s, p99 334.48ms  
+00:42:56 r2 N=8 react c=25000: 202559 req/s, p99 4.74s  
+00:43:14 r1 N=2 rr c=1000: 99 req/s, p99 9.90s  
+00:43:35 r1 N=2 franken c=1000: 103 req/s, p99 9.79s  
+00:44:02 r1 N=8 rr c=1000: 701 req/s, p99 2.27s  
+00:44:19 r1 N=8 franken c=1000: 706 req/s, p99 2.24s  

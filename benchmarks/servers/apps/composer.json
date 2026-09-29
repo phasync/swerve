@@ -1,0 +1,17 @@
+{
+    "description": "The PSR-15 benchmark application and each server's PSR-7 bridge (swerve brings its own vendor)",
+    "require": {
+        "php": ">=8.5",
+        "nyholm/psr7": "^1.8",
+        "nyholm/psr7-server": "^1.1",
+        "psr/http-server-handler": "^1.0",
+        "spiral/roadrunner-http": "^4.1",
+        "react/http": "^1.11",
+        "react/promise-timer": "^1.11"
+    },
+    "autoload": {
+        "classmap": ["common/Handler.php"],
+        "files": ["common/page.php"]
+    },
+    "config": {"optimize-autoloader": true}
+}

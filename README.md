@@ -53,19 +53,32 @@ requests and connections at once on [phasync](https://github.com/phasync/phasync
 - **Yours to own.** MIT, with no third-party dependencies beyond PSR interfaces. See
   [the Ennerd philosophy](PHILOSOPHY.md).
 
-Hello world over HTTP/1.1 with keep-alive on one 2-socket, 56-thread server, load from a
-second machine, each server at its fastest worker or thread count (requests per second;
-[method, scripts and raw results](benchmarks/)):
+The same PSR-15 handler on every server, 2 and 8 workers on one CCD of a Ryzen 9 9950X3D, wrk on
+the other, over loopback ([method, scripts and raw results](benchmarks/servers/SUMMARY.md)).
+8 workers serve 3.9× what 2 do.
 
-| Connections | Node http | Go net/http | swerve | Node + Express | swerve + Slim |
-|---|---:|---:|---:|---:|---:|
-| 64 | 246,024 | 196,816 | 235,568 | 67,446 | 212,235 |
-| 1,024 | 216,529 | 317,434 | 284,562 | 92,365 | 248,132 |
-| 10,000 | 163,444 | 183,374 | 210,986 | 85,381 | 194,926 |
-| ~28,000 | 135,011 | 162,497 | 157,152 | 73,971 | 160,221 |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/hello-dark.svg">
+  <img alt="Hello world, requests per second: Swoole 1.01M, OpenSwoole 966k, swerve 860k, swerve + phasync-ext 846k, ReactPHP 617k, FrankenPHP 457k, RoadRunner 144k at 8 workers" src="benchmarks/charts/hello-light.svg">
+</picture>
 
-Below about 1,000 connections per worker swerve is fastest on PHP's own `stream_select()`;
-above that it needs phasync-ext, which waits with epoll.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/page-dark.svg">
+  <img alt="10 KB page, requests per second at 8 workers: Swoole 220k, OpenSwoole 215k, swerve + phasync-ext 214k, swerve 213k, ReactPHP 200k, FrankenPHP 135k, RoadRunner 85k" src="benchmarks/charts/page-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/wait-dark.svg">
+  <img alt="10 ms wait, 10,000 connections, 8 workers: Swoole 621k, OpenSwoole 557k, swerve + phasync-ext 501k, ReactPHP 223k, FrankenPHP 706, RoadRunner 701 requests per second" src="benchmarks/charts/wait-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/websocket-dark.svg">
+  <img alt="Time for a message to reach the last of 50,000 WebSockets: swerve + phasync-ext 78 ms, ReactPHP 150 ms, Swoole 199 ms, OpenSwoole 203 ms" src="benchmarks/charts/websocket-light.svg">
+</picture>
+
+Below about 1,000 connections per worker swerve runs on PHP's own `stream_select()`; above that
+it needs phasync-ext, which waits with epoll.
 
 ### Coming from PHP-FPM
 

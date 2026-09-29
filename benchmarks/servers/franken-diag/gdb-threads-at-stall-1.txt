@@ -1,0 +1,2678 @@
+[New LWP 50064]
+[New LWP 50063]
+[New LWP 50062]
+[New LWP 50061]
+[New LWP 50060]
+[New LWP 50059]
+[New LWP 50058]
+[New LWP 50057]
+[New LWP 50056]
+[New LWP 50055]
+[New LWP 50054]
+[New LWP 50053]
+[New LWP 50052]
+[New LWP 50051]
+[New LWP 50050]
+[New LWP 50049]
+[New LWP 50048]
+[New LWP 50047]
+[New LWP 50046]
+[New LWP 50045]
+[New LWP 50044]
+[New LWP 50043]
+[New LWP 50042]
+[New LWP 50041]
+[New LWP 50040]
+[New LWP 50039]
+[New LWP 50038]
+[New LWP 50037]
+[New LWP 50036]
+[New LWP 50035]
+[New LWP 50034]
+[New LWP 50033]
+[New LWP 50032]
+[New LWP 50031]
+[New LWP 50030]
+[New LWP 50029]
+[New LWP 50028]
+[New LWP 50027]
+[New LWP 50026]
+[New LWP 50025]
+[New LWP 50024]
+[New LWP 50023]
+[New LWP 50022]
+[New LWP 50021]
+[New LWP 50020]
+[New LWP 50019]
+[New LWP 50018]
+[New LWP 50017]
+[New LWP 50016]
+[New LWP 50015]
+[New LWP 50014]
+[New LWP 50013]
+[New LWP 50012]
+[New LWP 50011]
+[New LWP 50010]
+[New LWP 50009]
+[New LWP 50008]
+[New LWP 50007]
+[New LWP 50006]
+[New LWP 50005]
+[New LWP 50004]
+[New LWP 50003]
+[New LWP 50002]
+[New LWP 50001]
+[New LWP 50000]
+[New LWP 49999]
+[New LWP 49998]
+[New LWP 49997]
+[New LWP 49996]
+[New LWP 49995]
+[New LWP 49994]
+[New LWP 49993]
+[New LWP 49992]
+[New LWP 49991]
+[New LWP 49990]
+[New LWP 49989]
+[New LWP 49988]
+[New LWP 49987]
+[New LWP 49986]
+[New LWP 49985]
+[New LWP 49984]
+[New LWP 49983]
+[New LWP 49982]
+[New LWP 49981]
+[New LWP 49980]
+[New LWP 49979]
+[New LWP 49978]
+[New LWP 49977]
+[New LWP 49976]
+[New LWP 49975]
+[New LWP 49974]
+[New LWP 49973]
+[New LWP 49972]
+[New LWP 49971]
+[New LWP 49970]
+[New LWP 49969]
+[New LWP 49968]
+[New LWP 49967]
+[New LWP 49966]
+[New LWP 49965]
+[New LWP 49964]
+[New LWP 49963]
+[New LWP 49962]
+[New LWP 49961]
+[New LWP 49960]
+[New LWP 49959]
+[New LWP 49958]
+[New LWP 49957]
+[New LWP 49956]
+[New LWP 49955]
+[New LWP 49954]
+[New LWP 49953]
+[New LWP 49952]
+[New LWP 49951]
+[New LWP 49950]
+[New LWP 49949]
+[New LWP 49948]
+[New LWP 49947]
+[New LWP 49946]
+[New LWP 49945]
+[New LWP 49944]
+[New LWP 49943]
+[New LWP 49942]
+[New LWP 49941]
+[New LWP 49940]
+[New LWP 49939]
+[New LWP 49938]
+[New LWP 49937]
+[New LWP 49936]
+[New LWP 49935]
+[New LWP 49934]
+[New LWP 49933]
+[New LWP 49932]
+[New LWP 49931]
+[New LWP 49930]
+[New LWP 49929]
+[New LWP 49928]
+[New LWP 49927]
+[New LWP 49926]
+[New LWP 49925]
+[New LWP 49924]
+[New LWP 49923]
+[New LWP 49922]
+[New LWP 49921]
+[New LWP 49920]
+[New LWP 49919]
+[New LWP 49918]
+[New LWP 49917]
+[New LWP 49916]
+[New LWP 49915]
+[New LWP 49914]
+[New LWP 49913]
+[New LWP 49912]
+[New LWP 49911]
+[New LWP 49910]
+[New LWP 49909]
+[New LWP 49908]
+[New LWP 49907]
+[New LWP 49906]
+[New LWP 49905]
+[New LWP 49904]
+[New LWP 49903]
+[New LWP 49902]
+[New LWP 49901]
+[New LWP 49900]
+[New LWP 49899]
+[New LWP 49898]
+[New LWP 49897]
+[New LWP 49896]
+[New LWP 49895]
+[New LWP 49894]
+[New LWP 49893]
+[New LWP 49892]
+[New LWP 49891]
+[New LWP 49890]
+[New LWP 49889]
+[New LWP 49888]
+[New LWP 49887]
+[New LWP 49886]
+[New LWP 49885]
+[New LWP 49884]
+[New LWP 49883]
+[New LWP 49882]
+[New LWP 49881]
+[New LWP 49880]
+[New LWP 49879]
+[New LWP 49878]
+[New LWP 49877]
+[New LWP 49876]
+[New LWP 49875]
+[New LWP 49874]
+[New LWP 49873]
+[New LWP 49872]
+[New LWP 49871]
+[New LWP 49870]
+[New LWP 49869]
+[New LWP 49868]
+[New LWP 49867]
+[New LWP 49866]
+[New LWP 49865]
+[New LWP 49864]
+[New LWP 49863]
+[New LWP 49862]
+[New LWP 49861]
+[New LWP 49860]
+[New LWP 49859]
+[New LWP 49858]
+[New LWP 49857]
+[New LWP 49856]
+[New LWP 49855]
+[New LWP 49854]
+[New LWP 49853]
+[New LWP 49852]
+[New LWP 49851]
+[New LWP 49850]
+[New LWP 49849]
+[New LWP 49848]
+[New LWP 49847]
+[New LWP 49846]
+[New LWP 49845]
+[New LWP 49844]
+[New LWP 49843]
+[New LWP 49842]
+[New LWP 49841]
+[New LWP 49840]
+[New LWP 49839]
+[New LWP 49838]
+[New LWP 49837]
+[New LWP 49836]
+[New LWP 49835]
+[New LWP 49834]
+[New LWP 49833]
+[New LWP 49832]
+[New LWP 49831]
+[New LWP 49830]
+[New LWP 49829]
+[New LWP 49828]
+[New LWP 49827]
+[New LWP 49826]
+[New LWP 49815]
+[New LWP 49816]
+[New LWP 49814]
+[New LWP 49813]
+[New LWP 49812]
+[New LWP 49811]
+[New LWP 49810]
+[New LWP 49809]
+[New LWP 49808]
+[New LWP 49807]
+[New LWP 49806]
+[New LWP 49805]
+[New LWP 49804]
+[New LWP 49803]
+[New LWP 49802]
+[New LWP 49801]
+[New LWP 49800]
+[New LWP 49798]
+[New LWP 49799]
+[New LWP 49797]
+[New LWP 49796]
+[New LWP 49795]
+[New LWP 49794]
+[New LWP 49793]
+[New LWP 49792]
+[New LWP 49791]
+[New LWP 49790]
+[New LWP 49789]
+[New LWP 49788]
+[New LWP 49787]
+[New LWP 49786]
+[New LWP 49785]
+[New LWP 49784]
+[New LWP 49783]
+[New LWP 49782]
+[New LWP 49781]
+[New LWP 49780]
+[New LWP 49779]
+[New LWP 49778]
+[New LWP 49777]
+[New LWP 49776]
+[New LWP 49775]
+[New LWP 49774]
+[New LWP 49772]
+[New LWP 49773]
+[New LWP 49771]
+[New LWP 49770]
+[New LWP 49769]
+[New LWP 49768]
+[New LWP 49767]
+[New LWP 49766]
+[New LWP 49765]
+[New LWP 49764]
+[New LWP 49763]
+[New LWP 49762]
+[New LWP 49761]
+[New LWP 49760]
+[New LWP 49759]
+[New LWP 49758]
+[New LWP 49757]
+[New LWP 49756]
+[New LWP 49755]
+[New LWP 49754]
+[New LWP 49753]
+[New LWP 49752]
+[New LWP 49751]
+[New LWP 49750]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+0x0000578e40d15a43 in ?? ()
+
+Thread 307 (Thread 0x7e5b85f9f6c0 (LWP 49750) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40cbfe85 in ?? ()
+#2  0x0000578e4a3d6d20 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x00007e5b85f9e918 in ?? ()
+#5  0x0000000000000000 in ?? ()
+
+Thread 306 (Thread 0x7e5b8579e6c0 (LWP 49751) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850190f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 305 (Thread 0x7e5b84f9d6c0 (LWP 49752) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850190f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 304 (Thread 0x7e5b77fff6c0 (LWP 49753) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501980160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 303 (Thread 0x7e5b777fe6c0 (LWP 49754) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000578e4a4c6b58 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 302 (Thread 0x7e5b76ffd6c0 (LWP 49755) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501cbe160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 301 (Thread 0x7e5b767fc6c0 (LWP 49756) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501cbe960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 300 (Thread 0x7e5b75ffb6c0 (LWP 49757) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501cbf160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 299 (Thread 0x7e5b757fa6c0 (LWP 49758) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40cbfe10 in ?? ()
+#2  0x0000578e4a4c6de0 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 298 (Thread 0x7e5b74ff96c0 (LWP 49759) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501d80160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 297 (Thread 0x7e5b5ffff6c0 (LWP 49760) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501ce4160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 296 (Thread 0x7e5b5f7fe6c0 (LWP 49761) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501d80960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 295 (Thread 0x7e5b5effd6c0 (LWP 49762) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501c7e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 294 (Thread 0x7e5b5e7fc6c0 (LWP 49763) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501c7e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 293 (Thread 0x7e5b5dffb6c0 (LWP 49764) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501ce5160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 292 (Thread 0x7e5b5d7fa6c0 (LWP 49765) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502000160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 291 (Thread 0x7e5b5cff96c0 (LWP 49766) "php-main"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850190e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 290 (Thread 0x7e5b34ffd6c0 (LWP 49767) "php-a"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b34ffa320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 289 (Thread 0x7e5b357fe6c0 (LWP 49768) "php-3"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b357fb320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 288 (Thread 0x7e5b337fa6c0 (LWP 49769) "php-6"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b337f7320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 287 (Thread 0x7e5b347fc6c0 (LWP 49770) "php-1"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b347f9320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 286 (Thread 0x7e5b33ffb6c0 (LWP 49771) "php-20"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b33ff8320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 285 (Thread 0x7e5b327f86c0 (LWP 49773) "php-7"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b327f5320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 284 (Thread 0x7e5b32ff96c0 (LWP 49772) "php-4"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b32ff6320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 283 (Thread 0x7e5b28dfd6c0 (LWP 49774) "php-1f"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b28dfa320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 282 (Thread 0x7e5b295fe6c0 (LWP 49775) "php-1e"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502292960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 281 (Thread 0x7e5b29dff6c0 (LWP 49776) "php-8"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b29dfc320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 280 (Thread 0x7e5b2bfff6c0 (LWP 49777) "php-2"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b2bffc320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 279 (Thread 0x7e5b2b7fe6c0 (LWP 49778) "php-15"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b2b7fb320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 278 (Thread 0x7e5b265f86c0 (LWP 49779) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502000960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 277 (Thread 0x7e5b27dfb6c0 (LWP 49780) "php-b"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b27df8320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 276 (Thread 0x7e5b2a7fc6c0 (LWP 49781) "php-18"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b2a7f9320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 275 (Thread 0x7e5b2affd6c0 (LWP 49782) "php-9"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b2affa320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 274 (Thread 0x7e5b285fc6c0 (LWP 49783) "php-1c"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b285f9320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 273 (Thread 0x7e5b255f66c0 (LWP 49784) "php-1d"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b255f3320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 272 (Thread 0x7e5b30ff56c0 (LWP 49785) "php-1b"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b30ff2320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 271 (Thread 0x7e5b317f66c0 (LWP 49786) "php-16"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b317f3320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 270 (Thread 0x7e5b25df76c0 (LWP 49787) "php-19"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b25df4320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 269 (Thread 0x7e5b31ff76c0 (LWP 49788) "php-17"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b31ff4320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 268 (Thread 0x7e5b275fa6c0 (LWP 49789) "php-1a"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b275f7320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 267 (Thread 0x7e5b26df96c0 (LWP 49790) "php-5"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b26df6320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 266 (Thread 0x7e5b24df56c0 (LWP 49791) "php-0"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185022bf160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 265 (Thread 0x7e5b1ffff6c0 (LWP 49792) "php-12"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1fffc320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 264 (Thread 0x7e5b1f7fe6c0 (LWP 49793) "php-13"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1f7fb320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 263 (Thread 0x7e5b1c7f86c0 (LWP 49794) "php-c"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1c7f5320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 262 (Thread 0x7e5b1bff76c0 (LWP 49795) "php-f"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1bff4320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 261 (Thread 0x7e5b1e7fc6c0 (LWP 49796) "php-14"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1e7f9320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 260 (Thread 0x7e5b1effd6c0 (LWP 49797) "php-11"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1effa320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 259 (Thread 0x7e5b1cff96c0 (LWP 49799) "php-e"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1cff6320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 258 (Thread 0x7e5b1d7fa6c0 (LWP 49798) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501ebf160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 257 (Thread 0x7e5b1dffb6c0 (LWP 49800) "php-d"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1dff8320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 256 (Thread 0x7e5b1b7f66c0 (LWP 49801) "php-10"):
+#0  futex_wait (private=0, expected=2, futex_word=0x578e4a415aa0) at ../sysdeps/nptl/futex-internal.h:146
+#1  __GI___lll_lock_wait (futex=futex@entry=0x578e4a415aa0, private=0) at ./nptl/lowlevellock.c:49
+#2  0x00007e5bccaa01e1 in lll_mutex_lock_optimized (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:48
+#3  ___pthread_mutex_lock (mutex=0x578e4a415aa0) at ./nptl/pthread_mutex_lock.c:93
+#4  0x0000578e4290ea19 in ?? ()
+#5  0x0000578e42506d14 in ?? ()
+#6  0x0000578e42506e45 in php_output_write ()
+#7  0x0000578e38000fae in ?? ()
+#8  0x00007e5b1b7f3320 in ?? ()
+#9  0x0000578e00000001 in ?? ()
+#10 0x000000000000001e in ?? ()
+#11 0x0000000008000004 in ?? ()
+
+Thread 255 (Thread 0x7e5aab3ff6c0 (LWP 49802) "php-a"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502026160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 254 (Thread 0x7e5aaabfe6c0 (LWP 49803) "php-15"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020dc160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 253 (Thread 0x7e5aaa3fd6c0 (LWP 49804) "php-4"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501f52160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 252 (Thread 0x7e5aa9bfc6c0 (LWP 49805) "php-1f"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d86160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 251 (Thread 0x7e5aa93fb6c0 (LWP 49806) "php-1c"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502610160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 250 (Thread 0x7e5aa8bfa6c0 (LWP 49807) "php-e"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850217e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 249 (Thread 0x7e5a73dfd6c0 (LWP 49808) "php-6"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fac160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 248 (Thread 0x7e5a745fe6c0 (LWP 49809) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850227f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 247 (Thread 0x7e5a74dff6c0 (LWP 49810) "php-b"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850250a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 246 (Thread 0x7e5a877fe6c0 (LWP 49811) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185022ed960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 245 (Thread 0x7e5a867fc6c0 (LWP 49812) "php-1e"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850269a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 244 (Thread 0x7e5a86ffd6c0 (LWP 49813) "php-1d"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502488160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 243 (Thread 0x7e5a857fa6c0 (LWP 49814) "php-18"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a0e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 242 (Thread 0x7e5a85ffb6c0 (LWP 49816) "php-1b"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850270e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 241 (Thread 0x7e5a87fff6c0 (LWP 49815) "php-14"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850280e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 240 (Thread 0x7e5a84ff96c0 (LWP 49826) "php-5"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d34160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 239 (Thread 0x7e5a77fff6c0 (LWP 49827) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185029ae160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 238 (Thread 0x7e5a777fe6c0 (LWP 49828) "php-6"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850250a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 237 (Thread 0x7e5a76ffd6c0 (LWP 49829) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850250b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 236 (Thread 0x7e5a767fc6c0 (LWP 49830) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502488960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 235 (Thread 0x7e5a75ffb6c0 (LWP 49831) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502026960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 234 (Thread 0x7e5a757fa6c0 (LWP 49832) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fac960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 233 (Thread 0x7e5a735fc6c0 (LWP 49833) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850217f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 232 (Thread 0x7e5a72dfb6c0 (LWP 49834) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020dc960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 231 (Thread 0x7e5a725fa6c0 (LWP 49835) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502489160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 230 (Thread 0x7e5a715f86c0 (LWP 49836) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fad160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 229 (Thread 0x7e5a71df96c0 (LWP 49837) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850227f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 228 (Thread 0x7e5a70df76c0 (LWP 49838) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502489960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 227 (Thread 0x7e5a63fff6c0 (LWP 49839) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850269a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 226 (Thread 0x7e5a627fc6c0 (LWP 49840) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850270e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 225 (Thread 0x7e5a62ffd6c0 (LWP 49841) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850217f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 224 (Thread 0x7e5a637fe6c0 (LWP 49842) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502610960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 223 (Thread 0x7e5a61ffb6c0 (LWP 49843) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a0e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 222 (Thread 0x7e5a617fa6c0 (LWP 49844) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185029ae960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 221 (Thread 0x7e5a60ff96c0 (LWP 49845) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501f52960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 220 (Thread 0x7e5a43fff6c0 (LWP 49846) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850280e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 219 (Thread 0x7e5a437fe6c0 (LWP 49847) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d34960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 218 (Thread 0x7e5a42ffd6c0 (LWP 49848) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d86960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 217 (Thread 0x7e5a427fc6c0 (LWP 49849) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501f53160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 216 (Thread 0x7e5a41ffb6c0 (LWP 49850) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503396160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 215 (Thread 0x7e5a417fa6c0 (LWP 49851) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185029af160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 214 (Thread 0x7e5a40ff96c0 (LWP 49852) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850267e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 213 (Thread 0x7e5a0bfff6c0 (LWP 49853) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a0f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 212 (Thread 0x7e5a0b7fe6c0 (LWP 49854) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850268a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 211 (Thread 0x7e5a0affd6c0 (LWP 49855) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850270f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 210 (Thread 0x7e5a09ffb6c0 (LWP 49856) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850250b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 209 (Thread 0x7e5a0a7fc6c0 (LWP 49857) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850328a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 208 (Thread 0x7e5a097fa6c0 (LWP 49858) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020dd160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 207 (Thread 0x7e5a08ff96c0 (LWP 49859) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850270f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 206 (Thread 0x7e59fbfff6c0 (LWP 49860) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fad960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 205 (Thread 0x7e59fb7fe6c0 (LWP 49861) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a0f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 204 (Thread 0x7e59faffd6c0 (LWP 49862) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185028d2160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 203 (Thread 0x7e59fa7fc6c0 (LWP 49863) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502064160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 202 (Thread 0x7e59f9ffb6c0 (LWP 49864) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020b8160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 201 (Thread 0x7e59f97fa6c0 (LWP 49865) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502611160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 200 (Thread 0x7e59f8ff96c0 (LWP 49866) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a6a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 199 (Thread 0x7e599bfff6c0 (LWP 49867) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020b8960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 198 (Thread 0x7e599b7fe6c0 (LWP 49868) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850350a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 197 (Thread 0x7e599a7fc6c0 (LWP 49869) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850348a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 196 (Thread 0x7e599affd6c0 (LWP 49870) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502990160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 195 (Thread 0x7e5999ffb6c0 (LWP 49871) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850321e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 194 (Thread 0x7e59997fa6c0 (LWP 49872) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850269b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 193 (Thread 0x7e5998ff96c0 (LWP 49873) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501f53960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 192 (Thread 0x7e597b7fe6c0 (LWP 49874) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503134160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 191 (Thread 0x7e597bfff6c0 (LWP 49875) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502990960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 190 (Thread 0x7e597affd6c0 (LWP 49876) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020b9160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 189 (Thread 0x7e597a7fc6c0 (LWP 49877) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d87160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 188 (Thread 0x7e5979ffb6c0 (LWP 49878) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502de4160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 187 (Thread 0x7e59797fa6c0 (LWP 49879) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850280f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 186 (Thread 0x7e5978ff96c0 (LWP 49880) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850328a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 185 (Thread 0x7e595bfff6c0 (LWP 49881) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503134960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 184 (Thread 0x7e595affd6c0 (LWP 49882) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850268a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 183 (Thread 0x7e595b7fe6c0 (LWP 49883) "php-4"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020b9960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 182 (Thread 0x7e595a7fc6c0 (LWP 49884) "php-12"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503396960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 181 (Thread 0x7e5959ffb6c0 (LWP 49885) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502578160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 180 (Thread 0x7e59597fa6c0 (LWP 49886) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850331c160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 179 (Thread 0x7e5958ff96c0 (LWP 49887) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502746160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 178 (Thread 0x7e592f7fe6c0 (LWP 49888) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502076160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 177 (Thread 0x7e592ffff6c0 (LWP 49889) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850321e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 176 (Thread 0x7e5937fff6c0 (LWP 49890) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fd8160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 175 (Thread 0x7e59377fe6c0 (LWP 49891) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502027160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 174 (Thread 0x7e5936ffd6c0 (LWP 49892) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502064960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 173 (Thread 0x7e59367fc6c0 (LWP 49893) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502746960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 172 (Thread 0x7e5935ffb6c0 (LWP 49894) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502578960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 171 (Thread 0x7e59357fa6c0 (LWP 49895) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502611960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 170 (Thread 0x7e5934ff96c0 (LWP 49896) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502991160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 169 (Thread 0x7e592effd6c0 (LWP 49897) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a6a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 168 (Thread 0x7e592e7fc6c0 (LWP 49898) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cfa160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 167 (Thread 0x7e592dffb6c0 (LWP 49899) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850348a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 166 (Thread 0x7e592d7fa6c0 (LWP 49900) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185023fa160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 165 (Thread 0x7e592cff96c0 (LWP 49901) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185029af960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 164 (Thread 0x7e5927fff6c0 (LWP 49902) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cfa960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 163 (Thread 0x7e59277fe6c0 (LWP 49903) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850350a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 162 (Thread 0x7e5926ffd6c0 (LWP 49904) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502de4960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 161 (Thread 0x7e59267fc6c0 (LWP 49905) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185024e0160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 160 (Thread 0x7e59257fa6c0 (LWP 49906) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503430160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 159 (Thread 0x7e5925ffb6c0 (LWP 49907) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185023fa960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 158 (Thread 0x7e5924ff96c0 (LWP 49908) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850269b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 157 (Thread 0x7e58d3fff6c0 (LWP 49909) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502da2160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 156 (Thread 0x7e58d37fe6c0 (LWP 49910) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502da2960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 155 (Thread 0x7e58d2ffd6c0 (LWP 49911) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502da3160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 154 (Thread 0x7e58d27fc6c0 (LWP 49912) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502da3960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 153 (Thread 0x7e58d1ffb6c0 (LWP 49913) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502dc2160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 152 (Thread 0x7e58d17fa6c0 (LWP 49914) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502dc2960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 151 (Thread 0x7e58d0ff96c0 (LWP 49915) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502dc3160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 150 (Thread 0x7e58bbfff6c0 (LWP 49916) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502dc3960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 149 (Thread 0x7e58bb7fe6c0 (LWP 49917) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502df4160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 148 (Thread 0x7e58baffd6c0 (LWP 49918) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502df4960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 147 (Thread 0x7e58ba7fc6c0 (LWP 49919) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502df5160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 146 (Thread 0x7e58b9ffb6c0 (LWP 49920) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502df5960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 145 (Thread 0x7e58b97fa6c0 (LWP 49921) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502e8a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 144 (Thread 0x7e58b8ff96c0 (LWP 49922) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502e8a960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 143 (Thread 0x7e5897fff6c0 (LWP 49923) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502e8b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 142 (Thread 0x7e58977fe6c0 (LWP 49924) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502e8b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 141 (Thread 0x7e5896ffd6c0 (LWP 49925) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f0c160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 140 (Thread 0x7e58967fc6c0 (LWP 49926) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f0c960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 139 (Thread 0x7e5895ffb6c0 (LWP 49927) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f0d160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 138 (Thread 0x7e58957fa6c0 (LWP 49928) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f0d960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 137 (Thread 0x7e587bfff6c0 (LWP 49929) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f2c160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 136 (Thread 0x7e5894ff96c0 (LWP 49930) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850280f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 135 (Thread 0x7e58735ff6c0 (LWP 49931) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185020dd960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 134 (Thread 0x7e587b7fe6c0 (LWP 49932) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503397160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 133 (Thread 0x7e587affd6c0 (LWP 49933) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185030b2160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 132 (Thread 0x7e587a7fc6c0 (LWP 49934) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503397960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 131 (Thread 0x7e5879ffb6c0 (LWP 49935) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185023fb160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 130 (Thread 0x7e58797fa6c0 (LWP 49936) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502991960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 129 (Thread 0x7e5878ff96c0 (LWP 49937) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a6b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 128 (Thread 0x7e5873fff6c0 (LWP 49938) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cfb160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 127 (Thread 0x7e5872dfe6c0 (LWP 49939) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850331c960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 126 (Thread 0x7e58725fd6c0 (LWP 49940) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850348b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 125 (Thread 0x7e5871dfc6c0 (LWP 49941) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f2c960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 124 (Thread 0x7e58715fb6c0 (LWP 49942) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850321f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 123 (Thread 0x7e5870dfa6c0 (LWP 49943) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850328b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 122 (Thread 0x7e5833fff6c0 (LWP 49944) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502747160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 121 (Thread 0x7e582b5ff6c0 (LWP 49945) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850245c160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 120 (Thread 0x7e58337fe6c0 (LWP 49946) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185024e0960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 119 (Thread 0x7e5832ffd6c0 (LWP 49947) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185030b2960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 118 (Thread 0x7e58327fc6c0 (LWP 49948) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502027960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 117 (Thread 0x7e5831ffb6c0 (LWP 49949) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fd8960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 116 (Thread 0x7e58317fa6c0 (LWP 49950) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850245c960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 115 (Thread 0x7e5830ff96c0 (LWP 49951) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d87960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 114 (Thread 0x7e582bfff6c0 (LWP 49952) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850268b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 113 (Thread 0x7e582adfe6c0 (LWP 49953) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502076960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 112 (Thread 0x7e582a5fd6c0 (LWP 49954) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502065160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 111 (Thread 0x7e5829dfc6c0 (LWP 49955) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185024e1160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 110 (Thread 0x7e58295fb6c0 (LWP 49956) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fd9160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 109 (Thread 0x7e5828dfa6c0 (LWP 49957) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502ff2160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 108 (Thread 0x7e57fffff6c0 (LWP 49958) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502065960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 107 (Thread 0x7e57ff7fe6c0 (LWP 49959) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185030b3160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 106 (Thread 0x7e57feffd6c0 (LWP 49960) "php-4"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185023fb960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 105 (Thread 0x7e57fe7fc6c0 (LWP 49961) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f8c160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 104 (Thread 0x7e57fdffb6c0 (LWP 49962) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cb0160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 103 (Thread 0x7e57fd7fa6c0 (LWP 49963) "php-5"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502077160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 102 (Thread 0x7e57fcff96c0 (LWP 49964) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185033d8160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 101 (Thread 0x7e57ebfff6c0 (LWP 49965) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cb0960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 100 (Thread 0x7e57eb7fe6c0 (LWP 49966) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502ff2960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 99 (Thread 0x7e57eaffd6c0 (LWP 49967) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cb1160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 98 (Thread 0x7e57ea7fc6c0 (LWP 49968) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850268b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 97 (Thread 0x7e57e9ffb6c0 (LWP 49969) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850245d160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 96 (Thread 0x7e57e97fa6c0 (LWP 49970) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850245d960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 95 (Thread 0x7e57e8ff96c0 (LWP 49971) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850328b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 94 (Thread 0x7e57db7fe6c0 (LWP 49972) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850267e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 93 (Thread 0x7e57daffd6c0 (LWP 49973) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185033d8960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 92 (Thread 0x7e57dbfff6c0 (LWP 49974) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185028d2960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 91 (Thread 0x7e57d9ffb6c0 (LWP 49975) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f8c960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 90 (Thread 0x7e57da7fc6c0 (LWP 49976) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185030b3960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 89 (Thread 0x7e57d97fa6c0 (LWP 49977) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185028d3160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 88 (Thread 0x7e57d8ff96c0 (LWP 49978) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018501fd9960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 87 (Thread 0x7e57937fe6c0 (LWP 49979) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185024e1960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 86 (Thread 0x7e5793fff6c0 (LWP 49980) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502077960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 85 (Thread 0x7e5792ffd6c0 (LWP 49981) "php-3"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185028d3960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 84 (Thread 0x7e57927fc6c0 (LWP 49982) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503135160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 83 (Thread 0x7e5790ff96c0 (LWP 49983) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503430960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 82 (Thread 0x7e5791ffb6c0 (LWP 49984) "php-e"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d35160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 81 (Thread 0x7e57917fa6c0 (LWP 49985) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502de5160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 80 (Thread 0x7e578affd6c0 (LWP 49986) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502747960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 79 (Thread 0x7e578bfff6c0 (LWP 49987) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502ff3160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 78 (Thread 0x7e578b7fe6c0 (LWP 49988) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185033d9160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 77 (Thread 0x7e5789ffb6c0 (LWP 49989) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502579160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 76 (Thread 0x7e578a7fc6c0 (LWP 49990) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850321f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 75 (Thread 0x7e57897fa6c0 (LWP 49991) "php-4"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f2d160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 74 (Thread 0x7e5788ff96c0 (LWP 49992) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850348b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 73 (Thread 0x7e575bfff6c0 (LWP 49993) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185033d9960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 72 (Thread 0x7e575b7fe6c0 (LWP 49994) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850350b160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 71 (Thread 0x7e575affd6c0 (LWP 49995) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502de5960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 70 (Thread 0x7e575a7fc6c0 (LWP 49996) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850331d160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 69 (Thread 0x7e5759ffb6c0 (LWP 49997) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cfb960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 68 (Thread 0x7e57597fa6c0 (LWP 49998) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502ff3960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 67 (Thread 0x7e5758ff96c0 (LWP 49999) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502a6b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 66 (Thread 0x7e5737fff6c0 (LWP 50000) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d28160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 65 (Thread 0x7e57377fe6c0 (LWP 50001) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185023d8160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 64 (Thread 0x7e5736ffd6c0 (LWP 50002) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503110160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 63 (Thread 0x7e5735ffb6c0 (LWP 50003) "php-2"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850302e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 62 (Thread 0x7e57357fa6c0 (LWP 50004) "php-1"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503110960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 61 (Thread 0x7e57367fc6c0 (LWP 50005) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f8d160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 60 (Thread 0x7e5734ff96c0 (LWP 50006) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850331d960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 59 (Thread 0x7e571bfff6c0 (LWP 50007) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850302e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 58 (Thread 0x7e571b7fe6c0 (LWP 50008) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d28960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 57 (Thread 0x7e571affd6c0 (LWP 50009) "php-5"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185023d8960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 56 (Thread 0x7e5719ffb6c0 (LWP 50010) "php-6"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503431160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 55 (Thread 0x7e571a7fc6c0 (LWP 50011) "php-d"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502579960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 54 (Thread 0x7e570bfff6c0 (LWP 50012) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503111160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 53 (Thread 0x7e5718ff96c0 (LWP 50013) "php-9"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850350b960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 52 (Thread 0x7e57197fa6c0 (LWP 50014) "php-1a"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502cb1960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 51 (Thread 0x7e570b7fe6c0 (LWP 50015) "php-b"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850267f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 50 (Thread 0x7e570affd6c0 (LWP 50016) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f8d960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 49 (Thread 0x7e570a7fc6c0 (LWP 50017) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502d35960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 48 (Thread 0x7e5709ffb6c0 (LWP 50018) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503135960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 47 (Thread 0x7e57097fa6c0 (LWP 50019) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502f2d960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 46 (Thread 0x7e5708ff96c0 (LWP 50020) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185030a0160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 45 (Thread 0x7e56f7fff6c0 (LWP 50021) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503200160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 44 (Thread 0x7e56f77fe6c0 (LWP 50022) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503500160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 43 (Thread 0x7e56f6ffd6c0 (LWP 50023) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185035fc160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 42 (Thread 0x7e56f67fc6c0 (LWP 50024) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503bac160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 41 (Thread 0x7e56f5ffb6c0 (LWP 50025) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503500960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 40 (Thread 0x7e56f57fa6c0 (LWP 50026) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185051ce160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 39 (Thread 0x7e56f4ff96c0 (LWP 50027) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018502bca160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 38 (Thread 0x7e56effff6c0 (LWP 50028) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050ce160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 37 (Thread 0x7e56ef7fe6c0 (LWP 50029) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185051ce960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 36 (Thread 0x7e56eeffd6c0 (LWP 50030) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40cbfe85 in ?? ()
+#2  0x0000578e4a3d6d10 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x00007e56eeffc900 in ?? ()
+#5  0x0000000000000000 in ?? ()
+
+Thread 35 (Thread 0x7e56ee7fc6c0 (LWP 50031) "php-19"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185030a0960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 34 (Thread 0x7e56edffb6c0 (LWP 50032) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850267f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 33 (Thread 0x7e56ed7fa6c0 (LWP 50033) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504d0a160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 32 (Thread 0x7e56ecff96c0 (LWP 50034) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850482e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 31 (Thread 0x7e56e7fff6c0 (LWP 50035) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850482e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 30 (Thread 0x7e56e77fe6c0 (LWP 50036) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850482f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 29 (Thread 0x7e56e6ffd6c0 (LWP 50037) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850482f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 28 (Thread 0x7e56e67fc6c0 (LWP 50038) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e00160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 27 (Thread 0x7e56e5ffb6c0 (LWP 50039) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e00960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 26 (Thread 0x7e56e57fa6c0 (LWP 50040) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e01160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 25 (Thread 0x7e56e4ff96c0 (LWP 50041) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e01960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 24 (Thread 0x7e56e47f86c0 (LWP 50042) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e04160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 23 (Thread 0x7e56e3ff76c0 (LWP 50043) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e04960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 22 (Thread 0x7e56e37f66c0 (LWP 50044) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e05160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 21 (Thread 0x7e56e2ff56c0 (LWP 50045) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e05960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 20 (Thread 0x7e56e27f46c0 (LWP 50046) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e0e160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 19 (Thread 0x7e56e1ff36c0 (LWP 50047) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e0e960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 18 (Thread 0x7e56e17f26c0 (LWP 50048) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e0f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 17 (Thread 0x7e56e0ff16c0 (LWP 50049) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504e0f960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 16 (Thread 0x7e56e07f06c0 (LWP 50050) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x000001850302f160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 15 (Thread 0x7e56dffef6c0 (LWP 50051) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503200960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 14 (Thread 0x7e56df7ee6c0 (LWP 50052) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185030a1160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 13 (Thread 0x7e56defed6c0 (LWP 50053) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504006160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 12 (Thread 0x7e56de7ec6c0 (LWP 50054) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185041c6160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 11 (Thread 0x7e56ddfeb6c0 (LWP 50055) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050a8160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 10 (Thread 0x7e56dcfe96c0 (LWP 50056) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185051cf160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 9 (Thread 0x7e56dd7ea6c0 (LWP 50057) "php-19"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018503bac960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 8 (Thread 0x7e56dc7e86c0 (LWP 50058) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050a8960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 7 (Thread 0x7e56dbfe76c0 (LWP 50059) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050a9160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 6 (Thread 0x7e56db7e66c0 (LWP 50060) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050a9960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 5 (Thread 0x7e56dafe56c0 (LWP 50061) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050c4160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 4 (Thread 0x7e56da7e46c0 (LWP 50062) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050c4960 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 3 (Thread 0x7e56d9fe36c0 (LWP 50063) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x00000185050c5160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 2 (Thread 0x7e56d97e26c0 (LWP 50064) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000018504ce0160 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+
+Thread 1 (Thread 0x7e5bcd0cdb40 (LWP 49746) "frankenphp"):
+#0  0x0000578e40d15a43 in ?? ()
+#1  0x0000578e40c89f69 in ?? ()
+#2  0x0000578e4a3d4098 in ?? ()
+#3  0x0000000000000080 in ?? ()
+#4  0x0000000000000000 in ?? ()
+[Inferior 1 (process 49746) detached]

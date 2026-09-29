@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 313" width="760" height="313" role="img" aria-label="Requests that wait 10 ms, 10,000 connections">
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;font-variant-numeric:tabular-nums}</style>
+<text x="0" y="22" font-size="17" font-weight="600" fill="#E6EEF8">Requests that wait 10 ms, 10,000 connections</text>
+<text x="0" y="44" font-size="12.5" fill="#93A4B8">Requests per second at each server&#x27;s peak, 8 workers</text>
+<line x1="170.0" y1="60" x2="170.0" y2="238" stroke="#243246" stroke-width="1"/>
+<text x="170.0" y="254" font-size="11" text-anchor="middle" fill="#93A4B8">0</text>
+<line x1="290.0" y1="60" x2="290.0" y2="238" stroke="#243246" stroke-width="1"/>
+<text x="290.0" y="254" font-size="11" text-anchor="middle" fill="#93A4B8">200k</text>
+<line x1="410.0" y1="60" x2="410.0" y2="238" stroke="#243246" stroke-width="1"/>
+<text x="410.0" y="254" font-size="11" text-anchor="middle" fill="#93A4B8">400k</text>
+<line x1="530.0" y1="60" x2="530.0" y2="238" stroke="#243246" stroke-width="1"/>
+<text x="530.0" y="254" font-size="11" text-anchor="middle" fill="#93A4B8">600k</text>
+<line x1="650.0" y1="60" x2="650.0" y2="238" stroke="#243246" stroke-width="1"/>
+<text x="650.0" y="254" font-size="11" text-anchor="middle" fill="#93A4B8">800k</text>
+<line x1="170" y1="60" x2="170" y2="238" stroke="#3D4F66" stroke-width="1"/>
+<text x="160" y="79.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">Swoole 6.2</text>
+<rect x="170" y="64" width="372.6" height="22" rx="3" fill="#46586E"/>
+<text x="549.6" y="79.5" font-size="12" fill="#E6EEF8">621k</text>
+<text x="160" y="108.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">OpenSwoole 26.2</text>
+<rect x="170" y="93" width="334.4" height="22" rx="3" fill="#46586E"/>
+<text x="511.4" y="108.5" font-size="12" fill="#E6EEF8">557k</text>
+<text x="160" y="137.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<rect x="170" y="122" width="300.5" height="22" rx="3" fill="#5E8DC2"/>
+<text x="477.5" y="137.5" font-size="12" fill="#E6EEF8">501k</text>
+<text x="160" y="166.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">ReactPHP 1.11</text>
+<rect x="170" y="151" width="133.7" height="22" rx="3" fill="#46586E"/>
+<text x="310.7" y="166.5" font-size="12" fill="#E6EEF8">223k</text>
+<text x="160" y="195.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">FrankenPHP 1.12</text>
+<rect x="170" y="180" width="0.4" height="22" rx="3" fill="#46586E"/>
+<text x="177.4" y="195.5" font-size="12" fill="#E6EEF8">706</text>
+<text x="160" y="224.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">RoadRunner 2025.1</text>
+<rect x="170" y="209" width="0.4" height="22" rx="3" fill="#46586E"/>
+<text x="177.4" y="224.5" font-size="12" fill="#E6EEF8">701</text>
+<text x="0" y="288" font-size="11" fill="#93A4B8">FrankenPHP and RoadRunner serve one request per worker at a time by design; their peak is at 1,000 connections.</text>
+<text x="0" y="303" font-size="11" fill="#93A4B8">swerve without the extension: select(), 1,024 sockets per worker.</text>
+</svg>
