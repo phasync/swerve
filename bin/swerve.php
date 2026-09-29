@@ -203,7 +203,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
     Worker::refreshAutoloader();
     // Loaded in the worker's event loop: the application may start coroutines as it loads,
     // such as a subscriber that runs for the worker's whole life
-    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $fastcgi) {
+    // Before the application loads, which may change the working directory
+    $files = '' !== $args->public ? new StaticFiles($args->public) : null;
+    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $fastcgi, $files) {
         try {
             $app = require $swerveFile;
         } catch (\Throwable $e) {
@@ -262,9 +264,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
              * Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
              * kernel spreads new connections over them.
              */
-            if ('' !== $args->public) {
+            if (null !== $files) {
                 // Files first; the application gets what is not one
-                $app = new class(new StaticFiles($args->public), $app) implements RequestHandlerInterface {
+                $app = new class($files, $app) implements RequestHandlerInterface {
                     public function __construct(private StaticFiles $files, private RequestHandlerInterface $app)
                     {
                     }

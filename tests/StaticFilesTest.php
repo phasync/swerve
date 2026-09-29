@@ -122,6 +122,22 @@ test('with --public, swerve serves the files and the application the rest, HEAD 
     }
 });
 
+test('a relative --public is the directory where swerve started, also when the application changes directory as it loads', function () {
+    $dir = static_dir();
+    $cwd = getcwd();
+    chdir(dirname($dir));
+    try {
+        [$process, $addr] = swerve_start(['--public=' . basename($dir)], 1, fixture: 'chdir-app.php');
+    } finally {
+        chdir($cwd);
+    }
+    try {
+        expect(probe($addr, '/app.js'))->toBe('console.log(1)');
+    } finally {
+        native_stop($process);
+    }
+});
+
 test('--public needs a directory, and HTTP', function () {
     $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
     exec("$swerve --public=/no/such/dir 2>&1", $out, $code);
