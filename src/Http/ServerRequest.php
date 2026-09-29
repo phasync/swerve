@@ -59,7 +59,7 @@ final class ServerRequest extends Message
         return null !== $this->form && !$this->uploadedFilesSet ? $this->form->files() : parent::getUploadedFiles();
     }
 
-    public function withUploadedFiles(array $uploadedFiles): ServerRequestInterface
+    public function withUploadedFiles($uploadedFiles): ServerRequestInterface
     {
         $c                   = parent::withUploadedFiles($uploadedFiles);
         $c->uploadedFilesSet = true;
@@ -73,7 +73,7 @@ final class ServerRequest extends Message
         return null !== $this->form && !$this->bodySet ? $this->form->input() : parent::getBody();
     }
 
-    public function withBody(StreamInterface $body): MessageInterface
+    public function withBody($body): MessageInterface
     {
         $c          = parent::withBody($body);
         $c->bodySet = true;

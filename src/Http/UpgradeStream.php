@@ -60,7 +60,7 @@ final class UpgradeStream implements StreamInterface
         phasync::raiseFlag($this->read);
     }
 
-    public function read(int $length): string
+    public function read($length): string
     {
         while ('' === $this->buffer && !$this->ended) {
             phasync::awaitFlag($this->written);

@@ -140,7 +140,7 @@ final class RequestBody implements StreamInterface
     /**
      * Returns '' only when the body has ended.
      */
-    public function read(int $length): string
+    public function read($length): string
     {
         $this->readElsewhere = $this->readElsewhere || \Fiber::getCurrent() !== $this->connection->fiber;
         while ($this->absorbing) {
@@ -383,7 +383,7 @@ final class RequestBody implements StreamInterface
      * Only to where the body already is: nothing to do. Slim's MethodOverrideMiddleware
      * rewinds every POST body at its end, which an empty body is before it is read.
      */
-    public function seek(int $offset, int $whence = \SEEK_SET): void
+    public function seek($offset, $whence = \SEEK_SET): void
     {
         $to = match ($whence) {
             \SEEK_SET => $offset,
@@ -400,7 +400,7 @@ final class RequestBody implements StreamInterface
         $this->seek(0);
     }
 
-    public function write(string $string): int
+    public function write($string): int
     {
         throw new \RuntimeException('The request body is not writable');
     }
@@ -423,7 +423,7 @@ final class RequestBody implements StreamInterface
         return null;
     }
 
-    public function getMetadata(?string $key = null)
+    public function getMetadata($key = null)
     {
         return null === $key ? [] : null;
     }
