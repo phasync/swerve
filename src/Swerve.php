@@ -2,7 +2,6 @@
 
 namespace Swerve;
 
-use phasync\Context\ContextInterface;
 use phasync\SelectableInterface;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
@@ -113,9 +112,9 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
      * Serve until stopped. Returns after stop(), once every request and connection ended.
      *
      * @param \Closure|null         $opened  called once every server listens
-     * @param ContextInterface|null $context the phasync context of the coroutines serving requests
+     * @param object|null $context the phasync context of the coroutines serving requests
      */
-    public function run(SwerveInterface $app, ?\Closure $opened = null, ?ContextInterface $context = null): void
+    public function run(SwerveInterface $app, ?\Closure $opened = null, ?object $context = null): void
     {
         if ($this->running) {
             throw new \RuntimeException('Already running');

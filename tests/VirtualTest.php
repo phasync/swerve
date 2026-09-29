@@ -55,6 +55,31 @@ test('Virtual: concurrent requests in one worker keep their own session, and exi
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
 })->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
 
+test('Virtual: concurrent requests each have their own $_SESSION while they wait, and each session saves its own', function () {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        $conns = [];
+        foreach (['a', 'b', 'c'] as $v) {
+            $conns[$v] = native_connect($addr);
+            fwrite($conns[$v], "GET /virtual-session?v=$v&ms=200 HTTP/1.1\r\nHost: t\r\n\r\n");
+        }
+        $sids = [];
+        foreach ($conns as $v => $conn) {
+            [$sid, $read, $after] = explode(' ', native_read_response($conn)['body']);
+            expect([$read, $after])->toBe([$v, $v]);
+            $sids[$v] = $sid;
+        }
+        foreach ($sids as $v => $sid) { // what each session saved
+            $conn = native_connect($addr);
+            fwrite($conn, "GET /virtual-session HTTP/1.1\r\nHost: t\r\nCookie: PHPSESSID=$sid\r\n\r\n");
+            expect(native_read_response($conn)['body'])->toBe("$sid $v $v");
+        }
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
 test('Virtual: concurrent requests each have their own $_GET, $_COOKIE, $_SERVER and $_POST, also after waiting', function () {
     [$process, $addr, $log] = virtual_start();
     try {

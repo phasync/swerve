@@ -4,7 +4,6 @@ namespace Swerve\Http;
 
 use phasync;
 use phasync\CancelledException;
-use phasync\Context\DefaultContext;
 use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -292,7 +291,7 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
             } finally {
                 self::$pinging = false;
             }
-        }, context: new DefaultContext());
+        }, context: new \stdClass());
     }
 
     private function frame(int $opcode, string $payload): void

@@ -27,7 +27,10 @@ use Swerve\Http\Message\Response;
  * variables and static properties are shared by the requests of a worker: run code that keeps
  * request state in them one request at a time.
  *
- * Needs phasync-ext 0.5.0-alpha11 or later: see available().
+ * The superglobals and $_SESSION are swapped per request: the request runs in a switch-aware
+ * phasync context (Superglobals), so each request sees its own while its coroutines run.
+ *
+ * Needs phasync-ext 0.5.0-alpha15 or later: see available().
  */
 final class Virtual
 {
@@ -36,7 +39,7 @@ final class Virtual
 
     public static function available(): bool
     {
-        return \function_exists('phasync\ext\virtualize') && \version_compare((string) \phpversion('phasync'), '0.5.0-alpha11', '>=');
+        return \function_exists('phasync\ext\virtualize') && \version_compare((string) \phpversion('phasync'), '0.5.0-alpha15', '>=');
     }
 
     /**
@@ -50,7 +53,7 @@ final class Virtual
     public static function run(ServerRequestInterface $request, \Closure $code): ResponseInterface
     {
         if (!self::available()) {
-            throw new \LogicException('Virtual::run() needs phasync-ext 0.5.0-alpha11 or later');
+            throw new \LogicException('Virtual::run() needs phasync-ext 0.5.0-alpha15 or later');
         }
         $sapi = new class($request) {
             public UpgradeStream $body;
@@ -135,9 +138,12 @@ final class Virtual
                 return $this->aborted;
             }
         };
-        $run = phasync::go(static function () use ($code, $sapi) {
+        $outer = Superglobals::current(); // the worker's, restored while other requests run
+        $run   = phasync::go(static function () use ($code, $sapi, $outer) {
             try {
-                \phasync\ext\virtualize($code, $sapi);
+                // The request runs in a context that swaps its superglobals in and out; PHP builds
+                // them as virtualize() starts the request
+                phasync::withContext(static fn () => \phasync\ext\virtualize($code, $sapi), new Superglobals($outer));
             } finally {
                 $sapi->body->end();
                 phasync::raiseFlag($sapi); // in case it ended by throwing, before any headers

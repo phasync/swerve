@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a8f014d47e5a2bf3834517ac710b81ec",
+    "content-hash": "b875741c2a7516c7f6e387dcef27b6a4",
     "packages": [
         {
             "name": "charm/options",
@@ -129,16 +129,16 @@
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.0-alpha15",
+            "version": "2.0.0-alpha19",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "6e17007567dd3f08b7b97524a337e4f3bd2ad31a"
+                "reference": "efe455aaae2bab8e417b8fa43c1cf51860bbd192"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/6e17007567dd3f08b7b97524a337e4f3bd2ad31a",
-                "reference": "6e17007567dd3f08b7b97524a337e4f3bd2ad31a",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/efe455aaae2bab8e417b8fa43c1cf51860bbd192",
+                "reference": "efe455aaae2bab8e417b8fa43c1cf51860bbd192",
                 "shasum": ""
             },
             "require": {
@@ -188,9 +188,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha15"
+                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha19"
             },
-            "time": "2026-09-29T03:51:55+00:00"
+            "time": "2026-09-29T08:28:22+00:00"
         },
         {
             "name": "psr/http-factory",

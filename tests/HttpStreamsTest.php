@@ -1036,3 +1036,32 @@ test('a WebSocket client that resets its connection frees it, without an error',
     expect(log_count($log, '/(ERROR|CRITICAL|failed|Unhandled)/i'))->toBe(0);
     native_stop($process);
 });
+
+test('phasync::finally() in the handler runs after the whole response, streamed too, in the request\'s coroutine, before the next request on the connection', function () {
+    [$master, $addr] = native_start(workers: 1);
+    try {
+        $conn = native_connect($addr);
+        fwrite($conn, "GET /finally-stream HTTP/1.1\r\nHost: t\r\n\r\n");
+        expect(native_read_response($conn)['body'] ?? null)->toBe('abc');
+        fwrite($conn, "GET /finally-log HTTP/1.1\r\nHost: t\r\n\r\n");
+        expect(json_decode(native_read_response($conn)['body'] ?? 'null', true))->toBe(['body ended', "finally ran in the request's coroutine"]);
+    } finally {
+        native_stop($master);
+    }
+});
+
+test('a request run in a switch-aware context keeps its own static property while requests overlap in one worker', function () {
+    [$master, $addr] = native_start(workers: 1);
+    try {
+        $conns = [];
+        foreach (['a', 'b', 'c'] as $v) {
+            $conns[$v] = native_connect($addr);
+            fwrite($conns[$v], "GET /swap?v=$v&ms=100 HTTP/1.1\r\nHost: t\r\n\r\n");
+        }
+        foreach ($conns as $v => $conn) {
+            expect(native_read_response($conn)['body'] ?? null)->toBe($v);
+        }
+    } finally {
+        native_stop($master);
+    }
+});

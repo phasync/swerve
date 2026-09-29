@@ -379,7 +379,7 @@ $cache->set("user:$id", $user, 60);
 
 ## Code written for PHP-FPM
 
-With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-alpha11 or later),
+With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-alpha15 or later),
 `Swerve\Http\Virtual::run()` runs code that echoes and calls `header()` as a request of its own:
 its output, status, headers, cookies and session become the PSR-7 response, streamed, and
 `exit()` ends the request, not the worker.
@@ -391,9 +391,19 @@ return Virtual::run($request, static function () {
 });
 ```
 
-`$_GET`, `$_POST`, `$_COOKIE`, `$_FILES` and `$_SERVER` are the request's own, as under
-PHP-FPM, also with many requests at once in a worker. The application's own global variables and
-static properties are not: code that keeps request state there should run one request at a time.
+`$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `$_SERVER` and `$_SESSION` are the request's own, as
+under PHP-FPM, also with many requests at once in a worker. Other global variables and static
+properties are shared by the worker's requests; code that keeps request state there keeps its own
+per request by running the request in a switch-aware phasync context, which swaps it in whenever
+the request's coroutines run:
+
+```php
+return phasync::withContext(fn () => $app->handle($request), new class implements phasync\Context\SwitchAwareInterface {
+    private $own;
+    public function resume(): void  { App::$current = $this->own; }
+    public function suspend(): void { $this->own = App::$current; }
+});
+```
 
 ## Supervision
 

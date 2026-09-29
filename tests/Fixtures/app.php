@@ -215,6 +215,20 @@ function fixture_callback_stream(Closure $read, Closure $eof): StreamInterface
     };
 }
 
+/** A static property, as frameworks keep request state in them: for /swap. */
+final class SwapFixture
+{
+    public static ?string $value = null;
+}
+
+/** The worker's log for the /finally-* routes. */
+function &fixture_log(): array
+{
+    static $log = [];
+
+    return $log;
+}
+
 /**
  * A minimal WebSocket server (RFC 6455), written against nothing but the two streams: the
  * request body is what the client sends after the handshake, the response body what goes back.
@@ -362,6 +376,38 @@ return new class($version) implements RequestHandlerInterface {
                 \phasync::sleep((int) ($query['ms'] ?? 0) / 1000);
                 echo "last\n";
             }),
+            // A static kept per request, as an adapter keeps its framework's: the request runs in
+            // a switch-aware context. ?v= set, read back after waiting ?ms=
+            '/swap' => phasync::withContext(static function () use ($query) {
+                SwapFixture::$value = $query['v'];
+                phasync::sleep((int) $query['ms'] / 1000);
+
+                return new Response(200, [], (string) SwapFixture::$value);
+            }, new class implements phasync\Context\SwitchAwareInterface {
+                private ?string $own = null;
+
+                public function resume(): void
+                {
+                    SwapFixture::$value = $this->own;
+                }
+
+                public function suspend(): void
+                {
+                    $this->own = SwapFixture::$value;
+                }
+            }),
+            // The request's own $_SESSION: ?v= written, read back after waiting ?ms=; without ?v=,
+            // what the session holds
+            '/virtual-session' => Virtual::run($request, static function () {
+                \session_save_path(\sys_get_temp_dir());
+                \session_start();
+                if (isset($_GET['v'])) {
+                    $_SESSION['v'] = $_GET['v'];
+                    \phasync::sleep((int) ($_GET['ms'] ?? 0) / 1000);
+                    $_SESSION['after'] = $_GET['v'];
+                }
+                echo \session_id(), ' ', ($_SESSION['v'] ?? '-'), ' ', ($_SESSION['after'] ?? '-');
+            }),
             // The request's own superglobals, read before and after waiting ?ms= (needs phasync-ext)
             '/virtual-globals' => Virtual::run($request, static function () {
                 $read = static fn () => ($_GET['q'] ?? '-') . '|' . ($_COOKIE['c'] ?? '-') . '|' . ($_SERVER['HTTP_X_T'] ?? '-') . '|' . ($_POST['p'] ?? '-');
@@ -442,6 +488,34 @@ return new class($version) implements RequestHandlerInterface {
             // Streams whose getSize() is 0 although they have data
             '/pipe'        => new Response(200, [], Nyholm\Psr7\Stream::create(\popen('echo from-pipe', 'r'))),
             '/proc'        => new Response(200, [], Nyholm\Psr7\Stream::create(\fopen('/proc/self/stat', 'r'))),
+            // phasync::finally() in handle(): runs after the whole (streamed) response, before the
+            // next request on the connection
+            '/finally-stream' => (static function () {
+                $log = &fixture_log();
+                $out = new UnbufferedStream(65536, PHP_FLOAT_MAX);
+                phasync::go(static function () use ($out, &$log) {
+                    foreach (['a', 'b', 'c'] as $chunk) {
+                        phasync::sleep(0.02);
+                        $out->append($chunk);
+                    }
+                    $log[] = 'body ended';
+                    $out->end();
+                });
+                $fiber = Fiber::getCurrent();
+                phasync::finally(static function () use (&$log, $fiber) {
+                    phasync::sleep(0.01); // it may wait
+                    $log[] = 'finally ran in the ' . (Fiber::getCurrent() === $fiber ? "request's coroutine" : 'another coroutine');
+                });
+
+                return new Response(200, [], $out);
+            })(),
+            '/finally-log' => (static function () {
+                $log   = &fixture_log();
+                $json  = json_encode($log);
+                $log   = [];
+
+                return new Response(200, ['Content-Type' => 'application/json'], $json);
+            })(),
             '/stream'      => new Response(200, [], fixture_stream((int) $query['n'], (int) ($query['ms'] ?? 0), (bool) ($query['size'] ?? 0), (bool) ($query['throw'] ?? 0))),
             '/applength'   => new Response(200, ['Content-Length' => $query['cl']], fixture_stream((int) $query['actual'], 0, false, false)),
             '/echo-stream' => new Response(200, [], $request->getBody()),

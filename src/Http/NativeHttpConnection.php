@@ -161,7 +161,7 @@ final class NativeHttpConnection
     {
         $n = 0;
         foreach (self::$contexts ?? [] as $context => $_) {
-            foreach ($context->getFibers() as $fiber => $__) {
+            foreach (phasync::getLoop()->getFibers($context) as $fiber) {
                 $n += (int) !$fiber->isTerminated();
             }
         }
@@ -977,20 +977,27 @@ final class NativeHttpConnection
         $context     = new LoggingContext($this->logger);
         self::$contexts ??= new \WeakMap();
         self::$contexts[$context] = true;
-        $response    = phasync::withContext(fn () => $this->handler->handle($request), $context);
-        if (null !== $this->ioError) {
-            return false; // the application swallowed our socket failure: the client is gone
-        }
-        if (null !== $body->error) {
-            throw $body->error; // the application swallowed a malformed body: answer it and close
-        }
+        // The response is sent inside the context too, so phasync::finally() in the handler runs
+        // once all of it is sent (as after fastcgi_finish_request()), in this coroutine
+        $keepAlive = phasync::withContext(function () use ($request, $body, $method, $version, $keepAlive) {
+            $response = $this->handler->handle($request);
+            if (null !== $this->ioError) {
+                return null; // the application swallowed our socket failure: the client is gone
+            }
+            if (null !== $body->error) {
+                throw $body->error; // the application swallowed a malformed body: answer it and close
+            }
 
-        $keepAlive = $this->writeResponse($response, $method, $version, $keepAlive, $body);
+            return $this->writeResponse($response, $method, $version, $keepAlive, $body);
+        }, $context);
+        if (null === $keepAlive) {
+            return false;
+        }
         if (!$body->eof()) {
             // The body is still the application's: it may be read later, from any coroutine.
             // Our references go; when nothing else holds it, it is released right here.
             $held = \WeakReference::create($body);
-            unset($body, $request, $response);
+            unset($body, $request);
 
             return $this->settle($keepAlive, $held);
         }
