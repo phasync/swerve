@@ -1,0 +1,17 @@
+{
+    "description": "Slim 4 benchmark application: one app (app.php), one entry file per server",
+    "require": {
+        "php": ">=8.5",
+        "slim/slim": "^4.15",
+        "nyholm/psr7": "^1.8",
+        "nyholm/psr7-server": "^1.1",
+        "phasync/swerve": "0.1.0-alpha20",
+        "spiral/roadrunner-http": "^4.1",
+        "react/http": "^1.11",
+        "react/promise-timer": "^1.11"
+    },
+    "minimum-stability": "alpha",
+    "prefer-stable": true,
+    "autoload": {"files": ["app.php"]},
+    "config": {"optimize-autoloader": true}
+}

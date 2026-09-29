@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 632" width="760" height="632" role="img" aria-label="The same framework applications, JSON route">
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;font-variant-numeric:tabular-nums}</style>
+<text x="0" y="22" font-size="17" font-weight="600" fill="#E6EEF8">The same framework applications, JSON route</text>
+<text x="0" y="44" font-size="12.5" fill="#93A4B8">Requests per second, 8 workers, PHP 8.5.11 with opcache and JIT, Ryzen 9 9950X3D, loopback</text>
+<line x1="170.0" y1="60" x2="170.0" y2="572" stroke="#243246" stroke-width="1"/>
+<text x="170.0" y="588" font-size="11" text-anchor="middle" fill="#93A4B8">0</text>
+<line x1="266.0" y1="60" x2="266.0" y2="572" stroke="#243246" stroke-width="1"/>
+<text x="266.0" y="588" font-size="11" text-anchor="middle" fill="#93A4B8">200k</text>
+<line x1="362.0" y1="60" x2="362.0" y2="572" stroke="#243246" stroke-width="1"/>
+<text x="362.0" y="588" font-size="11" text-anchor="middle" fill="#93A4B8">400k</text>
+<line x1="458.0" y1="60" x2="458.0" y2="572" stroke="#243246" stroke-width="1"/>
+<text x="458.0" y="588" font-size="11" text-anchor="middle" fill="#93A4B8">600k</text>
+<line x1="554.0" y1="60" x2="554.0" y2="572" stroke="#243246" stroke-width="1"/>
+<text x="554.0" y="588" font-size="11" text-anchor="middle" fill="#93A4B8">800k</text>
+<line x1="650.0" y1="60" x2="650.0" y2="572" stroke="#243246" stroke-width="1"/>
+<text x="650.0" y="588" font-size="11" text-anchor="middle" fill="#93A4B8">1M</text>
+<line x1="170" y1="60" x2="170" y2="572" stroke="#3D4F66" stroke-width="1"/>
+<text x="0" y="79" font-size="13" font-weight="600" fill="#E6EEF8">Slim 4</text>
+<text x="160" y="101.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">Swoole</text>
+<rect x="170" y="86" width="400.5" height="22" rx="3" fill="#46586E"/>
+<text x="577.5" y="101.5" font-size="12" fill="#E6EEF8">834k</text>
+<text x="160" y="130.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>
+<rect x="170" y="115" width="338.6" height="22" rx="3" fill="#8FB5E0"/>
+<text x="515.6" y="130.5" font-size="12" fill="#E6EEF8">705k</text>
+<text x="160" y="159.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<rect x="170" y="144" width="335.4" height="22" rx="3" fill="#5E8DC2"/>
+<text x="512.4" y="159.5" font-size="12" fill="#E6EEF8">699k</text>
+<text x="160" y="188.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">ReactPHP</text>
+<rect x="170" y="173" width="261.9" height="22" rx="3" fill="#46586E"/>
+<text x="438.9" y="188.5" font-size="12" fill="#E6EEF8">546k</text>
+<text x="160" y="217.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">FrankenPHP</text>
+<rect x="170" y="202" width="175.5" height="22" rx="3" fill="#46586E"/>
+<text x="352.5" y="217.5" font-size="12" fill="#E6EEF8">366k</text>
+<text x="160" y="246.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">RoadRunner</text>
+<rect x="170" y="231" width="63.4" height="22" rx="3" fill="#46586E"/>
+<text x="240.4" y="246.5" font-size="12" fill="#E6EEF8">132k</text>
+<text x="0" y="293" font-size="13" font-weight="600" fill="#E6EEF8">Symfony 7.4</text>
+<text x="160" y="315.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">Swoole (runtime/swoole)</text>
+<rect x="170" y="300" width="99.0" height="22" rx="3" fill="#46586E"/>
+<text x="276.0" y="315.5" font-size="12" fill="#E6EEF8">206k</text>
+<text x="160" y="344.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<rect x="170" y="329" width="46.4" height="22" rx="3" fill="#5E8DC2"/>
+<text x="223.4" y="344.5" font-size="12" fill="#E6EEF8">96.6k</text>
+<text x="160" y="373.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>
+<rect x="170" y="358" width="45.4" height="22" rx="3" fill="#8FB5E0"/>
+<text x="222.4" y="373.5" font-size="12" fill="#E6EEF8">94.6k</text>
+<text x="160" y="402.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">FrankenPHP</text>
+<rect x="170" y="387" width="42.7" height="22" rx="3" fill="#46586E"/>
+<text x="219.7" y="402.5" font-size="12" fill="#E6EEF8">88.9k</text>
+<text x="160" y="431.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">RoadRunner</text>
+<rect x="170" y="416" width="27.7" height="22" rx="3" fill="#46586E"/>
+<text x="204.7" y="431.5" font-size="12" fill="#E6EEF8">57.6k</text>
+<text x="0" y="478" font-size="13" font-weight="600" fill="#E6EEF8">Yii 3</text>
+<text x="160" y="500.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>
+<rect x="170" y="485" width="94.5" height="22" rx="3" fill="#8FB5E0"/>
+<text x="271.5" y="500.5" font-size="12" fill="#E6EEF8">197k</text>
+<text x="160" y="529.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<rect x="170" y="514" width="92.3" height="22" rx="3" fill="#5E8DC2"/>
+<text x="269.3" y="529.5" font-size="12" fill="#E6EEF8">192k</text>
+<text x="160" y="558.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">RoadRunner</text>
+<rect x="170" y="543" width="38.4" height="22" rx="3" fill="#46586E"/>
+<text x="215.4" y="558.5" font-size="12" fill="#E6EEF8">80.0k</text>
+<text x="0" y="622" font-size="11" fill="#93A4B8">Each framework on the servers it has an integration for. Swoole in BASE mode, its faster one here. benchmarks/frameworks</text>
+</svg>

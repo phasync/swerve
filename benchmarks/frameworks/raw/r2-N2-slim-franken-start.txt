@@ -1,0 +1,4 @@
+ 04:38:00 up  5:09,  9 users,  load average: 1.05, 2.91, 3.43
+cd /home/frode/bench/fw/slim; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/jit taskset -c 0-7,16-23 /home/frode/bench/fw/frankenphp run --config /tmp/fw.Caddyfile
+json=200:30 wait=200:13 
+     19 ld-linux-x86-64 0-7,16-23

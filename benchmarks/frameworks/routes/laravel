@@ -1,0 +1,3 @@
+json /api/json
+session /counter
+wait /api/usleep?ms=10

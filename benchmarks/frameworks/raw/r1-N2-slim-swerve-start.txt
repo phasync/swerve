@@ -1,0 +1,4 @@
+ 03:49:45 up  4:20,  7 users,  load average: 4.29, 4.07, 2.61
+cd /home/frode/bench/fw/slim; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/jit taskset -c 0-7,16-23 php vendor/bin/swerve --workers=2 -q --no-access-log --http=0.0.0.0:18500 swerve.php
+json=200:30 wait=200:13 
+      3 php 0-7,16-23

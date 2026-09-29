@@ -1,0 +1,4 @@
+ 04:10:50 up  4:41,  8 users,  load average: 4.16, 5.20, 3.75
+cd /home/frode/bench/fw/swerve-symfony/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/jit taskset -c 0-7,16-23 /home/frode/bench/fw/frankenphp run --config /tmp/fw.Caddyfile
+json=200:42 session=200:24 wait=200:13 
+     26 ld-linux-x86-64 0-7,16-23

@@ -1,0 +1,5 @@
+ 04:39:32 up  5:10,  9 users,  load average: 0.92, 2.41, 3.20
+cd /home/frode/bench/fw/slim; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/react taskset -c 0-7,16-23 bash -c for i in $(seq 2); do php react.php & done; wait
+json=200:30 wait=200:13 
+      1 bash 0-7,16-23
+      2 php 0-7,16-23

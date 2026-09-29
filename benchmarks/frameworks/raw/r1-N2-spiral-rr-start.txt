@@ -1,0 +1,5 @@
+ 03:56:08 up  4:27,  8 users,  load average: 0.97, 2.00, 2.13
+cd /home/frode/bench/fw/swerve-spiral/benchmarks/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/rr taskset -c 0-7,16-23 /home/frode/bench/rr/rr serve -c /tmp/fw-rr.yaml -w /home/frode/bench/fw/swerve-spiral/benchmarks/app
+json=200:32 session=200:20 wait=200:13 
+      2 php 0-7,16-23
+     14 rr 0-7,16-23

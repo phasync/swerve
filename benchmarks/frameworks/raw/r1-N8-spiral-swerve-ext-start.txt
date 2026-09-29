@@ -1,0 +1,4 @@
+ 04:18:03 up  4:49,  8 users,  load average: 3.30, 4.34, 3.96
+cd /home/frode/bench/fw/swerve-spiral/benchmarks/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/ext taskset -c 0-7,16-23 php vendor/bin/swerve --workers=8 -q --no-access-log --http=0.0.0.0:18500 swerve.php
+json=200:32 session=200:20 wait=200:13 
+      9 php 0-7,16-23

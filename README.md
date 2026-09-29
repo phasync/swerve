@@ -77,6 +77,21 @@ the other, over loopback ([method, scripts and raw results](benchmarks/servers/S
   <img alt="Time for a message to reach the last of 50,000 WebSockets: swerve + phasync-ext 78 ms, ReactPHP 150 ms, Swoole 199 ms, OpenSwoole 203 ms" src="benchmarks/charts/websocket-light.svg">
 </picture>
 
+The same framework applications on each server they have an integration for
+([method and results](benchmarks/frameworks/SUMMARY.md)). With phasync-ext, Symfony on swerve
+also overlaps requests that wait: 10,455 req/s with a 10 ms wait at 8 workers, where one request
+per worker at a time gives about 780.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/frameworks-lean-dark.svg">
+  <img alt="JSON route, 8 workers. Slim: Swoole 834k, swerve 705k, swerve + phasync-ext 699k, ReactPHP 546k, FrankenPHP 366k, RoadRunner 132k. Symfony: Swoole 206k, swerve + phasync-ext 96.6k, swerve 94.6k, FrankenPHP 88.9k, RoadRunner 57.6k. Yii 3: swerve 197k, swerve + phasync-ext 192k, RoadRunner 80k" src="benchmarks/charts/frameworks-lean-light.svg">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/frameworks-full-dark.svg">
+  <img alt="JSON route, 8 workers. Laravel: FrankenPHP 21.5k, Swoole 21.1k, RoadRunner 19.2k (all Octane), swerve 18.5k, swerve + phasync-ext 18.4k. CodeIgniter: swerve 20.6k, swerve + phasync-ext 20.2k, FrankenPHP 17.6k. Spiral: RoadRunner 21.4k, swerve + phasync-ext 19.8k, swerve 19.8k" src="benchmarks/charts/frameworks-full-light.svg">
+</picture>
+
 Below about 1,000 connections per worker swerve runs on PHP's own `stream_select()`; above that
 it needs phasync-ext, which waits with epoll.
 

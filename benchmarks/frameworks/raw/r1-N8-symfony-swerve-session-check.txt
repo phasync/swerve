@@ -1,0 +1,8 @@
+sessions: 2048 distinct of 2048
+cookie: PHPSESSID=90c4473bf19b682d918f6879976bb740
+HTTP/1.1 200 OK
+{"count":3,"pid":733003}
+HTTP/1.1 200 OK
+{"count":5,"pid":733000}
+HTTP/1.1 200 OK
+{"count":7,"pid":732997}

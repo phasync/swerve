@@ -1,0 +1,4 @@
+ 04:43:15 up  5:14, 10 users,  load average: 0.93, 1.69, 2.74
+cd /home/frode/bench/fw/swerve-yii/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/jit taskset -c 0-7,16-23 php vendor/bin/swerve --workers=2 -q --no-access-log --http=0.0.0.0:18500 swerve.php
+json=200:29 session=200:70 wait=200:13 
+      3 php 0-7,16-23

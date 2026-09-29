@@ -1,0 +1,4 @@
+ 04:08:01 up  4:39,  8 users,  load average: 7.11, 5.58, 3.54
+cd /home/frode/bench/fw/swerve-symfony/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/jit taskset -c 0-7,16-23 php vendor/bin/swerve --workers=8 -q --no-access-log --http=0.0.0.0:18500 swerve.php
+json=200:42 session=200:24 wait=200:13 
+      9 php 0-7,16-23

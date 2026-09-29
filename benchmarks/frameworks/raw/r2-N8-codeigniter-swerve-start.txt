@@ -1,0 +1,4 @@
+ 05:08:49 up  5:39,  7 users,  load average: 3.63, 4.48, 4.47
+cd /home/frode/bench/fw/swerve-codeigniter/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/jit taskset -c 0-7,16-23 php vendor/bin/swerve --workers=8 -q --no-access-log --http=0.0.0.0:18500 swerve.php
+json=200:45 session=200:25 wait=200:13 
+      9 php 0-7,16-23

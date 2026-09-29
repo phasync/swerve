@@ -1,0 +1,4 @@
+ 05:13:59 up  5:45,  7 users,  load average: 1.45, 3.26, 4.03
+cd /home/frode/bench/fw/swerve-symfony/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/swoole taskset -c 0-7,16-23 php public/swoole.php
+json=200:42 session=200:25 wait=200:13 
+      6 php 0-7,16-23

@@ -1,0 +1,6 @@
+ 04:27:51 up  4:58,  8 users,  load average: 1.84, 3.22, 3.73
+cd /home/frode/bench/fw/swerve-laravel/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/rr taskset -c 0-7,16-23 php artisan octane:start --host=0.0.0.0 --port=18500 --workers=2 --max-requests=1000000000 --server=roadrunner --rpc-port=18501 --log-level=error
+json=200:17 session=200:40 wait=200:13 
+      1 php 0-7,16-23
+      2 php8.5 0-7,16-23
+     15 rr 0-7,16-23

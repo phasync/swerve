@@ -1,0 +1,5 @@
+ 04:14:19 up  4:45,  8 users,  load average: 2.80, 4.73, 3.92
+cd /home/frode/bench/fw/slim; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/rr taskset -c 0-7,16-23 /home/frode/bench/rr/rr serve -c /tmp/fw-rr.yaml -w /home/frode/bench/fw/slim
+json=200:30 wait=200:13 
+      8 php 0-7,16-23
+     18 rr 0-7,16-23

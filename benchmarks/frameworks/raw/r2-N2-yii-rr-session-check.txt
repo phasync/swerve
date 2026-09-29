@@ -1,0 +1,8 @@
+sessions: 2 distinct of 2048
+cookie: PHPSESSID=3c94d7e57cf6fbdfcc557063447a24be
+HTTP/1.1 200 OK
+{"n":3,"v":null,"id":"3c94d7e57cf6fbdfcc557063447a24be","pid":1064556}
+HTTP/1.1 200 OK
+{"n":5,"v":null,"id":"3c94d7e57cf6fbdfcc557063447a24be","pid":1064556}
+HTTP/1.1 200 OK
+{"n":7,"v":null,"id":"3c94d7e57cf6fbdfcc557063447a24be","pid":1064556}

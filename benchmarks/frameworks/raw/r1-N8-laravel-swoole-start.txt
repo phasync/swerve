@@ -1,0 +1,5 @@
+ 04:07:05 up  4:38,  8 users,  load average: 5.67, 4.83, 3.18
+cd /home/frode/bench/fw/swerve-laravel/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/swoole taskset -c 0-7,16-23 php artisan octane:start --host=0.0.0.0 --port=18500 --workers=8 --max-requests=1000000000 --server=swoole
+json=200:17 session=200:40 wait=200:13 
+      1 php 0-7,16-23
+     41 php8.5 0-7,16-23

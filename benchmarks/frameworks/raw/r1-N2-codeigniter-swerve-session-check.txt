@@ -1,0 +1,8 @@
+sessions: 2048 distinct of 2048
+cookie: ci_session=998545cf7b5eabc02a33da24ec12b6d4
+HTTP/1.1 200 OK
+{"count":3,"pid":643395}
+HTTP/1.1 200 OK
+{"count":5,"pid":643395}
+HTTP/1.1 200 OK
+{"count":7,"pid":643396}

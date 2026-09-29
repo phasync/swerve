@@ -1,0 +1,4 @@
+ 04:24:39 up  4:55, 10 users,  load average: 3.12, 4.12, 4.05
+cd /home/frode/bench/fw/swerve-codeigniter/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/franken-intl taskset -c 0-7,16-23 /home/frode/bench/fw/frankenphp run --config /tmp/fw.Caddyfile
+json=200:45 session=200:24 wait=200:13 
+     25 ld-linux-x86-64 0-7,16-23

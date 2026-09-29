@@ -1,0 +1,8 @@
+sessions: 2048 distinct of 2048
+cookie: csrf-token=K9kmnEcOJPGf%2BUeJ; sid=4e8d85c843c947c47760d36eecfc9369
+HTTP/1.1 200 OK
+{"n":3,"pid":576509}
+HTTP/1.1 200 OK
+{"n":5,"pid":576510}
+HTTP/1.1 200 OK
+{"n":7,"pid":576509}

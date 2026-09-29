@@ -1,0 +1,5 @@
+ 03:46:40 up  4:17,  7 users,  load average: 5.46, 3.21, 2.03
+cd /home/frode/bench/fw/swerve-symfony/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/rr taskset -c 0-7,16-23 /home/frode/bench/rr/rr serve -c /tmp/fw-rr.yaml -w /home/frode/bench/fw/swerve-symfony/tests/Fixtures/app
+json=200:42 session=200:24 wait=200:13 
+      2 php 0-7,16-23
+     18 rr 0-7,16-23

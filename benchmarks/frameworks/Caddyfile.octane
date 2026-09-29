@@ -1,0 +1,27 @@
+# Laravel Octane's Caddyfile stub (vendor/laravel/octane/src/Commands/stubs/Caddyfile), tuned as
+# the other FrankenPHP cells per FrankenPHP's performance docs: every request to the worker
+# (`match *`, no try_files file lookups), no file server, no `encode`, num_threads N+1 (@THREADS@).
+# Octane fills the {$...} placeholders from its environment.
+{
+	{$CADDY_GLOBAL_OPTIONS}
+	auto_https off
+	admin {$CADDY_SERVER_ADMIN_HOST}:{$CADDY_SERVER_ADMIN_PORT}
+	log {
+		level ERROR
+	}
+	frankenphp {
+		num_threads @THREADS@
+	}
+}
+
+{$CADDY_SERVER_SERVER_NAME} {
+	root * "{$APP_PUBLIC_PATH}"
+	php_server {
+		file_server off
+		worker {
+			file "{$APP_PUBLIC_PATH}/frankenphp-worker.php"
+			num {$CADDY_SERVER_WORKER_COUNT}
+			match *
+		}
+	}
+}

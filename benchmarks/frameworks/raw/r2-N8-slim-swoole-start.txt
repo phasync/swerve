@@ -1,0 +1,4 @@
+ 05:01:47 up  5:32,  7 users,  load average: 4.79, 5.61, 4.65
+cd /home/frode/bench/fw/slim; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/swoole taskset -c 0-7,16-23 php swoole.php
+json=200:30 wait=200:13 
+      9 php 0-7,16-23

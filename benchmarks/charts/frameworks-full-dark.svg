@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 560" width="760" height="560" role="img" aria-label="The same framework applications, JSON route (continued)">
+<style>text{font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;font-variant-numeric:tabular-nums}</style>
+<text x="0" y="22" font-size="17" font-weight="600" fill="#E6EEF8">The same framework applications, JSON route (continued)</text>
+<text x="0" y="44" font-size="12.5" fill="#93A4B8">Requests per second, 8 workers, PHP 8.5.11 with opcache and JIT, Ryzen 9 9950X3D, loopback</text>
+<line x1="170.0" y1="60" x2="170.0" y2="485" stroke="#243246" stroke-width="1"/>
+<text x="170.0" y="501" font-size="11" text-anchor="middle" fill="#93A4B8">0</text>
+<line x1="266.0" y1="60" x2="266.0" y2="485" stroke="#243246" stroke-width="1"/>
+<text x="266.0" y="501" font-size="11" text-anchor="middle" fill="#93A4B8">5.0k</text>
+<line x1="362.0" y1="60" x2="362.0" y2="485" stroke="#243246" stroke-width="1"/>
+<text x="362.0" y="501" font-size="11" text-anchor="middle" fill="#93A4B8">10.0k</text>
+<line x1="458.0" y1="60" x2="458.0" y2="485" stroke="#243246" stroke-width="1"/>
+<text x="458.0" y="501" font-size="11" text-anchor="middle" fill="#93A4B8">15.0k</text>
+<line x1="554.0" y1="60" x2="554.0" y2="485" stroke="#243246" stroke-width="1"/>
+<text x="554.0" y="501" font-size="11" text-anchor="middle" fill="#93A4B8">20.0k</text>
+<line x1="650.0" y1="60" x2="650.0" y2="485" stroke="#243246" stroke-width="1"/>
+<text x="650.0" y="501" font-size="11" text-anchor="middle" fill="#93A4B8">25.0k</text>
+<line x1="170" y1="60" x2="170" y2="485" stroke="#3D4F66" stroke-width="1"/>
+<text x="0" y="79" font-size="13" font-weight="600" fill="#E6EEF8">Laravel 13</text>
+<text x="160" y="101.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">FrankenPHP (Octane)</text>
+<rect x="170" y="86" width="413.4" height="22" rx="3" fill="#46586E"/>
+<text x="590.4" y="101.5" font-size="12" fill="#E6EEF8">21.5k</text>
+<text x="160" y="130.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">Swoole (Octane)</text>
+<rect x="170" y="115" width="405.6" height="22" rx="3" fill="#46586E"/>
+<text x="582.6" y="130.5" font-size="12" fill="#E6EEF8">21.1k</text>
+<text x="160" y="159.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">RoadRunner (Octane)</text>
+<rect x="170" y="144" width="368.0" height="22" rx="3" fill="#46586E"/>
+<text x="545.0" y="159.5" font-size="12" fill="#E6EEF8">19.2k</text>
+<text x="160" y="188.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>
+<rect x="170" y="173" width="355.8" height="22" rx="3" fill="#8FB5E0"/>
+<text x="532.8" y="188.5" font-size="12" fill="#E6EEF8">18.5k</text>
+<text x="160" y="217.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<rect x="170" y="202" width="353.9" height="22" rx="3" fill="#5E8DC2"/>
+<text x="530.9" y="217.5" font-size="12" fill="#E6EEF8">18.4k</text>
+<text x="0" y="264" font-size="13" font-weight="600" fill="#E6EEF8">CodeIgniter 4.7</text>
+<text x="160" y="286.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>
+<rect x="170" y="271" width="395.9" height="22" rx="3" fill="#8FB5E0"/>
+<text x="572.9" y="286.5" font-size="12" fill="#E6EEF8">20.6k</text>
+<text x="160" y="315.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<rect x="170" y="300" width="387.5" height="22" rx="3" fill="#5E8DC2"/>
+<text x="564.5" y="315.5" font-size="12" fill="#E6EEF8">20.2k</text>
+<text x="160" y="344.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">FrankenPHP</text>
+<rect x="170" y="329" width="338.0" height="22" rx="3" fill="#46586E"/>
+<text x="515.0" y="344.5" font-size="12" fill="#E6EEF8">17.6k</text>
+<text x="0" y="391" font-size="13" font-weight="600" fill="#E6EEF8">Spiral 3</text>
+<text x="160" y="413.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">RoadRunner</text>
+<rect x="170" y="398" width="410.0" height="22" rx="3" fill="#46586E"/>
+<text x="587.0" y="413.5" font-size="12" fill="#E6EEF8">21.4k</text>
+<text x="160" y="442.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<rect x="170" y="427" width="380.2" height="22" rx="3" fill="#5E8DC2"/>
+<text x="557.2" y="442.5" font-size="12" fill="#E6EEF8">19.8k</text>
+<text x="160" y="471.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>
+<rect x="170" y="456" width="379.3" height="22" rx="3" fill="#8FB5E0"/>
+<text x="556.3" y="471.5" font-size="12" fill="#E6EEF8">19.8k</text>
+<text x="0" y="535" font-size="11" fill="#93A4B8">Each framework on the servers it has an integration for. Swoole in PROCESS mode, Octane&#x27;s default and its faster one here.</text>
+<text x="0" y="550" font-size="11" fill="#93A4B8">benchmarks/frameworks</text>
+</svg>

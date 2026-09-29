@@ -1,0 +1,8 @@
+sessions: 8 distinct of 2048
+cookie: PHPSESSID=af8e154027d1a1dae406fd000a3a3490
+HTTP/1.1 200 OK
+{"n":3,"v":null,"id":"af8e154027d1a1dae406fd000a3a3490","pid":1279516}
+HTTP/1.1 200 OK
+{"n":5,"v":null,"id":"af8e154027d1a1dae406fd000a3a3490","pid":1279517}
+HTTP/1.1 200 OK
+{"n":7,"v":null,"id":"af8e154027d1a1dae406fd000a3a3490","pid":1279519}

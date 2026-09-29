@@ -1,0 +1,4 @@
+ 03:39:38 up  4:10,  6 users,  load average: 1.27, 1.28, 1.26
+cd /home/frode/bench/fw/swerve-laravel/tests/Fixtures/app; PHP_INI_SCAN_DIR=:/home/frode/bench/fw/ini/jit taskset -c 0-7,16-23 php vendor/bin/swerve --workers=2 -q --no-access-log --http=0.0.0.0:18500 --public=public swerve.php
+json=200:17 session=200:40 wait=200:13 
+      3 php 0-7,16-23
