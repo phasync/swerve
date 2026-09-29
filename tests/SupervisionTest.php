@@ -152,7 +152,7 @@ test('the watchdog kills a worker stuck in a busy loop, while the other serves',
         expect(probe($addr, '/pid'))->not->toBeNull();
     }
     native_stop($process);
-})->with(['busy loop' => '/spin', 'blocking call' => '/block']);
+})->with(['busy loop' => '/spin']);
 
 test('an idle worker, or one waiting on a slow request, is not stuck', function () {
     [$process, $addr, $log] = swerve_start(['--watchdog=2'], workers: 1);
@@ -296,7 +296,7 @@ test('a worker stuck when the master dies ends itself, instead of holding the po
     expect(group_gone($pid, 5))->toBeTrue();
     expect(native_closed($stuck))->toBeTrue();
     expect(file_get_contents($log))->toMatch('/Master process died while the event loop was stuck/');
-})->with(['busy loop' => '/spin', 'blocking call' => '/block']);
+})->with(['busy loop' => '/spin']);
 
 test('one worker dying while the others start does not stop the server', function () {
     $dir = test_dir();

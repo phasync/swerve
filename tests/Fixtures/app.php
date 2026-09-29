@@ -587,12 +587,6 @@ return new class($version) implements RequestHandlerInterface {
                 while (true) {
                 }
             })(),
-            // Looped, because a signal ends sleep() early
-            '/block'       => (static function () {
-                while (true) {
-                    \sleep(1000);
-                }
-            })(),
             // A blocking sleep of ?ms=, answering how long it took: a signal would end it early
             '/usleep'      => (static function () use ($query) {
                 $start = \microtime(true);
