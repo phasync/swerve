@@ -308,8 +308,11 @@ Octane: `--max-requests=1000000000`. Its default (500) restarts every worker aft
   N=8) and FrankenPHP 1.4× at N=2. For Symfony it is the adapter: a CLI micro-benchmark
   (`apps/symfony/micro.php`, one CPU) has the kernel's handle+terminate at 23 µs and
   `Swerve\Symfony\Handler::handle()` at 44–45 µs; `toSymfony()` is 1.7 µs and the `phasync::go()`
-  for terminate ~4 µs, so ~15 µs per request are elsewhere in `handle()` (kernel pool borrow/release,
-  the PSR response). The pool size is not it (`KERNELS=1`: same req/s).
+  for terminate ~4 µs in a plain loop. Follow-up (swerve-symfony#1): that `phasync::go()` is the
+  cost. It is the only fiber swerve-symfony creates per request, and in a process as large as a
+  Symfony app a new fiber costs ~5.5 µs itself (PHP maps a fresh 2 MiB stack for each) and slows the
+  next request by 2–5 µs more. Running terminate inline instead: 25.8k → 37.4k req/s at N=2, 94.5k →
+  135.0k at N=8 (+43 %). The pool size is not it (`KERNELS=1`: same req/s).
 - **Where swerve is ahead**: Slim on swerve 181k / 705k vs RoadRunner 75k / 132k and FrankenPHP 188k /
   366k (FrankenPHP's N=2 figure uses 5.5 CPUs); Swoole is 18 % ahead of swerve on Slim, as in
   set 1. Yii: swerve 52k / 197k json and 38k / 142k session vs RoadRunner 37k / 80k and 28k / 59k.
@@ -343,11 +346,12 @@ Octane: `--max-requests=1000000000`. Its default (500) restarts every worker aft
   better p99 on Laravel json; BASE stays ahead on Symfony json at N=8 (206k vs 171k, the latter
   with 10 CPUs). For blocking frameworks PROCESS, Octane's default, is the right setting.
 - **swerve without phasync-ext has a long tail on Laravel json** (p99 142 ms at N=2 vs 7.7 ms with
-  the extension; same throughput). Even at N=1 with 16 connections: p99 44 ms vs 8 ms. Not seen on
-  the lighter apps (Symfony p99 2.5 ms). With 0.4 ms per request, the order in which the
-  `stream_select()` poller serves 16 ready connections (and how many connections each worker got)
-  shows as a tail; the extension's poller doesn't have it. Sequentially there are no stalls
-  (20,000 requests, none over 10 ms), so it is not GC or the framework.
+  the extension; same throughput). Follow-up (phasync#53): not the poller. swerve-laravel serves
+  requests one at a time through phasync's `Synchronized`, whose release let whichever coroutine
+  ran first take the lock, often a newly arrived request, so a waiting one could lose many times in
+  a row (handler times up to 518 ms against 0.4 ms). The poller only changed who won. phasync
+  2.0.0-alpha15 hands the lock to the longest waiter: N=1, 16 connections, p99 149.9 ms → 6.6 ms
+  (6.5 ms with phasync-ext), same throughput. The tables above are from before the fix.
 - **CodeIgniter session on FrankenPHP varied 16–21 % between rounds**; the others were within 4 %
   (listed by `summarize.py`). Not investigated further.
 - Symfony on FrankenPHP: `FrankenPhpWorkerRunner` calls `gc_collect_cycles()` after every request
