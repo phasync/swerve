@@ -4,6 +4,8 @@ namespace Swerve\Http;
 
 use phasync;
 use phasync\CancelledException;
+use phasync\Context\DefaultContext;
+use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\Http\Message\Response;
@@ -51,6 +53,9 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
 
     /** @var array<int, self> the open WebSockets of this process, see keepAlive() */
     private static array $open = [];
+
+    /** Raised when the last open WebSocket closes, for the ping loop. */
+    private static ?object $lastClosed = null;
     private static bool $pinging = false;
 
     /** The reader saw the connection end: receive() returns null once the inbox is empty. */
@@ -248,6 +253,9 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
             $this->readerDone = true;
             phasync::raiseFlag($this);
             unset(self::$open[\spl_object_id($this)]);
+            if (!self::$open && null !== self::$lastClosed) {
+                phasync::raiseFlag(self::$lastClosed); // the ping loop ends now, not after its sleep
+            }
             if (!$app->isTerminated()) {
                 phasync::cancel($app);
             }
@@ -266,20 +274,25 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
             return;
         }
         self::$pinging = true;
+        // A context of its own: it serves every connection, and no request waits for it (a
+        // drain waits for the coroutines of requests)
         phasync::go(static function () {
             try {
                 while (self::$open) {
-                    phasync::sleep(self::PING_INTERVAL);
-                    foreach (self::$open as $ws) {
-                        if (!$ws->closed) {
-                            $ws->writeNow("\x89\x00"); // a ping with no payload
+                    try {
+                        phasync::awaitFlag(self::$lastClosed ??= new \stdClass(), self::PING_INTERVAL);
+                    } catch (TimeoutException) {
+                        foreach (self::$open as $ws) {
+                            if (!$ws->closed) {
+                                $ws->writeNow("\x89\x00"); // a ping with no payload
+                            }
                         }
                     }
                 }
             } finally {
                 self::$pinging = false;
             }
-        });
+        }, context: new DefaultContext());
     }
 
     private function frame(int $opcode, string $payload): void

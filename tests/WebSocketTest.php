@@ -107,8 +107,16 @@ test('WebSocket: a drain (shutdown) closes open connections with 1001', function
     expect(ws_read($conn))->toBe([1, 'hi']);
     swerve_signal($process, SIGTERM);
     expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
+    // The client's half of the closing handshake, and its close when swerve closes, as a browser's;
+    // a client that stays silent would hold the drain for the closing linger (2 s)
+    ws_send($conn, 8, pack('n', 1001));
+    fread($conn, 1);
+    fclose($conn);
+    $t = microtime(true);
     swerve_wait($process, 5);
-    expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
+    // Nothing else holds the drain: not the shared ping loop, which is no request's
+    expect(microtime(true) - $t)->toBeLessThan(2.0, file_get_contents($log));
+    expect(log_count($log, '/(ERROR|CRITICAL|failed|deadline)/i'))->toBe(0, file_get_contents($log));
 });
 
 test('WebSocket: a callback that only sends (a subscription forwarded) gets every publish, and ends when its client leaves', function () {
