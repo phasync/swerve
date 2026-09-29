@@ -154,7 +154,7 @@ final class Worker
         // Blocked by the master around the fork: a signal that came meanwhile arrives now
         \pcntl_sigprocmask(\SIG_UNBLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
         \stream_set_blocking($pipe, false);
-        Topics::$toMaster = fn (string $topic, string $message) => $this->send(Topics::frame($topic, $message));
+        Topics::$toMaster = fn (string $topic, string $message, bool $json = false) => $this->send(Topics::frame($topic, $message, $json));
     }
 
     /**
@@ -389,10 +389,10 @@ final class Worker
                 return;
             }
             $buffer .= $bytes;
-            $status = Topics::parse($buffer, static fn (string $topic, string $message) => match ($topic) {
+            $status = Topics::parse($buffer, static fn (string $topic, string $message, string $frame, bool $json) => match ($topic) {
                 Cache::TOPIC  => Cache::reply($message),
                 Cache::FORGET => Cache::forget($message),
-                default       => Topics::deliver($topic, $message),
+                default       => Topics::deliver($topic, $message, $json),
             });
             if (\str_contains($status, 'L') && $this->logger instanceof Logger) {
                 $this->logger->reopen();

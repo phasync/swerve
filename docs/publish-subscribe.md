@@ -58,8 +58,15 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 - Topics are 1 to 255 bytes, messages at most 1 MiB; larger ones throw
   `InvalidArgumentException`.
 - It returns once the message is on its way, not when it is delivered.
-- Encode once: publish the JSON the clients receive, so a message sent to 10,000 WebSockets is
-  encoded once, not 10,000 times.
+- Every message travels as JSON: encoded once where it is published, decoded once in each
+  worker, and every subscriber gets the value that was published, shared. A string stays a
+  string (`'{}'` too), an array an array; objects arrive as associative arrays. `null` is
+  refused: a subscription with a heartbeat yields `null` for "nothing came".
+- Messages go to the subscribers in the workers, never to a browser by themselves. Publish
+  values as they are (`Swerve::publish('game', ['kill', $playerId])`), so 10,000 subscribers don't
+  each decode a string. When subscribers pass a message on unchanged to their WebSocket or SSE
+  clients, publish the string those clients should get: it is encoded once, by the publisher,
+  not by every subscriber.
 
 ## Patterns
 

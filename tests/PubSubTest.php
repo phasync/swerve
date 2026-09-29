@@ -264,3 +264,63 @@ test('a drain ends every subscription\'s loop, and one made while draining ends 
 
     expect($got)->toBe([['a', 'b', 'new one ended'], true, []]);
 });
+
+test('a message reaches every subscriber in every worker as the value published: an array as an array, a string as that string', function () {
+    [$process, $addr, $log] = swerve_start([], 2);
+    try {
+        $subscribers = [];
+        $pids        = [];
+        for ($i = 0; $i < 8; ++$i) {
+            [$conn, $pid]  = pubsub_subscribe($addr, 'structured', 2);
+            $subscribers[] = $conn;
+            $pids[$pid]    = true;
+        }
+        expect(count($pids))->toBe(2);
+        expect(probe($addr, '/publish-json?topic=structured&m=hello'))->toBe('published');
+        expect(probe($addr, '/publish?topic=structured&m=plain'))->toBe('published');
+        foreach ($subscribers as $conn) {
+            $events = '';
+            while (null !== ($chunk = native_read_chunk($conn)) && '' !== $chunk) {
+                $events .= $chunk;
+            }
+            // An array arrives as an array (re-encoded here to show it), a string as the string
+            expect($events)->toBe("data: json {\"m\":\"hello\",\"n\":1,\"list\":[1,2]}\n\ndata: plain\n\n");
+        }
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(error|critical)/'))->toBe(0, file_get_contents($log));
+});
+
+test('without a master, a message is delivered as JSON would deliver it, strings as strings; null is refused', function () {
+    $received = phasync::run(static function () {
+        $subscription = Swerve::subscribe('local-structured');
+        Swerve::publish('local-structured', ['a' => 1.0, 'o' => (object) ['x' => 1]]);
+        foreach ($subscription as $message) {
+            return $message;
+        }
+    });
+    expect($received)->toBe(['a' => 1.0, 'o' => ['x' => 1]]); // objects arrive as arrays, as from another worker
+    $strings = phasync::run(static function () {
+        $subscription = Swerve::subscribe('local-strings');
+        Swerve::publish('local-strings', '{}');
+        Swerve::publish('local-strings', '"quoted"');
+        $got = [];
+        foreach ($subscription as $message) {
+            $got[] = $message;
+            if (2 === \count($got)) {
+                return $got;
+            }
+        }
+    });
+    expect($strings)->toBe(['{}', '"quoted"']); // a string stays exactly that string
+    expect(fn () => Swerve::publish('local-structured', null))->toThrow(InvalidArgumentException::class);
+
+    // What a worker could not decode fails in the publisher: 512 levels encode, but don't decode
+    $deep = 'x';
+    for ($i = 0; $i < 512; ++$i) {
+        $deep = [$deep];
+    }
+    expect(fn () => Swerve::publish('local-structured', $deep))->toThrow(JsonException::class);
+    expect(fn () => Swerve::publish('local-structured', "\xFF"))->toThrow(JsonException::class); // invalid UTF-8
+});

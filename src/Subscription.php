@@ -18,7 +18,7 @@ use Swerve\Util\Topics;
  * message it is about to receive arrived in this process more than $maxLag seconds ago.
  * Messages wait for it meanwhile, shared with the topic's other subscribers.
  *
- * @implements \IteratorAggregate<int, string|null>
+ * @implements \IteratorAggregate<int, mixed>
  */
 final class Subscription implements \IteratorAggregate
 {
@@ -42,7 +42,7 @@ final class Subscription implements \IteratorAggregate
      * The messages, as they come; null after each $heartbeat seconds without one. Ends when the
      * process drains.
      *
-     * @return \Generator<int, string|null>
+     * @return \Generator<int, mixed> each message as published (a JSON message decoded), or null for a heartbeat
      *
      * @throws SubscriberLagException
      */

@@ -254,12 +254,20 @@ final class Swerve implements SelectableInterface, LoggerAwareInterface
      * crash) sees nothing sent before. Every subscriber sees the messages of a topic in the
      * same order. Swerve embedded without its master process delivers in this process only.
      *
+     * Every message travels as JSON: encoded once here, decoded once in each worker, and every
+     * subscriber gets the value published, shared: a string stays a string ('{}' too), an array
+     * an array, and objects arrive as associative arrays.
+     *
+     *     Swerve::publish('game', ['kill', $playerId]);
+     *
      * @param string $topic   1 to 255 bytes
-     * @param string $message at most 1 MiB
+     * @param mixed  $message anything json_encode() takes except null; at most 1 MiB encoded
      *
      * @throws \InvalidArgumentException for a topic or message outside those sizes
+     * @throws \JsonException            for a value JSON can't express
+     * @throws \InvalidArgumentException for null, which a heartbeat subscription yields for "nothing came"
      */
-    public static function publish(string $topic, string $message): void
+    public static function publish(string $topic, mixed $message): void
     {
         Topics::publish($topic, $message);
     }

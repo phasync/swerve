@@ -312,6 +312,8 @@ foreach (Swerve::subscribe('chat') as $message) {
 }
 ```
 
+- Messages travel as JSON, decoded once per worker and shared by its subscribers: a subscriber
+  gets the value published (`Swerve::publish('game', ['kill', $id])` an array, `'{}'` a string).
 - Messages pass through the master process, which sends each to every worker in the order it
   read them, so every subscriber sees a topic's messages in the same order. Without the master
   (swerve embedded in your own process), they are delivered in that process.

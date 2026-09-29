@@ -31,7 +31,7 @@ final class Topics
     /**
      * Sends a message to the master, set by the Worker; null without a master.
      *
-     * @var (Closure(string $topic, string $message): void)|null
+     * @var (Closure(string $topic, string $message, bool $json): void)|null
      */
     public static ?Closure $toMaster = null;
 
@@ -45,8 +45,17 @@ final class Topics
     /** @var array<string, int> */
     private static array $counts = [];
 
-    public static function publish(string $topic, string $message): void
+    public static function publish(string $topic, mixed $message): void
     {
+        if (null === $message) {
+            throw new \InvalidArgumentException('null is no message: a subscription with a heartbeat yields null when none came');
+        }
+        // Always JSON, strings too: what a subscriber gets is the value published ('{}' stays a
+        // string), decoded once per worker
+        $json    = true;
+        // Depth 511: json_decode() at its default 512 fails on the 512 levels json_encode() accepts,
+        // so what the workers could not decode fails here, in the publisher
+        $message = \json_encode($message, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION, 511);
         if ('' === $topic || \strlen($topic) > self::MAX_TOPIC) {
             throw new \InvalidArgumentException('A topic is 1 to ' . self::MAX_TOPIC . ' bytes, not ' . \strlen($topic));
         }
@@ -54,9 +63,9 @@ final class Topics
             throw new \InvalidArgumentException('A message is at most ' . self::MAX_MESSAGE . ' bytes, not ' . \strlen($message));
         }
         if (null !== self::$toMaster) {
-            (self::$toMaster)($topic, $message);
+            (self::$toMaster)($topic, $message, $json);
         } else {
-            self::deliver($topic, $message);
+            self::deliver($topic, $message, $json); // decoded again: what subscribers get never depends on where it came from
         }
     }
 
@@ -64,10 +73,14 @@ final class Topics
      * Hand a message to this process's subscribers of its topic, if any. Each message carries
      * when it arrived, for Subscription's lag check.
      */
-    public static function deliver(string $topic, string $message): void
+    /**
+     * A message for this process's subscribers of $topic. A JSON message is decoded here, once
+     * for all of them: they share the value (arrays are copied only if one changes it).
+     */
+    public static function deliver(string $topic, string $message, bool $json = false): void
     {
         if (isset(self::$writers[$topic])) {
-            self::$writers[$topic]->write([\hrtime(true), $message]);
+            self::$writers[$topic]->write([\hrtime(true), $json ? \json_decode($message, true, 512, \JSON_THROW_ON_ERROR) : $message]);
         }
     }
 
@@ -104,9 +117,10 @@ final class Topics
      * bytes (see Cluster): 'P', the topic's length (1 byte), the message's (4 bytes, big
      * endian), the topic, the message.
      */
-    public static function frame(string $topic, string $message): string
+    /** A message as it travels over a worker's pipe: 'J' for a published value (JSON), 'P' for swerve's own raw frames. */
+    public static function frame(string $topic, string $message, bool $json = false): string
     {
-        return 'P' . \chr(\strlen($topic)) . \pack('N', \strlen($message)) . $topic . $message;
+        return ($json ? 'J' : 'P') . \chr(\strlen($topic)) . \pack('N', \strlen($message)) . $topic . $message;
     }
 
     /**
@@ -114,7 +128,7 @@ final class Topics
      * each frame, with the frame itself last, and returns the status bytes. An incomplete frame
      * stays in $buffer for the next read.
      *
-     * @param Closure(string $topic, string $message, string $frame): void $message
+     * @param Closure(string $topic, string $message, string $frame, bool $json): void $message
      */
     public static function parse(string &$buffer, Closure $message): string
     {
@@ -122,7 +136,7 @@ final class Topics
         $at     = 0;
         $length = \strlen($buffer);
         while ($at < $length) {
-            if ('P' !== $buffer[$at]) {
+            if ('P' !== $buffer[$at] && 'J' !== $buffer[$at]) {
                 $status .= $buffer[$at++];
                 continue;
             }
@@ -134,7 +148,7 @@ final class Topics
             if ($length - $at < $frameLength) {
                 break;
             }
-            $message(\substr($buffer, $at + 6, $topicLength), \substr($buffer, $at + 6 + $topicLength, $frameLength - 6 - $topicLength), \substr($buffer, $at, $frameLength));
+            $message(\substr($buffer, $at + 6, $topicLength), \substr($buffer, $at + 6 + $topicLength, $frameLength - 6 - $topicLength), \substr($buffer, $at, $frameLength), 'J' === $buffer[$at]);
             $at += $frameLength;
         }
         $buffer = \substr($buffer, $at);

@@ -747,7 +747,7 @@ return new class($version) implements RequestHandlerInterface {
                 phasync::go(static function () use ($subscription, $out, $query) {
                     $i = 0;
                     foreach ($subscription as $message) {
-                        $out->append("data: $message\n\n");
+                        $out->append('data: ' . (\is_string($message) ? $message : 'json ' . \json_encode($message)) . "\n\n");
                         if (++$i >= (int) $query['n']) {
                             break;
                         }
@@ -756,6 +756,12 @@ return new class($version) implements RequestHandlerInterface {
                 });
 
                 return new Response(200, ['Content-Type' => 'text/event-stream'], $out);
+            })(),
+            // A structured message, sent as JSON: ['m' => ?m, 'n' => 1, 'list' => [1, 2]]
+            '/publish-json'   => (static function () use ($query) {
+                Swerve::publish($query['topic'], ['m' => $query['m'], 'n' => 1, 'list' => [1, 2]]);
+
+                return new Response(200, [], 'published');
             })(),
             '/publish'        => (static function () use ($query) {
                 Swerve::publish($query['topic'], \str_repeat($query['m'], (int) ($query['times'] ?? 1)));
