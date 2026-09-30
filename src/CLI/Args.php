@@ -2,6 +2,8 @@
 
 namespace Swerve\CLI;
 
+use phasync\Util\Console;
+
 /**
  * The command line: options, flags and arguments, parsed as GNU tools do. Options and
  * arguments may come in any order; an option's value is attached (`--workers=4`, `-w4`) or
@@ -204,11 +206,11 @@ final class Args
         $output = [];
         foreach ($this->values as $value) {
             if (\is_string($value)) {
-                $output[] = ($output ? "\n" : '') . "$value:";
+                $output[] = ($output ? "\n" : '') . '<!bold>' . Console::escape($value) . ':<!>';
                 continue;
             }
             $description = $value->description . ($value instanceof Option && '' !== $value->default ? " (default: {$value->default})" : '');
-            $output[]    = \sprintf('  %-' . $width . 's  %s', self::makeArgList($value), $description);
+            $output[]    = "  <!pad $width>" . Console::escape(self::makeArgList($value)) . '<!>  ' . Console::escape($description);
         }
 
         return \implode("\n", $output) . "\n";

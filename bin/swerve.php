@@ -4,7 +4,7 @@
  * Find the path to `vendor/autoload.php`.
  */
 
-use Charm\Terminal;
+use phasync\Util\Console;
 use phasync\Debug;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -56,7 +56,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
     /**
      * Colorful terminal.
      */
-    $term = new Terminal(\STDOUT);
+    $term = new Console(\STDOUT);
 
     /**
      * Argument parsing.

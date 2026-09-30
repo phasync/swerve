@@ -4,141 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "25a23eaaca13dc7b1ec0371fa9da4758",
+    "content-hash": "f35391b30b28ae8b6c49079e8ca24a96",
     "packages": [
         {
-            "name": "charm/options",
-            "version": "1.1.5",
-            "source": {
-                "type": "git",
-                "url": "https://bitbucket.org/ennerd/charm-options.git",
-                "reference": "1508ae6d87eb710676520dda62631cc0f2b59d32"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://bitbucket.org/ennerd/charm-options/get/1508ae6d87eb710676520dda62631cc0f2b59d32.zip",
-                "reference": "1508ae6d87eb710676520dda62631cc0f2b59d32",
-                "shasum": ""
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "AbstractOptions.php"
-                ],
-                "psr-4": {
-                    "Charm\\Options\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Frode Børli",
-                    "email": "frode@ennerd.com"
-                }
-            ],
-            "description": "A generic class for storing options while enforcing option types.",
-            "homepage": "https://bitbucket.org/ennerd/charm-options",
-            "support": {
-                "source": "https://bitbucket.org/ennerd/charm-options/src/1508ae6d87eb710676520dda62631cc0f2b59d32/?at=1.1.5"
-            },
-            "time": "2024-06-25T09:26:41+00:00"
-        },
-        {
-            "name": "charm/terminal",
-            "version": "1.1.5",
-            "source": {
-                "type": "git",
-                "url": "https://bitbucket.org/ennerd/terminal.git",
-                "reference": "721864ad4da0ce5152780c227d9246760bdcd07f"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://bitbucket.org/ennerd/terminal/get/721864ad4da0ce5152780c227d9246760bdcd07f.zip",
-                "reference": "721864ad4da0ce5152780c227d9246760bdcd07f",
-                "shasum": ""
-            },
-            "require": {
-                "charm/options": ">=1.0.6",
-                "charm/util-phpencode": ">=1.0.2"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Charm\\Terminal\\": "src/"
-                },
-                "classmap": [
-                    "Terminal.php"
-                ]
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Frode Børli",
-                    "email": "frode@ennerd.com"
-                }
-            ],
-            "description": "Organized and colorful command line output through a simple markup language.",
-            "homepage": "https://bitbucket.org/ennerd/terminal",
-            "support": {
-                "source": "https://bitbucket.org/ennerd/terminal/src/721864ad4da0ce5152780c227d9246760bdcd07f/?at=1.1.5"
-            },
-            "time": "2022-05-30T10:03:07+00:00"
-        },
-        {
-            "name": "charm/util-phpencode",
-            "version": "1.0.2",
-            "source": {
-                "type": "git",
-                "url": "https://bitbucket.org/ennerd/charm-util-phpencode.git",
-                "reference": "3d7d03532b8ce769618554581f21de4881ccd5f1"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://bitbucket.org/ennerd/charm-util-phpencode/get/3d7d03532b8ce769618554581f21de4881ccd5f1.zip",
-                "reference": "3d7d03532b8ce769618554581f21de4881ccd5f1",
-                "shasum": ""
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "php-encode.php"
-                ]
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Frode Børli",
-                    "email": "frode@ennerd.com"
-                }
-            ],
-            "description": "A small function that encodes compact PHP arrays, like json_encode - but for PHP arrays.",
-            "homepage": "https://bitbucket.org/ennerd/charm-util-phpencode",
-            "support": {
-                "source": "https://bitbucket.org/ennerd/charm-util-phpencode/src/3d7d03532b8ce769618554581f21de4881ccd5f1/?at=1.0.2"
-            },
-            "time": "2022-01-08T23:51:01+00:00"
-        },
-        {
             "name": "phasync/phasync",
-            "version": "2.0.0-alpha25",
+            "version": "2.0.0-alpha27",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "439e6247f56ab4998dc1b33947a7d337289b9d40"
+                "reference": "05bd0c399c6f264db1d105b033fcba59e266097f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/439e6247f56ab4998dc1b33947a7d337289b9d40",
-                "reference": "439e6247f56ab4998dc1b33947a7d337289b9d40",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/05bd0c399c6f264db1d105b033fcba59e266097f",
+                "reference": "05bd0c399c6f264db1d105b033fcba59e266097f",
                 "shasum": ""
             },
             "require": {
@@ -188,9 +67,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha25"
+                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha27"
             },
-            "time": "2026-09-30T07:24:37+00:00"
+            "time": "2026-09-30T08:33:17+00:00"
         },
         {
             "name": "psr/http-factory",
