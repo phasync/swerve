@@ -13,9 +13,9 @@ use Psr\Log\LoggerInterface;
  * started with phasync::go(), is logged here; the rest of the worker serves on. Without a
  * handler the failure would fail the worker's phasync::run(), which drops every coroutine.
  */
-final class LoggingContext implements ExceptionHandlerInterface
+final readonly class LoggingContext implements ExceptionHandlerInterface
 {
-    public function __construct(private readonly LoggerInterface $logger)
+    public function __construct(private LoggerInterface $logger)
     {
     }
 
