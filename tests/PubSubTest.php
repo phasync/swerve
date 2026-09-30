@@ -202,14 +202,14 @@ test('the master kills a worker that leaves published messages unread for 30 s, 
         // 4 MiB, more than its pipe holds, published through the other worker; a probe that
         // lands on the stalled one times out
         $published = 0;
-        $deadline  = microtime(true) + 10;
+        $start     = microtime(true);
+        $deadline  = $start + 10;
         while ($published < 8 && microtime(true) < $deadline) {
             $published += (int) ('published' === probe($addr, '/publish?topic=room&m=x&times=524288', 0.5));
         }
         expect($published)->toBe(8);
-        $start = microtime(true);
         log_wait($log, '/Killing worker \d+ \(slot \d\): published messages unread for 30 s/', 40);
-        expect(microtime(true) - $start)->toBeGreaterThan(25);
+        expect(microtime(true) - $start)->toBeGreaterThan(28);
         expect(probe($addr, '/hello'))->toBe('Hello');
     } finally {
         native_stop($process);

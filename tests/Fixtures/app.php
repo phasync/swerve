@@ -852,7 +852,9 @@ return new class($version) implements RequestHandlerInterface {
             })(),
             '/topics'         => new Response(200, [], \implode(',', Swerve\Util\Topics::active())),
             // Stalls this worker's event loop for ?s= seconds
-            '/busy'           => (static function () use ($query) {
+            // A stalled event loop: uninterruptible, or phasync-ext's preemption would let the
+            // worker's other coroutines run between iterations
+            '/busy'           => (#[\phasync\Uninterruptible] static function () use ($query) {
                 $until = \microtime(true) + (float) $query['s'];
                 while (\microtime(true) < $until) {
                 }
