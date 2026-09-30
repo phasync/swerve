@@ -4,7 +4,7 @@
     "type": "library",
     "require": {
         "php": "^8.2",
-        "phasync/phasync": "^2.0.0-alpha19",
+        "phasync/phasync": "^2.0.0-alpha25",
         "charm/terminal": "^1.1.5",
         "psr/log": "^3.0",
         "psr/http-message": "^1.0 || ^2.0",
@@ -30,7 +30,8 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "stable",
+    "minimum-stability": "alpha",
+    "prefer-stable": true,
     "require-dev": {
         "friendsofphp/php-cs-fixer": "dev-master",
         "slim/slim": "^4.14",
@@ -44,5 +45,8 @@
         "platform": {
             "php": "8.2.0"
         }
+    },
+    "suggest": {
+        "phasync/phasync-ext": "Optional C extension: epoll for any number of connections, preemption so a CPU-bound request cannot stall the others, and blocking I/O in existing code (PDO, mysqli, curl, files) waits cooperatively. swerve works fully without it."
     }
 }

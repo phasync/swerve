@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e0d0d2f6ae9e8e8025db5361a44e8674",
+    "content-hash": "25a23eaaca13dc7b1ec0371fa9da4758",
     "packages": [
         {
             "name": "charm/options",
@@ -129,16 +129,16 @@
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.0-alpha24",
+            "version": "2.0.0-alpha25",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "373f273b1f72083b310bbf0808663b6b9eec950b"
+                "reference": "439e6247f56ab4998dc1b33947a7d337289b9d40"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/373f273b1f72083b310bbf0808663b6b9eec950b",
-                "reference": "373f273b1f72083b310bbf0808663b6b9eec950b",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/439e6247f56ab4998dc1b33947a7d337289b9d40",
+                "reference": "439e6247f56ab4998dc1b33947a7d337289b9d40",
                 "shasum": ""
             },
             "require": {
@@ -188,9 +188,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha24"
+                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha25"
             },
-            "time": "2026-09-29T17:10:26+00:00"
+            "time": "2026-09-30T07:24:37+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -6385,12 +6385,12 @@
         }
     ],
     "aliases": [],
-    "minimum-stability": "stable",
+    "minimum-stability": "alpha",
     "stability-flags": {
         "friendsofphp/php-cs-fixer": 20,
         "phasync/phasync": 15
     },
-    "prefer-stable": false,
+    "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
         "php": "^8.2",
