@@ -433,6 +433,9 @@ final class Cluster
         if (WorkerProcess::DRAINING === $w->state) {
             if (\pcntl_wifexited($status) && 0 === \pcntl_wexitstatus($status)) {
                 $this->logger->info('Worker {pid} (slot {slot}) exited after draining ({how}, up {up})', $ctx);
+            } elseif ($w->fatal) {
+                // A fatal error, whichever came first: its drain notice or its exit
+                $this->logger->error('Worker {pid} (slot {slot}) died: {how}, up {up}' . $killed, $ctx);
             } else {
                 $this->logger->warning('Worker {pid} (slot {slot}) ended while draining: {how}' . $killed, $ctx);
             }
