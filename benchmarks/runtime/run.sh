@@ -26,7 +26,7 @@ exec 9> $HOME/bench/fpm-bench/bench.lock
 flock -n 9 || { echo "black's bench lock is held by another benchmark"; exit 1; }
 
 key() { # server: a hash of everything its result depends on
-    { echo "$RUNS $SECS $WRK"; wrk -v 2>&1 | head -1; cat run.sh
+    { echo "$RUNS $SECS $WRK $PHP $SWERVE"; wrk -v 2>&1 | head -1; declare -f start
       case $1 in
           phasync*) echo "$PHP"; php8.5 -v; cat hello.php
                     (cd ../.. && find src bin vendor -type f -name '*.php' | sort | xargs cat)
@@ -56,7 +56,7 @@ declare -A BEST
 for s in $SERVERS; do
     k=$(key $s)
     for n in $NS; do
-        cached=$(awk -F'\t' -v m=$MODE -v s=$s -v n=$n -v k=$k '$2==m && $3==s && $4==n && $5==k {print $7}' results.log 2> /dev/null)
+        cached=$(awk -F'\t' -v m=$MODE -v s=$s -v n=$n -v k=$k '$2==m && $3==s && $4==n && $5==k {print $7, $9}' results.log 2> /dev/null)
         if [ -n "$cached" ]; then
             BEST[$s,$n]="$(sort -n <<< "$cached" | tail -1) (cached)"
             continue
@@ -79,11 +79,12 @@ for s in $SERVERS; do
         done
         stop $pid
         if ss -ltn | grep -q ":$PORT "; then echo "$s N=$n left port $PORT taken: stopping"; exit 1; fi
-        BEST[$s,$n]=$(awk -F'\t' -v m=$MODE -v s=$s -v n=$n -v k=$k '$2==m && $3==s && $4==n && $5==k {print $7}' results.log | sort -n | tail -1)
+        BEST[$s,$n]=$(awk -F'\t' -v m=$MODE -v s=$s -v n=$n -v k=$k '$2==m && $3==s && $4==n && $5==k {print $7, $9}' results.log | sort -n | tail -1)
     done
 done
 
-echo; printf '%-12s' "req/s"; for n in $NS; do printf '%22s' "N=$n"; done; echo
+# The best run per server and N: req/s and its p99 latency
+echo; printf '%-12s' "req/s, p99"; for n in $NS; do printf '%30s' "N=$n"; done; echo
 for s in $SERVERS; do
-    printf '%-12s' $s; for n in $NS; do printf '%22s' "${BEST[$s,$n]:-failed}"; done; echo
+    printf '%-12s' $s; for n in $NS; do printf '%30s' "${BEST[$s,$n]:-failed}"; done; echo
 done
