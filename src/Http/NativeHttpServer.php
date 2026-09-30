@@ -121,7 +121,10 @@ final class NativeHttpServer
                     if ($ready) {
                         // A connection was waiting, yet accepting it failed: out of descriptors
                         $this->logShort('Accepting a connection failed ({error}); retrying', ['error' => \error_get_last()['message'] ?? 'unknown error']);
+                        \error_clear_last();
                         phasync::sleep(0.1);
+                    } else {
+                        \error_clear_last(); // nothing was waiting: not an error for the application to see
                     }
                     phasync::readable($this->listener, \PHP_FLOAT_MAX);
                     if ($this->draining) {
@@ -178,6 +181,7 @@ final class NativeHttpServer
         while ($socket = @\stream_socket_accept($this->listener, 0, $peer)) {
             $this->adopt($socket, $peer); // may let run() go on for a while, still accepting
         }
+        \error_clear_last(); // the queue is empty: not an error for the application to see
         // From here on nothing suspends until run() is woken by the shutdown
         $this->draining = true;
         \stream_socket_shutdown($this->listener, \STREAM_SHUT_RD);

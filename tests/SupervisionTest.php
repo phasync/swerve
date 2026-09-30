@@ -1993,3 +1993,14 @@ test('the application may start coroutines as it loads; they run for the worker\
     expect([$code, $took < 2])->toBe([0, true]);
     expect(log_count($log, '/(error|critical|warning)/'))->toBe(0, file_get_contents($log));
 });
+
+test('a worker\'s accepts leave no error behind for the application\'s shutdown handler to report', function (string $mode) {
+    $dir = temp_path(true);
+    \touch("$dir/record-last-error");
+    [$process, $addr] = swerve_start([], 1, env: ['SWERVE_TEST_DIR' => $dir], mode: $mode);
+    'http' === $mode ? probe($addr, '/hello') : fcgi_get($addr, '/hello');
+    native_stop($process);
+    $recorded = \array_map('file_get_contents', \glob("$dir/last-error-*"));
+    expect($recorded)->not->toBeEmpty();
+    expect(\array_filter($recorded))->toBe([]); // phasync/swerve#2: "stream_socket_accept(): Accept failed"
+})->with(['http', 'fastcgi']);

@@ -28,6 +28,12 @@ if ($testDir && \file_exists("$testDir/load-ms")) {
     \usleep((int) \file_get_contents("$testDir/load-ms") * 1000);
 }
 $version = $testDir && \file_exists("$testDir/version.php") ? require "$testDir/version.php" : 'none';
+if ($testDir && \file_exists("$testDir/record-last-error")) {
+    // As frameworks' shutdown handlers report error_get_last(), such as Spiral's
+    \register_shutdown_function(static function () use ($testDir) {
+        \file_put_contents("$testDir/last-error-" . \getmypid(), \error_get_last()['message'] ?? '');
+    });
+}
 
 /**
  * A non-seekable body of $n pieces of 10 bytes ("piece 000\n", ...), sleeping $ms before every

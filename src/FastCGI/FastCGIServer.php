@@ -109,6 +109,7 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
         while ($socket = @\stream_socket_accept($this->listener, 0, $peerName)) {
             $this->adopt($socket, $peerName);
         }
+        \error_clear_last(); // the queue is empty: not an error for the application to see
         $this->draining = true;
         \stream_socket_shutdown($this->listener, \STREAM_SHUT_RD);
         foreach ($this->sockets as $socket) {
@@ -129,6 +130,7 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
             while (true) {
                 $socket = @\stream_socket_accept($this->listener, 0, $peerName);
                 if (false === $socket) {
+                    \error_clear_last(); // an empty queue, or out of descriptors: retried either way
                     if ($ready) {
                         \phasync::sleep(0.1);
                     }
