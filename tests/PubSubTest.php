@@ -147,7 +147,7 @@ test('frames survive being read in pieces, among status bytes', function () {
         });
     }
 
-    expect([$status, $got, $buffer])->toBe(['.RT.', [[4, 'hello', 15], [255, 70000, 70261]], '']);
+    expect([$status, $got, $buffer])->toBe(['.RT.', [[4, 'hello', 23], [255, 70000, 70269]], '']);
 });
 
 /**
@@ -323,4 +323,14 @@ test('without a master, a message is delivered as JSON would deliver it, strings
     }
     expect(fn () => Swerve::publish('local-structured', $deep))->toThrow(JsonException::class);
     expect(fn () => Swerve::publish('local-structured', "\xFF"))->toThrow(JsonException::class); // invalid UTF-8
+});
+
+test('a frame carries when it was published, so the master can forward frames from several workers in publishing order', function () {
+    $buffer = Topics::frame('a', 'first') . Topics::frame('b', 'second');
+    $stamps = [];
+    Topics::parse($buffer, static function (string $topic, string $message, string $frame, bool $json, int $published) use (&$stamps) {
+        $stamps[$message] = $published;
+    });
+    expect(\array_keys($stamps))->toBe(['first', 'second']);
+    expect($stamps['first'])->toBeLessThanOrEqual($stamps['second'])->toBeGreaterThan(0);
 });

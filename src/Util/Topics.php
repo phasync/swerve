@@ -114,13 +114,14 @@ final class Topics
 
     /**
      * A message as it goes over the pipes between master and workers, among the single status
-     * bytes (see Cluster): 'P', the topic's length (1 byte), the message's (4 bytes, big
-     * endian), the topic, the message.
+     * bytes (see Cluster): 'J' for a published value (JSON) or 'P' for swerve's own raw frames,
+     * the topic's length (1 byte), the message's (4 bytes, big endian), when it was published
+     * (hrtime(), 8 bytes: the machine's monotonic clock, the same in every process), the topic,
+     * the message.
      */
-    /** A message as it travels over a worker's pipe: 'J' for a published value (JSON), 'P' for swerve's own raw frames. */
     public static function frame(string $topic, string $message, bool $json = false): string
     {
-        return ($json ? 'J' : 'P') . \chr(\strlen($topic)) . \pack('N', \strlen($message)) . $topic . $message;
+        return ($json ? 'J' : 'P') . \chr(\strlen($topic)) . \pack('NJ', \strlen($message), \hrtime(true)) . $topic . $message;
     }
 
     /**
@@ -128,7 +129,7 @@ final class Topics
      * each frame, with the frame itself last, and returns the status bytes. An incomplete frame
      * stays in $buffer for the next read.
      *
-     * @param Closure(string $topic, string $message, string $frame, bool $json): void $message
+     * @param Closure(string $topic, string $message, string $frame, bool $json, int $published): void $message
      */
     public static function parse(string &$buffer, Closure $message): string
     {
@@ -140,15 +141,16 @@ final class Topics
                 $status .= $buffer[$at++];
                 continue;
             }
-            if ($length - $at < 6) {
+            if ($length - $at < 14) {
                 break;
             }
-            $topicLength = \ord($buffer[$at + 1]);
-            $frameLength = 6 + $topicLength + \unpack('N', $buffer, $at + 2)[1];
+            $topicLength           = \ord($buffer[$at + 1]);
+            ['l' => $messageLength, 'p' => $published] = \unpack('Nl/Jp', $buffer, $at + 2);
+            $frameLength           = 14 + $topicLength + $messageLength;
             if ($length - $at < $frameLength) {
                 break;
             }
-            $message(\substr($buffer, $at + 6, $topicLength), \substr($buffer, $at + 6 + $topicLength, $frameLength - 6 - $topicLength), \substr($buffer, $at, $frameLength), 'J' === $buffer[$at]);
+            $message(\substr($buffer, $at + 14, $topicLength), \substr($buffer, $at + 14 + $topicLength, $messageLength), \substr($buffer, $at, $frameLength), 'J' === $buffer[$at], $published);
             $at += $frameLength;
         }
         $buffer = \substr($buffer, $at);

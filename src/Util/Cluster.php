@@ -317,6 +317,7 @@ final class Cluster
         }
         $now                  = self::now();
         $this->onlyHeartbeats = true;
+        $round                = []; // published this round, by all workers: forwarded in publishing order
         foreach ($read as $pid => $pipe) {
             $w     = $this->workers[$pid];
             $bytes = (string) @\fread($pipe, 65536);
@@ -329,7 +330,7 @@ final class Cluster
             $w->lastSeen = $now;
             $w->in .= $bytes;
             $published = false;
-            $bytes     = Topics::parse($w->in, function (string $topic, string $message, string $frame) use (&$published, $w) {
+            $bytes     = Topics::parse($w->in, function (string $topic, string $message, string $frame, bool $json, int $at) use (&$published, &$round, $w) {
                 $published = true; // also a cache request: answered at once, and the next round waits for nothing
                 if (Cache::TOPIC === $topic) {
                     $reply = Cache::serve($this->cache, $message, function (?array $keys) {
@@ -344,7 +345,7 @@ final class Cluster
 
                     return;
                 }
-                $this->publish($frame);
+                $round[] = [$at, $frame];
             });
             $this->onlyHeartbeats = $this->onlyHeartbeats && !$published && '' === \trim($bytes, '.');
             if (\str_contains($bytes, 'R') && WorkerProcess::STARTING === $w->state) {
@@ -365,6 +366,11 @@ final class Cluster
                     $this->logger->warning('Worker {pid} (slot {slot}) is draining on a SIGTERM the master did not send', ['pid' => $w->pid, 'slot' => $w->slot]);
                 }
             }
+        }
+        // A worker's own frames are in order already; across workers, the stamps decide
+        \usort($round, static fn (array $a, array $b) => $a[0] <=> $b[0]);
+        foreach ($round as [, $frame]) {
+            $this->publish($frame);
         }
     }
 
