@@ -3,7 +3,7 @@
 # on black. Server pinned to physical cores 0..N-1 (CCD0, no SMT siblings), wrk -t8 -c64 pinned
 # to CCD1's cores 8-15. PHP with opcache and the tracing JIT.
 #
-#   ./run.sh dev|docs ["phasync phasync-ext node go"] ["1 2 8"]
+#   ./run.sh dev|docs ["phasync phasync-ext node go"] ["1 2 4"]
 #
 # dev:  a 5 s warm-up, then one 10 s run (regression checks while developing)
 # docs: a 5 s warm-up, then three 30 s runs; the best is reported (published numbers)
@@ -13,7 +13,7 @@
 # swerve tree with its vendor/; `go build -o hello .` here.
 set -u
 cd "$(dirname "$0")"
-MODE=$1 SERVERS=${2:-"phasync phasync-ext node go"} NS=${3:-"1 2 8"}
+MODE=$1 SERVERS=${2:-"phasync phasync-ext node go"} NS=${3:-"1 2 4"}
 RT=$HOME/bench/rt PORT=18600 WRK="taskset -c 8-15 wrk -t8 -c64 --latency"
 EXT=$RT/phasync.so NODE=$RT/node-v26.10.0-linux-x64/bin/node
 PHP="php8.5 -d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M"
