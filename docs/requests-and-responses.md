@@ -81,7 +81,7 @@ set caching headers.
 ## Connections
 
 HTTP/1.1 keep-alive and pipelining are supported; a kept-alive connection may be idle for
-30 s. Limits, all answered with the proper status:
+5 s. Limits, all answered with the proper status:
 
 | | |
 |---|---|

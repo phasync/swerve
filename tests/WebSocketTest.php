@@ -175,7 +175,7 @@ test('WebSocket: a client that resets its connection (no close) ends the callbac
         native_stop($process);
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
-});
+})->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
 
 test('WebSocket: quiet connections are pinged every PING_INTERVAL seconds, by one coroutine for all', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);

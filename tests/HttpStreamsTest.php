@@ -12,7 +12,7 @@ use phasync\Psr\Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\NativeHttpConnection;
+use Swerve\Http\HttpConnection;
 
 /**
  * A handler of the given closure, for the in-process tests.
@@ -64,7 +64,7 @@ function serve_in_process(RequestHandlerInterface $handler, Closure $client, ?Ps
         }
         stream_set_blocking($server, false);
         stream_set_blocking($conn, false);
-        phasync::go((new NativeHttpConnection($server, '127.0.0.1:1', $handler, $logger ?? new Psr\Log\NullLogger()))->serve(...));
+        phasync::go((new HttpConnection($server, '127.0.0.1:1', new Swerve\Dispatcher($handler, $logger ?? new Psr\Log\NullLogger()), $logger ?? new Psr\Log\NullLogger()))->serve(...));
         try {
             return $client($conn);
         } finally {
@@ -415,7 +415,7 @@ test('reading a request body after its connection closed throws a RuntimeExcepti
 
         public function handle(ServerRequestInterface $request): ResponseInterface
         {
-            phasync::go(function () use ($request) {
+            phasync::service(function () use ($request) {
                 phasync::sleep(0.05);
                 try {
                     $request->getBody()->read(10);
@@ -1035,7 +1035,7 @@ test('a WebSocket client that resets its connection frees it, without an error',
     expect(probe($addr, '/hello'))->toBe('Hello');
     expect(log_count($log, '/(ERROR|CRITICAL|failed|Unhandled)/i'))->toBe(0);
     native_stop($process);
-});
+})->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
 
 test('phasync::finally() in the handler runs after the whole response, streamed too, in the request\'s coroutine, before the next request on the connection', function () {
     [$master, $addr] = native_start(workers: 1);
@@ -1064,4 +1064,45 @@ test('a request run in a switch-aware context keeps its own static property whil
     } finally {
         native_stop($master);
     }
+});
+
+test('each request gets a phasync context of its own, created when its code asks for one, shared by the coroutines it starts', function () {
+    $seen    = [];
+    $handler = streams_handler(function () use (&$seen) {
+        $seen[] = [phasync::getContext(), phasync::await(phasync::go(static fn () => phasync::getContext()))];
+
+        return new phasync\Psr\Response(200, [], 'ok');
+    });
+    $never = streams_handler(fn () => new phasync\Psr\Response(200, [], 'none'));
+    foreach ([$handler, $never] as $h) {
+        serve_in_process($h, function ($conn) {
+            client_write($conn, "GET /a HTTP/1.1\r\nHost: t\r\n\r\nGET /b HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+
+            return array_column(parse_responses(client_read_all($conn)), 'status');
+        });
+    }
+    expect($seen)->toHaveCount(2);
+    expect($seen[0][0])->toBe($seen[0][1]);
+    expect($seen[1][0])->toBe($seen[1][1]);
+    expect($seen[0][0])->not->toBe($seen[1][0]);
+});
+
+test('the client has the whole response while the request\'s own work goes on, and the connection closes after it', function () {
+    $ended   = false;
+    $handler = streams_handler(function () use (&$ended) {
+        phasync::go(static function () use (&$ended) {
+            phasync::sleep(0.2);
+            $ended = true;
+        });
+
+        return new phasync\Psr\Response(200, [], 'ok');
+    });
+    [$response, $endedWhenRead] = serve_in_process($handler, function ($conn) use (&$ended) {
+        client_write($conn, "GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+
+        return [client_read_all($conn), $ended]; // reads until the close: the work has not ended
+    });
+    expect($response)->toContain('ok');
+    expect($endedWhenRead)->toBeFalse();
+    expect($ended)->toBeTrue();
 });

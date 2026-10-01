@@ -90,7 +90,8 @@ private function events(): ResponseInterface
 A WebSocket starts as an HTTP request with `Upgrade: websocket`. When the application answers
 `101 Switching Protocols`, swerve sends that head at once, and from then on the request body is
 everything the client sends and the response body everything that goes back, raw: no
-HTTP framing, no HTTP timeouts, no size limit.
+HTTP framing, no HTTP timeouts, no size limit. This is HTTP mode only: no web server carries
+a `101` over FastCGI, so `--fastcgi` answers an upgrade with 501.
 
 `Swerve\Http\WebSocket` speaks the protocol (RFC 6455): the handshake, framing, fragmented
 messages, ping and pong, close codes, UTF-8 checks, and a limit on message size (1 MiB). The

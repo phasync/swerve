@@ -1,35 +1,27 @@
 <?php
 
-namespace swerve;
-
-use Closure;
-use Fiber;
-use Swerve\ConnectionInterface;
-use Swerve\Swerve;
-use Swerve\ModuleInterface;
+namespace Swerve;
 
 /**
- * The interface between the client and the application, for example implementing
- * HTTP, FastCGI, CGI or other protocols.
- * 
- * @package swerve
+ * A protocol server, such as HTTP/1.1 (--http) or FastCGI (--fastcgi): it turns what arrives on
+ * its listener into PSR-7 requests, gives each to the Dispatcher, and sends the response
+ * back in its protocol.
  */
-interface ServerInterface extends ModuleInterface {
+interface ServerInterface
+{
+    /**
+     * Open the listener. Throws when that fails, before the worker tells the master it is ready.
+     */
+    public function listen(): void;
 
     /**
-     * Open the socket and start serving requests. The provided closure
-     * must be used to register new connections with Swerve.
+     * Accept and serve connections until drained: returns once drain() was called and every
+     * connection has ended. Call from inside phasync::run(), after listen().
      */
-    public function open(Closure $addConnectionFunction): void;
-
-    /** 
-     * Stop serving
-     */
-    public function close(): void;
+    public function run(): void;
 
     /**
-     * Stop accepting; let the requests in flight finish, and close connections as they go
-     * idle. Serving coroutines end on their own, so the Swerve::run() around them returns.
+     * Stop accepting and let the requests in flight finish; run() then returns.
      */
     public function drain(): void;
 }

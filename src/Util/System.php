@@ -12,9 +12,22 @@ final class System {
     }
 
     /**
+     * Whether ext-sockets can be used (and not disabled): connections are then accepted, read and
+     * written with its functions, which are a little faster than PHP's streams; otherwise
+     * with streams alone.
+     */
+    public static function hasSockets(): bool
+    {
+        return \function_exists('socket_create') && \defined('SOCK_CLOEXEC');
+    }
+
+    /**
      * Listen on a TCP address such as 127.0.0.1:8080 or [::1]:8080 (a tcp:// prefix is
      * allowed), with SO_REUSEPORT, as every worker does on the same address. Accepted
-     * connections get TCP_NODELAY.
+     * connections get TCP_NODELAY, and with ext-sockets also TCP keepalive probing as Go's net
+     * package sets it (first probe after 15 s idle, then every 15 s, dropped after 9 unanswered:
+     * 150 s): a peer that vanished without closing, which nothing else ends on an upgraded
+     * connection, is noticed. (PHP's stream contexts don't apply keepalive to accepted sockets.)
      *
      * The listener is close-on-exec, so processes the application starts (exec('job &'),
      * proc_open(), mail()) don't inherit it. An inherited listener stays in the SO_REUSEPORT
@@ -23,25 +36,36 @@ final class System {
      * address taken after swerve stopped. PHP's streams are never close-on-exec; the sockets
      * extension makes them so from PHP 8.4. Without it, the listener is inherited.
      *
+     * A Unix domain socket, as unix:/run/swerve.sock, has no SO_REUSEPORT: the first call
+     * creates the socket file (refusing a path where anything listens, replacing a stale one),
+     * and later calls, in the workers forked after it, return that same listener. Anyone may
+     * connect to it; restrict it with the permissions of the directory it is in. The file stays
+     * until unlinkSocket().
+     *
      * @return resource non-blocking
      *
      * @throws \RuntimeException
      */
     public static function listen(string $address): mixed
     {
+        if (\str_starts_with($address, 'unix:')) {
+            return self::$unixListeners[$address] ??= self::listenUnix(\substr($address, 5));
+        }
         $address = \preg_replace('#^tcp://#', '', $address);
-        if (\defined('SOCK_CLOEXEC')) {
+        if (self::hasSockets()) {
             \preg_match('/^\[?(.*?)\]?:(\d+)$/D', $address, $m);
             $socket = \socket_create(\str_contains($m[1], ':') ? \AF_INET6 : \AF_INET, \SOCK_STREAM | \SOCK_CLOEXEC, \SOL_TCP);
             // SO_REUSEADDR as stream_socket_server() sets it: connections in TIME_WAIT don't block a restart
+            // TCP_NODELAY and the keepalive options are set here once: Linux gives them to every accepted connection
             if (!@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEADDR, 1) || !@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEPORT, 1)
+                || !@\socket_set_option($socket, \SOL_TCP, \TCP_NODELAY, 1)
+                || !@\socket_set_option($socket, \SOL_SOCKET, \SO_KEEPALIVE, 1) || !@\socket_set_option($socket, \SOL_TCP, \TCP_KEEPIDLE, 15)
+                || !@\socket_set_option($socket, \SOL_TCP, \TCP_KEEPINTVL, 15) || !@\socket_set_option($socket, \SOL_TCP, \TCP_KEEPCNT, 9)
                 || !@\socket_bind($socket, $m[1], (int) $m[2]) || !@\socket_listen($socket, 65535)) {
                 $errno = \socket_last_error($socket);
                 throw new \RuntimeException("Could not listen at $address: " . \socket_strerror($errno), $errno);
             }
             $listener = \socket_export_stream($socket);
-            // Read by stream_socket_accept() from the listener's context
-            \stream_context_set_option($listener, 'socket', 'tcp_nodelay', true);
         } else {
             $listener = @\stream_socket_server("tcp://$address", $errno, $errstr, \STREAM_SERVER_BIND | \STREAM_SERVER_LISTEN,
                 \stream_context_create(['socket' => ['so_reuseport' => true, 'tcp_nodelay' => true, 'backlog' => 65535]]));
@@ -52,6 +76,47 @@ final class System {
         \stream_set_blocking($listener, false);
 
         return $listener;
+    }
+
+    /** @var array<string, resource> */
+    private static array $unixListeners = [];
+
+    /** @return resource */
+    private static function listenUnix(string $path): mixed
+    {
+        if (\file_exists($path)) {
+            if ('socket' !== \filetype($path)) {
+                throw new \RuntimeException("Could not listen at $path: it exists, and is not a socket");
+            }
+            if ($probe = @\stream_socket_client("unix://$path", $errno, $errstr, 1)) {
+                \fclose($probe);
+                throw new \RuntimeException("Could not listen at $path: already in use");
+            }
+            \unlink($path);
+        }
+        if (self::hasSockets()) {
+            $socket = \socket_create(\AF_UNIX, \SOCK_STREAM | \SOCK_CLOEXEC, 0);
+            if (!@\socket_bind($socket, $path) || !@\socket_listen($socket, 65535)) {
+                $errno = \socket_last_error($socket);
+                throw new \RuntimeException("Could not listen at $path: " . \socket_strerror($errno), $errno);
+            }
+            $listener = \socket_export_stream($socket);
+        } else {
+            $listener = @\stream_socket_server("unix://$path", $errno, $errstr, \STREAM_SERVER_BIND | \STREAM_SERVER_LISTEN);
+            if (false === $listener) {
+                throw new \RuntimeException("Could not listen at $path: $errstr", $errno);
+            }
+        }
+        \chmod($path, 0666);
+        \stream_set_blocking($listener, false);
+
+        return $listener;
+    }
+
+    /** Remove the socket file of a unix: address from listen(), when the server stops. */
+    public static function unlinkSocket(string $address): void
+    {
+        @\unlink(\substr($address, 5));
     }
 
     /**

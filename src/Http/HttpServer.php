@@ -3,8 +3,9 @@
 namespace Swerve\Http;
 
 use phasync;
-use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
+use Swerve\Dispatcher;
+use Swerve\ServerInterface;
 use Swerve\Util\System;
 
 /**
@@ -21,7 +22,7 @@ use Swerve\Util\System;
  * the limit (see run()); more wait in the kernel's accept queue. At that limit, connections
  * waiting on their client are closed to make room, see reclaim().
  */
-final class NativeHttpServer
+final class HttpServer implements ServerInterface
 {
     /**
      * File descriptors left for the listener, logs and the application's own files and
@@ -35,12 +36,19 @@ final class NativeHttpServer
     /**
      * Connections being served, oldest first.
      *
-     * @var array<int, NativeHttpConnection>
+     * @var array<int, HttpConnection>
      */
     private array $connections = [];
 
     /** @var resource|null */
     private $listener = null;
+
+    /** The listener as ext-sockets' object, when System::hasSockets(): connections are accepted with it. */
+    private ?\Socket $listenSocket = null;
+    /** A unix: listener is one socket for every worker: see waitForClient() */
+    private bool $shared = false;
+    private ?\Fiber $waiting = null;
+    private ?\RuntimeException $wake = null;
 
     /** The most connections served at once, see listen(). */
     private int $max = 0;
@@ -64,10 +72,10 @@ final class NativeHttpServer
      */
     public function __construct(
         private readonly string $address,
-        private readonly RequestHandlerInterface $handler,
+        private readonly Dispatcher $dispatcher,
         private readonly LoggerInterface $logger,
         private readonly bool $bufferResponses = false,
-        private readonly int $maxBodySize = NativeHttpConnection::MAX_BODY,
+        private readonly int $maxBodySize = HttpConnection::MAX_BODY,
     ) {
     }
 
@@ -95,13 +103,17 @@ final class NativeHttpServer
             $this->remedy = 'add workers, or install the phasync extension: without it a worker serves no more, whatever the open-file limit';
         }
         $this->max = $limit - self::RESERVED_FDS;
-        \register_shutdown_function(static function () { NativeHttpConnection::$exiting = true; });
+        \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
 
         // Not phasync\Net\listen(): its accept loop retries at once, forever, when accepting
         // fails for lack of descriptors; and its listener is inherited by processes the
         // application starts, see System::listen()
         $listener       = System::listen($this->address);
         $this->listener = $listener;
+        $this->shared   = \str_starts_with($this->address, 'unix:');
+        if (System::hasSockets()) {
+            $this->listenSocket = \socket_import_stream($listener);
+        }
         $this->logger->info('Serving HTTP at {address}, at most {max} connections', ['address' => \stream_socket_get_name($listener, false), 'max' => $this->max]);
     }
 
@@ -116,8 +128,14 @@ final class NativeHttpServer
             $ready = false;
             while (true) {
                 // A burst of connections is accepted without waiting on the event loop in between
-                $socket = @\stream_socket_accept($this->listener, 0, $peer);
+                $socket = $this->accept($peer, $sock);
                 if (false === $socket) {
+                    if ($ready && $this->shared) {
+                        // Another worker may have accepted it first: a failure only if one is still waiting
+                        $r     = [$this->listener];
+                        $w     = $x = null;
+                        $ready = \stream_select($r, $w, $x, 0) > 0;
+                    }
                     if ($ready) {
                         // A connection was waiting, yet accepting it failed: out of descriptors
                         $this->logShort('Accepting a connection failed ({error}); retrying', ['error' => \error_get_last()['message'] ?? 'unknown error']);
@@ -126,7 +144,7 @@ final class NativeHttpServer
                     } else {
                         \error_clear_last(); // nothing was waiting: not an error for the application to see
                     }
-                    phasync::readable($this->listener, \PHP_FLOAT_MAX);
+                    $this->waitForClient();
                     if ($this->draining) {
                         break;
                     }
@@ -134,10 +152,10 @@ final class NativeHttpServer
                     continue;
                 }
                 $ready = false;
-                $this->adopt($socket, $peer);
+                $this->adopt($socket, $peer, $sock);
                 // At the limit: once a client waits to be accepted, make room for it
                 while (\count($this->connections) >= $this->max) {
-                    phasync::readable($this->listener, \PHP_FLOAT_MAX);
+                    $this->waitForClient();
                     if ($this->draining) {
                         break 2;
                     }
@@ -153,7 +171,8 @@ final class NativeHttpServer
             }
             // Closed here, not in drain(): this coroutine was waiting on it
             \fclose($this->listener);
-            $this->listener = null;
+            $this->listener     = null;
+            $this->listenSocket = null;
             while ($this->connections) {
                 phasync::awaitFlag($this);
             }
@@ -178,13 +197,20 @@ final class NativeHttpServer
      */
     public function drain(): void
     {
-        while ($socket = @\stream_socket_accept($this->listener, 0, $peer)) {
-            $this->adopt($socket, $peer); // may let run() go on for a while, still accepting
+        if ($this->shared) {
+            $this->draining = true;
+            if ($this->waiting) {
+                phasync::cancel($this->waiting, $this->wake = new \RuntimeException('drain'));
+            }
+        } else {
+            while ($socket = $this->accept($peer, $sock)) {
+                $this->adopt($socket, $peer, $sock); // may let run() go on for a while, still accepting
+            }
+            \error_clear_last(); // the queue is empty: not an error for the application to see
+            // From here on nothing suspends until run() is woken by the shutdown
+            $this->draining = true;
+            \stream_socket_shutdown($this->listener, \STREAM_SHUT_RD);
         }
-        \error_clear_last(); // the queue is empty: not an error for the application to see
-        // From here on nothing suspends until run() is woken by the shutdown
-        $this->draining = true;
-        \stream_socket_shutdown($this->listener, \STREAM_SHUT_RD);
         $upgraded = 0;
         foreach ($this->connections as $connection) {
             $upgraded += (int) $connection->drain();
@@ -194,12 +220,70 @@ final class NativeHttpServer
     }
 
     /**
+     * Wait for a client. The listener of a unix: address is shared with the other workers, so
+     * drain() can't shut it down to wake this: its wait coroutine is cancelled instead.
+     */
+    private function waitForClient(): void
+    {
+        if (!$this->shared) {
+            phasync::readable($this->listener, \PHP_FLOAT_MAX);
+
+            return;
+        }
+        // A cancellation stays on a coroutine until it ends, and run() waits again after the
+        // loop: the wait is a coroutine of its own, which is the one drain() cancels
+        $this->waiting = phasync::go(fn () => phasync::readable($this->listener, \PHP_FLOAT_MAX));
+        try {
+            phasync::await($this->waiting);
+        } catch (\RuntimeException $e) {
+            if ($e !== $this->wake) {
+                throw $e;
+            }
+        } finally {
+            $this->waiting = null;
+        }
+    }
+
+    /**
+     * The next waiting connection, or false. With ext-sockets it arrives already non-blocking and
+     * close-on-exec, and as a stream only for waiting on it: $sock is what the connection reads
+     * and writes with.
+     *
+     * @return resource|false
+     */
+    private function accept(?string &$peer, ?\Socket &$sock): mixed
+    {
+        if (null === $this->listenSocket) {
+            $sock = null;
+
+            return @\stream_socket_accept($this->listener, 0, $peer);
+        }
+        $accepted = @\socket_accept($this->listenSocket);
+        if (false === $accepted) {
+            $sock = null;
+
+            return false;
+        }
+        $sock = $accepted;
+        if ($this->shared) {
+            $peer = ''; // a unix socket's client has no address
+        } else {
+            \socket_getpeername($sock, $address, $port);
+            $peer = (\str_contains($address, ':') ? "[$address]" : $address) . ":$port";
+        }
+
+        return \socket_export_stream($sock);
+    }
+
+    /**
      * @param resource $socket
      */
-    private function adopt($socket, string $peer): void
+    private function adopt($socket, string $peer, ?\Socket $sock): void
     {
-        \stream_set_blocking($socket, false);
-        $connection = new NativeHttpConnection($socket, $peer, $this->handler, $this->logger, $this->bufferResponses, $this->maxBodySize);
+        if (null === $sock) {
+            \stream_set_blocking($socket, false);
+        }
+        $connection = new HttpConnection($socket, $peer, $this->dispatcher, $this->logger, $this->bufferResponses, $this->maxBodySize, $sock);
         $id         = \spl_object_id($connection);
 
         $this->connections[$id] = $connection;
@@ -228,7 +312,7 @@ final class NativeHttpServer
      */
     private function reclaim(): void
     {
-        foreach ([NativeHttpConnection::ANSWERED, NativeHttpConnection::NEW, NativeHttpConnection::KEPT_ALIVE, NativeHttpConnection::BODY] as $state) {
+        foreach ([HttpConnection::ANSWERED, HttpConnection::NEW, HttpConnection::KEPT_ALIVE, HttpConnection::BODY] as $state) {
             foreach ($this->connections as $connection) {
                 if ($connection->reclaim($state)) {
                     ++$this->reclaimed;

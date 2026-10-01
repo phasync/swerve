@@ -53,7 +53,7 @@ use Psr\Http\Message\StreamInterface;
  *    may be closed to make room. Code in handle() that waits for a coroutine reading the body
  *    past its framing (curl sends `Upgrade: h2c` on plain requests) is stuck until that time
  *    is up: the upgrade is then declined, as inside handle().
- * 5. Answering 101 (see NativeHttpConnection::tunnel()): set Upgrade and Connection yourself,
+ * 5. Answering 101 (see HttpConnection::tunnel()): set Upgrade and Connection yourself,
  *    they are sent as given. The head goes out as soon as handle() returns; the response body
  *    goes out unframed as it is read, and its end closes the connection (the request body then
  *    gets the client's last bytes for up to 2 s). No HTTP timeout or size limit applies, also
@@ -114,7 +114,7 @@ final class RequestBody implements StreamInterface
 
     /**
      * A coroutine other than handle()'s read the body: it reads on at its own pace, see
-     * absorbable() and NativeHttpConnection::settle().
+     * absorbable() and HttpConnection::settle().
      */
     public bool $readElsewhere = false;
 
@@ -125,7 +125,7 @@ final class RequestBody implements StreamInterface
      * @param bool $upgrade  an upgrade request, whose body's end depends on the response
      */
     public function __construct(
-        private readonly NativeHttpConnection $connection,
+        private readonly HttpConnection $connection,
         private readonly ?int $length,
         private bool $continue,
         private readonly int $maxSize,
@@ -244,7 +244,7 @@ final class RequestBody implements StreamInterface
     /**
      * Read the body's rest into the body, for the application to read whenever it likes: after
      * the response, while the application holds the body but isn't reading it, so the connection
-     * can go on (see NativeHttpConnection::settle()). The client gets the time it would have if
+     * can go on (see HttpConnection::settle()). The client gets the time it would have if
      * the application read the body itself. A chunked body is taken only up to about
      * $max bytes; its rest stays on the socket, for the application. A failure is left for the
      * application's reads to find: a malformed body's error, or what arrived and then a
@@ -260,7 +260,7 @@ final class RequestBody implements StreamInterface
         } catch (\RuntimeException) {
         } finally {
             $this->absorbing = false;
-            if (!NativeHttpConnection::$exiting) {
+            if (!HttpConnection::$exiting) {
                 phasync::raiseFlag($this); // a read waiting for it
             }
         }
@@ -275,7 +275,7 @@ final class RequestBody implements StreamInterface
     }
 
     /**
-     * The response status is known (upgrade requests only, see NativeHttpConnection::writeResponse()):
+     * The response status is known (upgrade requests only, see HttpConnection::writeResponse()):
      * a read waiting for it goes on, as the raw rest of the connection (101) or to the body's end.
      */
     public function respond(int $status): void
@@ -407,7 +407,7 @@ final class RequestBody implements StreamInterface
 
     /**
      * After a 101, ends the connection at once: the way to give a tunnel up, also one whose
-     * client stopped reading, where a write of the response waits (NativeHttpConnection::abort()).
+     * client stopped reading, where a write of the response waits (HttpConnection::abort()).
      * Otherwise does nothing: releasing the body (see __destruct()) is what hands its rest back
      * to the connection, which skips it or closes.
      */
@@ -440,7 +440,7 @@ final class RequestBody implements StreamInterface
             $this->connection->readLine(0); // exactly CRLF after the chunk's data
             $this->chunkEnd = false;
         }
-        $line   = $this->connection->readLine(NativeHttpConnection::MAX_CHUNK_LINE);
+        $line   = $this->connection->readLine(HttpConnection::MAX_CHUNK_LINE);
         $digits = \strspn($line, '0123456789abcdefABCDEF');
         // At most 15 hex digits, so the size always fits an int; extensions are accepted and ignored
         if (0 === $digits || $digits > 15 || ($digits !== \strlen($line)
@@ -455,9 +455,9 @@ final class RequestBody implements StreamInterface
         if (0 === $this->remaining) {
             $total = 0;
             $count = 0;
-            while ('' !== ($trailer = $this->connection->readLine(NativeHttpConnection::MAX_CHUNK_LINE))) {
+            while ('' !== ($trailer = $this->connection->readLine(HttpConnection::MAX_CHUNK_LINE))) {
                 $total += \strlen($trailer) + 2;
-                if (++$count > NativeHttpConnection::MAX_HEADERS || $total > NativeHttpConnection::MAX_HEAD
+                if (++$count > HttpConnection::MAX_HEADERS || $total > HttpConnection::MAX_HEAD
                     || 1 !== \preg_match('/\A[!#$%&\'*+.^_`|~0-9A-Za-z-]+:[\t\x20-\x7E\x80-\xFF]*\z/', $trailer)) {
                     throw new HttpError('Bad Request', 400);
                 }
@@ -491,7 +491,7 @@ final class RequestBody implements StreamInterface
      * so that middleware reading every body (curl sends `Upgrade: h2c` on plain requests) never
      * deadlocks; and once the wait has used up the client's allowance for the body, as a
      * handler that waits for a coroutine reading here would, which swerve can't tell (see
-     * NativeHttpConnection::awaitStatus()). A server may always ignore Upgrade (RFC 9110 7.8).
+     * HttpConnection::awaitStatus()). A server may always ignore Upgrade (RFC 9110 7.8).
      * When the client closed its side, and everything it sent before was read, the body ends
      * here whatever the status: nothing can follow, and a 101 still goes out, to a client that
      * only listens, or is gone. The client is looked at now and then (up to a second apart),
@@ -535,7 +535,7 @@ final class RequestBody implements StreamInterface
 
     /**
      * Released unfinished: the application dropped its last reference before the body's end.
-     * The connection gets it, and skips its rest or closes (NativeHttpConnection::settle()).
+     * The connection gets it, and skips its rest or closes (HttpConnection::settle()).
      * Storing $this keeps the object alive, and PHP runs a destructor only once, so the skip
      * reads through it. Never suspends: this may run in any coroutine, or in the collector.
      */

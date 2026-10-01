@@ -7,7 +7,7 @@ use Psr\Log\LoggerInterface;
 
 /**
  * The phasync context of a worker's coroutines, and of each request's (see bin/swerve.php and
- * NativeHttpConnection).
+ * HttpConnection).
  *
  * A coroutine that fails when nobody awaits it, such as a background task the application
  * started with phasync::go(), is logged here; the rest of the worker serves on. Without a

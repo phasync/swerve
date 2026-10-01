@@ -175,7 +175,7 @@ Application:
   [swerve.php]            A PHP file returning a PSR-15 RequestHandlerInterface, such as a Slim app
 
 Serving:
-  --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port or [ipv6]:port; repeat for several (default: 127.0.0.1:8080)
+  --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
   --fastcgi=<address>     Serve FastCGI here instead, behind nginx or the like; the same forms as --http
   --public=<dir>          HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
   -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
@@ -237,8 +237,8 @@ a logger, such as Slim's error middleware above, or log directly:
 Swerve::log()->warning('Payment {id} declined', ['id' => $id]);
 ```
 
-With `-q` it logs nothing; embedded without swerve's command line, it is the logger given to the
-last `new Swerve($logger)`.
+With `-q` it logs nothing; embedded without swerve's command line, it logs nothing until you give
+it a logger with `Swerve::setLog()`.
 
 ## Modes
 
@@ -249,7 +249,9 @@ the workers. There is nothing else to install or run.
 **FastCGI (`--fastcgi`).** For running swerve behind a web server of your own, such as
 nginx or HAProxy, which speaks FastCGI to the workers. swerve supports several requests
 multiplexed over one FastCGI connection; `etc/haproxy.cnf` is an example HAProxy
-configuration that uses it.
+configuration that uses it. The application is the same as in HTTP mode, except for protocol
+upgrades: no web server carries a `101` over FastCGI, so a WebSocket is answered with 501 and
+needs HTTP mode.
 
 ## Streams: request bodies after the response, upgrades, SSE
 

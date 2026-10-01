@@ -3,18 +3,17 @@
 namespace Swerve\FastCGI;
 
 use phasync\CancelledException;
-use phasync\Debug;
 use phasync\IOException;
 use phasync\TimeoutException;
 use phasync\Util\StringBuffer;
+use phasync\Psr\ComposableStream;
 use Psr\Log\LoggerInterface;
-use Swerve\Connection;
+use Swerve\Dispatcher;
+use Swerve\Http\ServerRequest;
 use Swerve\ProtocolErrorException;
-use Swerve\Util\Logger;
 
 final class FastCGISocket
 {
-    private \Closure $addConnectionFunction;
     private mixed $socket;
     private string $peerName;
     private StringBuffer $readBuffer;
@@ -23,15 +22,16 @@ final class FastCGISocket
     /** The write buffer was ended: the socket closes once it is written, and answers nothing more. */
     private bool $ended = false;
     /**
-     * @var array<int,FastCGIConnection>
+     * The requests begun and not yet ended, by request id.
+     *
+     * @var array<int,FastCGIRequest>
      */
-    private array $connections = [];
+    private array $requests = [];
     private LoggerInterface $logger;
     private bool $keepRunning = true;
 
-    public function __construct(\Closure $addConnectionFunction, $socket, string $peerName, LoggerInterface $logger)
+    public function __construct(private readonly Dispatcher $dispatcher, $socket, string $peerName, LoggerInterface $logger)
     {
-        $this->addConnectionFunction = $addConnectionFunction;
         $this->socket = $socket;
         $this->peerName = $peerName;
         $this->readBuffer = new StringBuffer();
@@ -147,9 +147,9 @@ final class FastCGISocket
      * last request ended and all of it is written; not after the first of several
      * multiplexed ones.
      */
-    public function endConnection(FastCGIConnection $connection): void
+    public function requestEnded(FastCGIRequest $request): void
     {
-        unset($this->connections[$connection->requestId]);
+        unset($this->requests[$request->requestId]);
         if (!$this->keepConnection && $this->idle()) {
             $this->end();
         }
@@ -174,7 +174,7 @@ final class FastCGISocket
     /** No request is open, nor partly received. */
     private function idle(): bool
     {
-        return !$this->connections && $this->readBuffer->isEmpty();
+        return !$this->requests && $this->readBuffer->isEmpty();
     }
 
     private function end(): void
@@ -182,6 +182,39 @@ final class FastCGISocket
         if (!$this->ended) {
             $this->ended = true;
             $this->writeBuffer->end();
+        }
+    }
+
+    /**
+     * The PSR-7 request of the params received, handled in a coroutine of its own: the front
+     * server multiplexes requests, which do not wait for each other. An application that throws
+     * gets a 500 when nothing was sent yet, and the request is ended either way.
+     */
+    private function serve(FastCGIRequest $fcgi): void
+    {
+        $params = $fcgi->params;
+        $method  = $params['REQUEST_METHOD'];
+        // The server provides the full request URI, or it is built from the other params
+        $target  = $params['REQUEST_URI'] ?? $params['SCRIPT_NAME'].($params['PATH_INFO'] ?? '').(!empty($params['QUERY_STRING']) ? '?'.$params['QUERY_STRING'] : '');
+        $version = isset($params['SERVER_PROTOCOL']) ? \explode('/', $params['SERVER_PROTOCOL'], 2)[1] : '1.0';
+        // The body's type and length come as params, which PSR-7 has as headers
+        $headers = $fcgi->headers;
+        $names   = $fcgi->headerNames;
+        foreach (['CONTENT_TYPE' => 'content-type', 'CONTENT_LENGTH' => 'content-length'] as $param => $header) {
+            if ('' !== ($params[$param] ?? '')) {
+                $headers[$header] = [$params[$param]];
+                $names[$header]   = $header;
+            }
+        }
+        $body = new ComposableStream(readFunction: $fcgi->stdin->read(...), eofFunction: $fcgi->stdin->eof(...));
+        $request = new ServerRequest($method, $target, $body, $headers, $names, $params, $version);
+        try {
+            $this->dispatcher->dispatch($request, $fcgi);
+        } catch (\Throwable $e) {
+            $this->logger->error('{request} failed: {exception}', ['request' => "$method $target", 'exception' => $e]);
+            $fcgi->fail();
+        } finally {
+            $fcgi->end();
         }
     }
 
@@ -212,28 +245,17 @@ final class FastCGISocket
                     $this->writeBuffer->write($record->toString());
                 }
             } elseif ($record->type === Record::FCGI_BEGIN_REQUEST) {
-                // echo "Request Count for Socket: " . count($this->connections) . "\n";
-                // Start a new request
-                if (isset($this->connections[$record->requestId])) {
+                if (isset($this->requests[$record->requestId])) {
                     throw new ProtocolErrorException('FCGI_BEGIN_REQUEST with existing request id '.$record->requestId);
                 }
                 $record->getBeginRequest($role, $flags);
                 if (!($flags & Record::FCGI_KEEP_CONN)) {
                     $this->keepConnection = false;
                 }
-                $request = new FastCGIConnection($this, $record->requestId);
-                $requestTime = \microtime(true);
-                $request->serverParams += [
-                    'SERVER_SOFTWARE' => 'Swerve',
-                    'REQUEST_TIME' => (int) $requestTime,
-                    'REQUEST_TIME_FLOAT' => $requestTime,
-                ];
-
-                $this->connections[$record->requestId] = $request;
+                $this->requests[$record->requestId] = new FastCGIRequest($this, $record->requestId, $this->logger);
                 $record->returnToPool();
-                ($this->addConnectionFunction)($request);
                 continue;
-            } elseif (!isset($this->connections[$record->requestId])) {
+            } elseif (!isset($this->requests[$record->requestId])) {
                 // We don't recognize the request id
                 if ($record->type === Record::FCGI_STDIN && $record->content === '') {
                     // The request may already have been responded to
@@ -241,55 +263,30 @@ final class FastCGISocket
                 }
                 throw new ProtocolErrorException((Record::TYPES[$record->type] ?? 'Record type '.$record->type).' with unknown request id '.$record->requestId);
             } elseif ($record->type === Record::FCGI_STDIN) {
-                $connection = $this->connections[$record->requestId];
+                $stdin = $this->requests[$record->requestId]->stdin;
                 if ($record->content === '') {
-                    $connection->stdin->end();
+                    $stdin->end();
                 } else {
-                    $connection->stdin->write($record->content);
+                    $stdin->write($record->content);
                 }
             } elseif ($record->type === Record::FCGI_ABORT_REQUEST) {
-                // Abort a request (client disconnected etc)
-                $this->connections[$record->requestId]->setAborted();
+                // The client disconnected: the response is dropped by the front server
             } elseif ($record->type === Record::FCGI_PARAMS) {
-                // FastCGI params
-                $connection = $this->connections[$record->requestId];
-
+                $request = $this->requests[$record->requestId];
                 if ($record->content === '') {
-                    // No more params will be received
-
-                    if (empty($connection->serverParams['REQUEST_METHOD'])) {
+                    // No more params will be received: the request can be served
+                    if (empty($request->params['REQUEST_METHOD'])) {
                         throw new ProtocolErrorException('FCGI_PARAMS MUST contain REQUEST_METHOD');
-                    } else {
-                        $connection->setRequestMethod($connection->serverParams['REQUEST_METHOD']);
                     }
-
-                    if (isset($connection->serverParams['REQUEST_URI'])) {
-                        // Server provided us with a full request URI
-                        $connection->setRequestTarget($connection->serverParams['REQUEST_URI']);
-                    } else {
-                        // Must build REQUEST_URI from other params
-                        $requestUri = $connection->serverParams['SCRIPT_NAME']
-                            .($connection->serverParams['PATH_INFO'] ?? '')
-                            .(!empty($connection->serverParams['QUERY_STRING']) ? '?'.$connection->serverParams['QUERY_STRING'] : '');
-                        $connection->setRequestTarget($requestUri);
-                    }
-
-                    if (isset($connection->serverParams['SERVER_PROTOCOL'])) {
-                        [$_, $protocolVersion] = \explode('/', $connection->serverParams['SERVER_PROTOCOL'], 2);
-                        $connection->setProtocolVersion($protocolVersion);
-                    } else {
-                        $connection->setProtocolVersion('1.0');
-                    }
-
-                    // Signal we may begin responding
-                    $connection->setState(Connection::STATE_RESPONSE_HEAD);
+                    \phasync::go($this->serve(...), [$request]);
                 } else {
                     foreach ($record->getParams() as $key => $value) {
                         if (\str_starts_with($key, 'HTTP_')) {
-                            $headerName = \strtolower(\str_replace('_', '-', \substr($key, 5)));
-                            $connection->addRequestHeader($headerName, $value);
+                            $name                       = \strtolower(\str_replace('_', '-', \substr($key, 5)));
+                            $request->headers[$name][]  = $value;
+                            $request->headerNames[$name] = $name;
                         } else {
-                            $connection->serverParams[$key] = $value;
+                            $request->params[$key] = $value;
                         }
                     }
                 }

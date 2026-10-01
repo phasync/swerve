@@ -2,32 +2,29 @@
 
 namespace Swerve\FastCGI;
 
-use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LoggerInterface;
+use Swerve\Dispatcher;
 use Swerve\ServerInterface;
-use Swerve\Swerve;
 use Swerve\Util\System;
 
-class FastCGIServer implements ServerInterface, LoggerAwareInterface
+/**
+ * FastCGI (--fastcgi), for a web server in front of swerve, such as nginx or HAProxy. Requests
+ * are multiplexed on the connections it keeps open. A protocol upgrade is not
+ * served: no front server tunnels a 101 over FastCGI, so it needs HTTP mode.
+ */
+final class FastCGIServer implements ServerInterface
 {
-    private ?Swerve $swerve = null;
-    private string $address;
+    private bool $shared = false;
+    private ?\Fiber $waiting = null;
+    private ?\RuntimeException $wake = null;
     /** @var resource|null */
     private $listener = null;
-    private ?\Fiber $coroutine = null;
-    private ?\Closure $addConnection = null;
-    private LoggerInterface $logger;
+    /** run() has not returned, see adopt(). */
+    private bool $running = false;
     /**
-     * @var array<int,\Fiber>
-     */
-    private array $fibers = [];
-    /**
-     * The sockets of $fibers, by the same keys.
-     *
      * @var array<int,FastCGISocket>
      */
     private array $sockets = [];
-    private int $nextFiberId = 0;
     private bool $draining = false;
 
     /**
@@ -39,61 +36,65 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
      */
     public static bool $exiting = false;
 
-    public function __construct(string $address, LoggerInterface $logger)
-    {
-        $this->address = $address;
-        $this->logger = $logger;
+    public function __construct(
+        private readonly string $address,
+        private readonly Dispatcher $dispatcher,
+        private readonly LoggerInterface $logger,
+    ) {
     }
 
-    public function setLogger(LoggerInterface $logger): void
+    public function listen(): void
     {
-        $this->logger = $logger;
-    }
-
-    public function getName(): string
-    {
-        return 'fcgi';
-    }
-
-    public function attach(Swerve $swerve): void
-    {
-        if ($this->swerve !== null) {
-            throw new \RuntimeException('Already attached');
-        }
-        $this->swerve = $swerve;
-    }
-
-    public function detach(): void
-    {
-        if ($this->listener !== null) {
-            $this->close();
-        }
-        $this->swerve = null;
-        $this->address = null;
-    }
-
-    public function open(\Closure $addConnectionFunction): void
-    {
-        if ($this->listener !== null) {
-            throw new \RuntimeException('Already open');
-        }
-        if ($this->swerve === null) {
-            throw new \RuntimeException('Not attached');
-        }
-        $this->listener      = System::listen($this->address);
-        $this->addConnection = $addConnectionFunction;
-        $this->coroutine     = \phasync::go($this->run(...));
+        $this->listener = System::listen($this->address);
+        $this->shared   = \str_starts_with($this->address, 'unix:');
         \register_shutdown_function(static function () { self::$exiting = true; });
-        $this->logger->info('Opened TCP socket at {address}', ['address' => $this->address]);
+        $this->logger->info('Serving FastCGI at {address}', ['address' => $this->address]);
     }
 
-    public function close(): void
+    /**
+     * Accept connections until drained, and return once the last one ended. Like
+     * HttpServer::run(), a connection that is waiting, yet can't be accepted (out of
+     * descriptors), is retried after a pause, not at once, forever.
+     */
+    public function run(): void
     {
-        if ($this->coroutine === null) {
-            throw new \RuntimeException('Not opened');
-        }
-        if (!self::$exiting) {
-            \phasync::cancel($this->coroutine);
+        $this->running = true;
+        try {
+            $ready = false;
+            while (true) {
+                $socket = @\stream_socket_accept($this->listener, 0, $peerName);
+                if (false === $socket) {
+                    \error_clear_last(); // an empty queue, or out of descriptors: retried either way
+                    if ($ready && $this->shared) {
+                        // Another worker may have accepted it first: a failure only if one is still waiting
+                        $r     = [$this->listener];
+                        $w     = $x = null;
+                        $ready = \stream_select($r, $w, $x, 0) > 0;
+                    }
+                    if ($ready) {
+                        \phasync::sleep(0.1);
+                    }
+                    $this->waitForClient();
+                    if ($this->draining) {
+                        break;
+                    }
+                    $ready = true;
+                    continue;
+                }
+                $ready = false;
+                $this->adopt($socket, $peerName);
+            }
+            // Closed here, not in drain(): this coroutine was waiting on it
+            \fclose($this->listener);
+            $this->listener = null;
+            $this->logger->info('Closed FastCGI at {address}', ['address' => $this->address]);
+            while ($this->sockets) {
+                \phasync::awaitFlag($this);
+            }
+        } finally {
+            // Also when the worker exits at its drain deadline, destroying this coroutine before
+            // those of the sockets still open: they must not wake it then
+            $this->running = false;
         }
     }
 
@@ -106,12 +107,19 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
      */
     public function drain(): void
     {
-        while ($socket = @\stream_socket_accept($this->listener, 0, $peerName)) {
-            $this->adopt($socket, $peerName);
+        if ($this->shared) {
+            $this->draining = true;
+            if ($this->waiting) {
+                \phasync::cancel($this->waiting, $this->wake = new \RuntimeException('drain'));
+            }
+        } else {
+            while ($socket = @\stream_socket_accept($this->listener, 0, $peerName)) {
+                $this->adopt($socket, $peerName);
+            }
+            \error_clear_last(); // the queue is empty: not an error for the application to see
+            $this->draining = true;
+            \stream_socket_shutdown($this->listener, \STREAM_SHUT_RD);
         }
-        \error_clear_last(); // the queue is empty: not an error for the application to see
-        $this->draining = true;
-        \stream_socket_shutdown($this->listener, \STREAM_SHUT_RD);
         foreach ($this->sockets as $socket) {
             $socket->drain();
         }
@@ -119,51 +127,27 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
     }
 
     /**
-     * Accept connections until drained or closed. Like NativeHttpServer::run(), a connection
-     * that is waiting, yet can't be accepted (out of descriptors), is retried after a pause,
-     * not at once, forever.
+     * Wait for a client. The listener of a unix: address is shared with the other workers, so
+     * drain() can't shut it down to wake this: its wait coroutine is cancelled instead.
      */
-    private function run(): void
+    private function waitForClient(): void
     {
+        if (!$this->shared) {
+            \phasync::readable($this->listener, \PHP_FLOAT_MAX);
+
+            return;
+        }
+        // A cancellation stays on a coroutine until it ends, and run() waits again after the
+        // loop: the wait is a coroutine of its own, which is the one drain() cancels
+        $this->waiting = \phasync::go(fn () => \phasync::readable($this->listener, \PHP_FLOAT_MAX));
         try {
-            $ready = false;
-            while (true) {
-                $socket = @\stream_socket_accept($this->listener, 0, $peerName);
-                if (false === $socket) {
-                    \error_clear_last(); // an empty queue, or out of descriptors: retried either way
-                    if ($ready) {
-                        \phasync::sleep(0.1);
-                    }
-                    \phasync::readable($this->listener, \PHP_FLOAT_MAX);
-                    if ($this->draining) {
-                        break;
-                    }
-                    $ready = true;
-                    continue;
-                }
-                $ready = false;
-                $this->adopt($socket, $peerName);
-            }
-        } catch (\Throwable $e) {
-            if (!$this->draining) {
-                $this->logger->error('{exception}', ['exception' => $e]);
+            \phasync::await($this->waiting);
+        } catch (\RuntimeException $e) {
+            if ($e !== $this->wake) {
+                throw $e;
             }
         } finally {
-            // Draining lets the sockets finish; close() is the hard stop
-            if (!$this->draining && !self::$exiting) {
-                foreach ($this->fibers as $key => $fiber) {
-                    if (!$fiber->isTerminated()) {
-                        \phasync::cancel($fiber);
-                        unset($this->fibers[$key], $this->sockets[$key]);
-                    }
-                }
-            }
-            if ($this->listener !== null) {
-                \fclose($this->listener);
-                $this->listener = null;
-                $this->logger->info('Closed TCP socket at {address}', ['address' => $this->address]);
-            }
-            $this->coroutine = null;
+            $this->waiting = null;
         }
     }
 
@@ -172,16 +156,20 @@ class FastCGIServer implements ServerInterface, LoggerAwareInterface
      */
     private function adopt($socket, string $peerName): void
     {
-        $fcgiSocket              = new FastCGISocket($this->addConnection, $socket, $peerName, $this->logger);
-        $fiberId                 = $this->nextFiberId++;
-        $this->sockets[$fiberId] = $fcgiSocket;
-        $this->fibers[$fiberId]  = \phasync::go(function () use ($fiberId, $fcgiSocket) {
+        $fcgiSocket = new FastCGISocket($this->dispatcher, $socket, $peerName, $this->logger);
+        $id         = \spl_object_id($fcgiSocket);
+
+        $this->sockets[$id] = $fcgiSocket;
+        \phasync::go(function () use ($id, $fcgiSocket) {
             try {
                 $fcgiSocket->run();
             } catch (\Throwable $e) {
-                $this->logger->notice(\get_class($e).': '.$e->getMessage()."\n".$e->getTraceAsString());
+                $this->logger->notice(\get_class($e) . ': ' . $e->getMessage() . "\n" . $e->getTraceAsString());
             } finally {
-                unset($this->fibers[$fiberId], $this->sockets[$fiberId]);
+                unset($this->sockets[$id]);
+                if ($this->running && $this->draining) {
+                    \phasync::raiseFlag($this); // run() waits for the last one
+                }
             }
         });
     }

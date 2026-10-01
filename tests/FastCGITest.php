@@ -148,3 +148,31 @@ test('a response written in chunks larger than one FastCGI record is split into 
         expect(fcgi_read_responses($conn, [$id + 1])[$id + 1]['body'])->toBe($body);
     }
 });
+
+test('an application that throws gets a 500, and the connection serves the next request', function () {
+    $conn = fcgi_connect($this->addr);
+    fwrite($conn, fcgi_request(1, 'GET', '/throw'));
+    $response = fcgi_read_responses($conn, [1])[1];
+    expect($response['status'])->toBe(500);
+    expect($response['body'])->toBe('Internal Server Error');
+    expect([$response['appStatus'], $response['protocolStatus']])->toBe([0, 0]);
+
+    fwrite($conn, fcgi_request(2, 'GET', '/hello'));
+    expect(fcgi_read_responses($conn, [2])[2]['body'])->toBe('Hello');
+});
+
+test('a protocol upgrade is answered with 501: no web server carries a 101 over FastCGI', function () {
+    $conn = fcgi_connect($this->addr);
+    fwrite($conn, fcgi_request(1, 'GET', '/websocket', '', [
+        'Upgrade'               => 'websocket',
+        'Connection'            => 'Upgrade',
+        'Sec-WebSocket-Key'     => base64_encode(random_bytes(16)),
+        'Sec-WebSocket-Version' => '13',
+    ]));
+    $response = fcgi_read_responses($conn, [1])[1];
+    expect($response['status'])->toBe(501);
+    expect($response['body'])->toContain('HTTP mode');
+
+    fwrite($conn, fcgi_request(2, 'GET', '/hello'));
+    expect(fcgi_read_responses($conn, [2])[2]['body'])->toBe('Hello');
+});

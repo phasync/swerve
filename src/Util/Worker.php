@@ -38,13 +38,6 @@ final class Worker
     /** When a drain that has not finished drops its connections, see tick(). */
     private float $deadline = \PHP_FLOAT_MAX;
 
-    /**
-     * Counts the coroutines requests started that still run: the drain waits for them, up to its
-     * deadline (see NativeHttpConnection::pendingWork()).
-     *
-     * @var (Closure(): int)|null
-     */
-    public ?Closure $pendingWork = null;
     private bool $recycleSent = false;
     /** Requests started. */
     private int $requests = 0;
@@ -240,10 +233,6 @@ final class Worker
                 exit(1);
             }
             if (0 === --$this->running) {
-                // The connections are done; the coroutines their requests started may not be
-                while (null !== $this->pendingWork && ($this->pendingWork)() > 0) {
-                    phasync::sleep(0.01);
-                }
                 $this->logger->info('Drained in {s} s, exiting', ['s' => \round(\microtime(true) - $this->drainStarted, 2)]);
                 exit(0);
             }
@@ -345,8 +334,8 @@ final class Worker
                 $this->drain('the master died');
             }
             if ($now >= $this->deadline) {
-                $this->logger->warning('Drain deadline reached after {s} s; dropping open connections and {n} coroutines requests started', [
-                    's' => \round($now - $this->drainStarted, 2), 'n' => null === $this->pendingWork ? 0 : ($this->pendingWork)(),
+                $this->logger->warning('Drain deadline reached after {s} s; dropping open connections and the coroutines requests started', [
+                    's' => \round($now - $this->drainStarted, 2),
                 ]);
                 exit(0);
             }

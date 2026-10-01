@@ -32,6 +32,11 @@ phasync::go(function () {
 });
 ```
 
+A request is served like a `phasync::run()`: the connection reads its next request once the
+coroutines the request started have ended, but the client has the whole response before that,
+so work after the response (`phasync::finally()`, a `go()`) costs it nothing. Work that must
+outlive the request belongs in `phasync::service()`.
+
 ## The rule: never block a worker
 
 A call that blocks the process, instead of letting phasync switch coroutines, stops

@@ -7,7 +7,7 @@ Application:
   [swerve.php]            A PHP file returning a PSR-15 RequestHandlerInterface, such as a Slim app
 
 Serving:
-  --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port or [ipv6]:port; repeat for several (default: 127.0.0.1:8080)
+  --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
   --fastcgi=<address>     Serve FastCGI here instead, behind nginx or the like; the same forms as --http
   --public=<dir>          HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
   -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
@@ -42,6 +42,11 @@ Information:
 - Addresses: `8080` is 127.0.0.1:8080, this machine only; `:8080` is every IPv4 interface;
   `localhost:8080`, `192.168.1.10:8080` and `[::1]:8080` are that address. A host name is
   resolved once, at start. `--http` may be given more than once.
+- `unix:/run/swerve.sock` (also `unix:///run/swerve.sock`, or just `/run/swerve.sock`) listens on a
+  Unix domain socket, for nginx on the same machine: `proxy_pass http://unix:/run/swerve.sock;`.
+  The workers share the one socket file, made at start (a stale file is replaced; where anything
+  listens, or a file that isn't a socket is in the way, swerve refuses to start) and removed at
+  stop. Anyone may connect: limit access with the permissions of the directory it is in.
 - `--fastcgi` serves FastCGI instead of HTTP, for nginx or another web server in front;
   `--public`, `--max-body` and `--buffer-responses` are for HTTP mode only.
 

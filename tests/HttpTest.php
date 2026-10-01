@@ -295,7 +295,7 @@ test('request heads beyond the limits or not HTTP/1.x get their error status', f
     expect(native_read_response($conn)['body'])->toBe('Hello');
 });
 
-test('a slow request head gets 408, an idle new connection closes, an idle kept-alive one stays', function () {
+test('a slow request head gets 408, an idle new connection closes, an idle kept-alive one closes silently sooner', function () {
     $a = native_connect($this->addr);
     $b = native_connect($this->addr);
     $c = native_connect($this->addr);
@@ -305,11 +305,12 @@ test('a slow request head gets 408, an idle new connection closes, an idle kept-
     fwrite($a, "GET /hello HTTP/1.1\r\n");
     stream_set_blocking($a, false);
     stream_set_blocking($b, false);
-    $got  = ['a' => '', 'b' => ''];
+    stream_set_blocking($c, false);
+    $got  = ['a' => '', 'b' => '', 'c' => ''];
     $done = [];
     $sent = 1;
-    while (count($done) < 2 && microtime(true) - $start < 14) {
-        foreach (['a' => $a, 'b' => $b] as $k => $conn) {
+    while (count($done) < 3 && microtime(true) - $start < 14) {
+        foreach (['a' => $a, 'b' => $b, 'c' => $c] as $k => $conn) {
             if (isset($done[$k])) {
                 continue;
             }
@@ -330,11 +331,8 @@ test('a slow request head gets 408, an idle new connection closes, an idle kept-
     expect($done['a'])->toBeGreaterThan(9.5)->toBeLessThan(12.0);
     expect($got['b'])->toBe('');
     expect($done['b'])->toBeGreaterThan(9.5)->toBeLessThan(12.0);
-    if (microtime(true) - $start < 11) {
-        usleep((int) ((11 - (microtime(true) - $start)) * 1e6));
-    }
-    fwrite($c, "GET /hello HTTP/1.1\r\nHost: t\r\n\r\n");
-    expect(native_read_response($c)['body'])->toBe('Hello');
+    expect($got['c'])->toBe(''); // KEEP_ALIVE_TIMEOUT: a client expects an idle kept-alive connection to close
+    expect($done['c'])->toBeGreaterThan(4.5)->toBeLessThan(6.5);
 });
 
 /*
@@ -779,16 +777,17 @@ test('100 Continue is never sent once the response head is out', function () {
     expect(native_read_chunk($conn))->toBe('');
 });
 
-test('an empty line after a request body leaves the kept-alive connection idle, not timing out a request', function () {
+test('an empty line after a request body leaves the kept-alive connection idle: it closes silently after KEEP_ALIVE_TIMEOUT, no 408', function () {
     $conn = native_connect($this->addr);
     stream_set_timeout($conn, 15);
     fwrite($conn, "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 5\r\n\r\nhello\r\n");
     expect(native_read_response($conn)['body'])->toBe('hello');
 
-    usleep(10500000); // past HEAD_TIMEOUT, within KEEP_ALIVE_TIMEOUT
-    fwrite($conn, "GET /hello HTTP/1.1\r\nHost: t\r\n\r\n");
-    $response = native_read_response($conn);
-    expect([$response['status'] ?? null, $response['body'] ?? null])->toBe([200, 'Hello']);
+    $start = microtime(true);
+    $data  = @fread($conn, 8192); // blocks until the server closes
+    expect($data)->toBe('');
+    expect(feof($conn))->toBeTrue();
+    expect(microtime(true) - $start)->toBeGreaterThan(4.0)->toBeLessThan(6.5);
 });
 
 test('a response the server closes after (an unread request body too large to skip) says Connection: close', function () {
@@ -968,7 +967,7 @@ test('pipelined requests already buffered let the worker\'s other coroutines run
                 $gap = max($gap, ($now = hrtime(true)) - $last);
             }
         });
-        phasync::go((new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve(...));
+        phasync::go((new Swerve\Http\HttpConnection($server, '127.0.0.1:1', new Swerve\Dispatcher($handler, new Psr\Log\NullLogger()), new Psr\Log\NullLogger()))->serve(...));
         $received = '';
         while (substr_count($received, 'HTTP/1.1 200') < 100) {
             $received .= fread(phasync::readable($client, 5), 65536);
@@ -1012,7 +1011,7 @@ test('a request body the kernel already holds is read without an event-loop wait
                 phasync::sleep();
             }
         });
-        phasync::go((new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve(...));
+        phasync::go((new Swerve\Http\HttpConnection($server, '127.0.0.1:1', new Swerve\Dispatcher($handler, new Psr\Log\NullLogger()), new Psr\Log\NullLogger()))->serve(...));
         stream_set_blocking($client, false);
         $received = '';
         while (!feof($client)) {
@@ -1173,7 +1172,7 @@ test('a request head arriving a byte at a time takes linear time, not quadratic'
             OneByteStream::$out = '';
             $start              = hrtime(true);
             // In the event loop, as always: the application runs in a coroutine of its own
-            phasync::run(static fn () => (new Swerve\Http\NativeHttpConnection(fopen('one-byte://', 'r+'), '127.0.0.1:1', $handler, new Psr\Log\NullLogger()))->serve());
+            phasync::run(static fn () => (new Swerve\Http\HttpConnection(fopen('one-byte://', 'r+'), '127.0.0.1:1', new Swerve\Dispatcher($handler, new Psr\Log\NullLogger()), new Psr\Log\NullLogger()))->serve());
             $best = min($best, hrtime(true) - $start);
             expect(OneByteStream::$out)->toStartWith('HTTP/1.1 200');
         }
@@ -1199,4 +1198,76 @@ test('an empty POST body can be rewound, as Slim\'s MethodOverrideMiddleware doe
         $packets = native_serve_packets($app, "POST / HTTP/1.1\r\nHost: t\r\n{$length}Connection: close\r\n\r\n");
         expect(implode('', $packets))->toStartWith('HTTP/1.1 200')->toEndWith("\r\n\r\nok");
     }
+});
+
+test('accepted connections have TCP_NODELAY and keepalive probing (15 s idle, 15 s apart, 9 probes)', function () {
+    $listener = \Swerve\Util\System::listen('127.0.0.1:0');
+    $client   = stream_socket_client('tcp://' . stream_socket_get_name($listener, false));
+    stream_set_blocking($listener, true);
+    $socket = socket_import_stream(stream_socket_accept($listener, 5));
+
+    expect([
+        socket_get_option($socket, SOL_SOCKET, SO_KEEPALIVE) > 0,
+        socket_get_option($socket, SOL_TCP, TCP_KEEPIDLE),
+        socket_get_option($socket, SOL_TCP, TCP_KEEPINTVL),
+        socket_get_option($socket, SOL_TCP, TCP_KEEPCNT),
+        socket_get_option($socket, SOL_TCP, TCP_NODELAY) > 0,
+    ])->toBe([true, 15, 15, 9, true]);
+    fclose($client);
+})->skip(!Swerve\Util\System::hasSockets(), 'PHP streams give accepted sockets no keepalive');
+
+test('on a unix: address every worker accepts from one socket, a reload keeps serving, and stopping removes the file', function (string $mode) {
+    $dir  = temp_path(true);
+    $addr = "unix:$dir/s.sock";
+    [$process, , $log, $pid] = swerve_start(['--grace=3'], 3, mode: $mode, addr: $addr);
+
+    expect(decoct(fileperms("$dir/s.sock") & 0777))->toBe('666');
+    $get = fn () => 'http' === $mode ? probe($addr, '/pid') : fcgi_get($addr, '/pid')['body'] ?? null;
+    $seen = [];
+    $deadline = microtime(true) + 5;
+    while (count($seen) < 3 && microtime(true) < $deadline) {
+        $seen[$get()] = true;
+    }
+    expect($seen)->toHaveCount(3);
+
+    swerve_signal($process, SIGHUP);
+    $deadline = microtime(true) + 10;
+    $fresh    = [];
+    while (microtime(true) < $deadline && count($fresh) < 3) {
+        $pid = $get();
+        expect($pid)->not->toBeNull();
+        if (!isset($seen[$pid])) {
+            $fresh[$pid] = true;
+        }
+    }
+    expect($fresh)->toHaveCount(3);
+
+    swerve_signal($process, SIGTERM);
+    [$code] = swerve_wait($process, 10);
+    expect($code)->toBe(0);
+    expect(file_exists("$dir/s.sock"))->toBeFalse();
+})->with(['http', 'fastcgi']);
+
+test('a unix: address replaces a stale socket file, and is refused where something listens or a file is in the way', function () {
+    $dir  = temp_path(true);
+    $path = "$dir/s.sock";
+    $stale = stream_socket_server("unix://$path");
+    fclose($stale);
+    expect(file_exists($path))->toBeTrue();
+
+    [$process, $addr] = swerve_start([], 1, addr: "unix:$path");
+    expect(probe($addr, '/hello'))->toBe('Hello');
+
+    $second = swerve_spawn(["--http=unix:$path", '--workers=1'], 'app.php', out: [2 => ['pipe', 'w']]);
+    [$code] = swerve_wait($second, 10);
+    expect($code)->toBe(1);
+    expect(probe($addr, '/hello'))->toBe('Hello');
+
+    swerve_signal($process, SIGTERM);
+    swerve_wait($process, 10);
+
+    file_put_contents($path, 'not a socket');
+    $third = swerve_spawn(["--http=unix:$path", '--workers=1'], 'app.php');
+    [$code] = swerve_wait($third, 10);
+    expect([$code, file_get_contents($path)])->toBe([1, 'not a socket']);
 });

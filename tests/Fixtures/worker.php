@@ -8,12 +8,12 @@
 require __DIR__ . '/../../vendor/autoload.php';
 
 use Psr\Log\NullLogger;
+use Swerve\Dispatcher;
 use Swerve\FastCGI\FastCGIServer;
-use Swerve\Runners\Psr15Runner;
-use Swerve\Swerve;
 
-$app = require __DIR__ . '/app.php';
-
-$swerve = new Swerve(new NullLogger());
-$swerve->add(new FastCGIServer($argv[1], new NullLogger()));
-$swerve->run(new Psr15Runner($app));
+phasync::run(function () use ($argv) {
+    $logger = new NullLogger();
+    $server = new FastCGIServer($argv[1], new Dispatcher(require __DIR__ . '/app.php', $logger), $logger);
+    $server->listen();
+    $server->run();
+});

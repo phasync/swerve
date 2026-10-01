@@ -25,7 +25,7 @@ return (function () {
 
     $args->section('Serving');
     $args->add('http', new Option(
-        '', 'http', 'Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port or [ipv6]:port; repeat for several',
+        '', 'http', 'Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several',
         default: '127.0.0.1:8080',
         placeholder: 'address',
         validator: $addr_validator,
@@ -90,7 +90,7 @@ return (function () {
     $args->section('Limits');
     $args->add('maxBody', new Option(
         '', 'max-body', 'HTTP: the largest request body in bytes (413), 0 for no limit',
-        default: (string) Swerve\Http\NativeHttpConnection::MAX_BODY,
+        default: (string) Swerve\Http\HttpConnection::MAX_BODY,
         placeholder: 'bytes',
         validator: fn ($value) => \ctype_digit((string) $value) ? null : 'A number of bytes required',
     ));

@@ -584,7 +584,7 @@ function ws_read($conn): ?array
 }
 
 /**
- * Serve requests in this process with a NativeHttpConnection over a SEQPACKET socket pair, so
+ * Serve requests in this process with a HttpConnection over a SEQPACKET socket pair, so
  * each of the server's writes arrives as one packet: the packets of the responses, up to the
  * end of the connection. Each of $requests is sent as one packet, and a read shorter than a
  * packet loses the rest of it, so a test sees whether the server reads a packet whole.
@@ -601,7 +601,7 @@ function native_serve_packets(Psr\Http\Server\RequestHandlerInterface $handler, 
         stream_set_blocking($server, false);
         stream_set_blocking($client, false);
         stream_set_read_buffer($client, 0);
-        $connection = new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger());
+        $connection = new Swerve\Http\HttpConnection($server, '127.0.0.1:1', new Swerve\Dispatcher($handler, new Psr\Log\NullLogger()), new Psr\Log\NullLogger());
         phasync::go($connection->serve(...));
 
         foreach ((array) $requests as $packet) {
@@ -637,9 +637,9 @@ function native_serve_packets(Psr\Http\Server\RequestHandlerInterface $handler, 
  *
  * @return array{0: resource, 1: string, 2: string, 3: int} the process, its address, the log file, the master's pid
  */
-function swerve_start(array $args = [], int $workers = 2, array $php = [], array $env = [], string $mode = 'http', string $fixture = 'app.php', bool $wait = true): array
+function swerve_start(array $args = [], int $workers = 2, array $php = [], array $env = [], string $mode = 'http', string $fixture = 'app.php', bool $wait = true, ?string $addr = null): array
 {
-    $addr = free_address();
+    $addr ??= free_address();
     $log  = temp_path();
     foreach (['--grace=3', '--watchdog=3'] as $default) {
         if (!preg_grep('/^' . strstr($default, '=', true) . '=/', $args)) {
@@ -714,7 +714,7 @@ function probe(string $addr, string $path, float $timeout = 1.0): ?string
 {
     set_error_handler(static fn (): bool => true);
     try {
-        $conn = stream_socket_client("tcp://$addr", $errno, $errstr, $timeout);
+        $conn = stream_socket_client(str_starts_with($addr, 'unix:') ? 'unix://' . substr($addr, 5) : "tcp://$addr", $errno, $errstr, $timeout);
     } finally {
         restore_error_handler();
     }
@@ -926,7 +926,7 @@ function fcgi_get(string $addr, string $path, float $timeout = 1.0): ?array
 {
     set_error_handler(static fn (): bool => true);
     try {
-        $conn = stream_socket_client("tcp://$addr", $errno, $errstr, $timeout);
+        $conn = stream_socket_client(str_starts_with($addr, 'unix:') ? 'unix://' . substr($addr, 5) : "tcp://$addr", $errno, $errstr, $timeout);
         if (false === $conn) {
             return null;
         }

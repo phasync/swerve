@@ -491,7 +491,7 @@ test('a background job of the application keeps no listener after its worker die
     }
     native_stop($process);
     expect(@stream_socket_server("tcp://$addr"))->not->toBeFalse();
-});
+})->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
 
 test('FastCGI: a background job of the application keeps no listener after a reload, nor after shutdown', function () {
     [$process, $addr, $log] = swerve_start(workers: 1, mode: 'fastcgi');
@@ -716,9 +716,13 @@ test('--max-requests recycles a worker after about that many requests', function
     [$process, $addr, $log] = swerve_start(['--max-requests=20'], workers: 1);
     $pids                   = [];
     $failed                 = 0;
-    for ($i = 0; $i < 70; ++$i) {
+    // The replacement needs a moment to start: keep asking until it answers
+    for ($i = 0, $until = microtime(true) + 5; $i < 70 || (count($pids) < 2 && microtime(true) < $until); ++$i) {
         $pid = probe($addr, '/pid');
         null === $pid ? ++$failed : $pids[$pid] = true;
+        if ($i >= 70) {
+            usleep(5000);
+        }
     }
     expect(count($pids))->toBeGreaterThanOrEqual(2);
     expect($failed)->toBeLessThanOrEqual(resets_allowed());
@@ -986,7 +990,7 @@ test('drain answers a request that reached an idle keep-alive connection before 
         [$server, $client] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
         stream_set_blocking($server, false);
         stream_set_blocking($client, false);
-        $connection = new Swerve\Http\NativeHttpConnection($server, '127.0.0.1:1', $handler, new Psr\Log\NullLogger());
+        $connection = new Swerve\Http\HttpConnection($server, '127.0.0.1:1', new Swerve\Dispatcher($handler, new Psr\Log\NullLogger()), new Psr\Log\NullLogger());
         phasync::go($connection->serve(...));
         fwrite($client, "GET /1 HTTP/1.1\r\nHost: test\r\n\r\n");
         phasync::sleep(0.05);
@@ -1504,7 +1508,7 @@ test('a drain waits for the coroutines a request started after its response, up 
     swerve_signal($process, SIGTERM);
     [$code, $took] = swerve_wait($process, 5);
     expect([$code, file_exists("$dir/after-response"), $took < 2])->toBe([0, false, true]);
-    log_wait($log, '/Drain deadline reached .* 1 coroutines requests started/');
+    log_wait($log, '/Drain deadline reached .* the coroutines requests started/');
 });
 
 test('on a machine with several NUMA nodes, the workers are pinned to them in turn', function () {
@@ -1736,7 +1740,7 @@ test('a tunnel whose application ignores the end of its input is dropped at the 
     expect($code)->toBe(0);
     expect(group_gone($pid, 1))->toBeTrue();
     log_wait($log, '/Drain deadline reached/', 1);
-    expect(log_count($log, '/FiberError/'))->toBe(0);
+    expect(log_count($log, '/FiberError/'))->toBe(0, file_get_contents($log));
 });
 
 test('a drain deadline reached while the application reads a request body after the response ends the worker without a PHP fatal error', function (string $request) {
@@ -1863,7 +1867,7 @@ test('a drained tunnel whose client still sends gets everything the application 
     expect(str_ends_with($received, "EOF\n"))->toBeTrue();
     expect(trim($received, "A\n"))->toBe('EOF');
     swerve_wait($process, 6);
-});
+})->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
 
 test('a drain ends a tunnel\'s input also while its application reads the upgrade request\'s own body, sent after the 101', function (string $framing, string $first, string $more) {
     [$process, $addr, $log] = swerve_start(['--grace=4'], workers: 1);
