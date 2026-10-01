@@ -382,6 +382,26 @@ $cache->set("user:$id", $user, 60);
 - Available once the worker serves, not while `swerve.php` loads. Without the master (swerve
   embedded in your own process), the cache is the process's own.
 
+### Claims
+
+`Swerve::claim()` gives one worker at a time a name, decided by the master: a job that must
+not run twice, a leader.
+
+```php
+if ($claim = Swerve::claim('nightly-report', ttl: 10)) {
+    while (work()) { $claim->renew() or break; }
+    $claim->release();
+}
+```
+
+- It returns `null` when another worker holds the name; `Swerve::claim($name, $ttl, timeout: 5)`
+  waits up to that many seconds for it to come free, trying every 20 ms (no fairness: whoever
+  tries first gets it). A claim lasts `ttl` seconds unless renewed; `renew()` returns `false`
+  once it is lost. `Swerve::claimed($name)` tells whether anyone holds the name, claiming nothing.
+- A claim ends at once when its worker drains or dies, not after the TTL. Names are apart from
+  the cache's keys, and a claim is never evicted. Without the master, claims are the
+  process's own.
+
 ## Code written for PHP-FPM
 
 With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-alpha15 or later),

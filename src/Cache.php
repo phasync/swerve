@@ -5,6 +5,7 @@ namespace Swerve;
 use phasync;
 use phasync\Util\LruCache;
 use Psr\SimpleCache\CacheInterface;
+use Swerve\Util\Claims;
 use Swerve\Util\Topics;
 
 /**
@@ -53,6 +54,9 @@ final class Cache implements CacheInterface
      * strings (see apply()), and '' for a key known to be missing.
      */
     private LruCache $layer;
+
+    /** Without a master: the claims of this process, see Claim. */
+    private ?Claims $claims = null;
 
     private function __construct()
     {
@@ -137,8 +141,9 @@ final class Cache implements CacheInterface
      * that the writer, too, hears of it before its reply.
      *
      * @param \Closure(?list<string> $keys): void $forget
+     * @param int                                  $owner  the worker's inbox, which holds the claims it makes
      */
-    public static function serve(LruCache $store, string $message, \Closure $forget): string
+    public static function serve(LruCache $store, Claims $claims, int $owner, string $message, \Closure $forget): string
     {
         $call = \unserialize(\substr($message, 4), ['allowed_classes' => false]);
         if ('set' === $call[0] || 'delete' === $call[0]) {
@@ -147,7 +152,7 @@ final class Cache implements CacheInterface
             $forget(null);
         }
 
-        return \substr($message, 0, 4) . \serialize(self::apply($store, $call));
+        return \substr($message, 0, 4) . \serialize(self::apply($store, $claims, $owner, $call));
     }
 
     /**
@@ -228,11 +233,13 @@ final class Cache implements CacheInterface
      * Carry out a request: on this process's layer without a master, else by the master.
      *
      * @param list<string>|null $fetching keys a get fetches, for the local layer
+     *
+     * @internal
      */
-    private function call(array $call, ?array $fetching = null): mixed
+    public function call(array $call, ?array $fetching = null): mixed
     {
         if (null === Topics::$toMaster) {
-            return self::apply($this->layer, $call);
+            return self::apply($this->layer, $this->claims ??= new Claims(), 0, $call);
         }
         if (!self::$listening) {
             throw new \LogicException('Swerve::cache() is there once the worker serves, not while swerve.php loads');
@@ -253,7 +260,7 @@ final class Cache implements CacheInterface
      * A request on $store. Entries are the value serialized, after 8 bytes of its expiry on the
      * monotonic clock in nanoseconds (0: none).
      */
-    private static function apply(LruCache $store, array $call): mixed
+    private static function apply(LruCache $store, Claims $claims, int $owner, array $call): mixed
     {
         switch ($call[0]) {
             case 'get':
@@ -284,6 +291,11 @@ final class Cache implements CacheInterface
                 $store->clear();
 
                 return true;
+            case 'claim':
+            case 'renew':
+            case 'release':
+            case 'check':
+                return $claims->apply($call, $owner);
         }
         throw new \UnexpectedValueException("Unknown cache request '$call[0]'");
     }

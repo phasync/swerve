@@ -95,6 +95,23 @@ final class Swerve
     }
 
     /**
+     * Claim $name for $ttl seconds, atomically: null when another worker holds it, after waiting
+     * up to $timeout seconds for it to come free. See Claim.
+     */
+    public static function claim(string $name, float $ttl, float $timeout = 0.0): ?Claim
+    {
+        return Claim::acquire($name, $ttl, $timeout);
+    }
+
+    /**
+     * Whether any worker holds $name now; one trip to the master, nothing is claimed.
+     */
+    public static function claimed(string $name): bool
+    {
+        return Claim::held($name);
+    }
+
+    /**
      * Whether this worker drains: it is shutting down, reloading or being recycled, and finishes
      * the requests in flight. Long responses should end soon: see docs/realtime.md.
      */

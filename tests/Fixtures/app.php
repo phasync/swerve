@@ -347,6 +347,9 @@ return new class($version) implements RequestHandlerInterface {
     /** @var StreamInterface[] request bodies /hold keeps, unread */
     private array $held = [];
 
+    /** @var \Swerve\Claim[] what /claim keeps, by name, so that a claim outlives its request */
+    private array $claims = [];
+
     /** /sse-beat producers still running. */
     private int $sseLive = 0;
 
@@ -448,6 +451,26 @@ return new class($version) implements RequestHandlerInterface {
             '/cache-set' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->set($query['k'], \json_decode($query['v'], true), isset($query['ttl']) ? (int) $query['ttl'] : null)])),
             '/cache-get' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->get($query['k'], 'missing')])),
             '/cache-del' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->delete($query['k'])])),
+            // Swerve::claim(): ?n= name, ?ttl= seconds, ?timeout= seconds to wait; answers [pid, claimed, elapsed].
+            // The Claim is kept, not released when the request ends
+            '/claim'   => (function () use ($query) {
+                $start = \microtime(true);
+                $claim = Swerve::claim($query['n'], (float) $query['ttl'], (float) ($query['timeout'] ?? 0));
+                if (null !== $claim) {
+                    $this->claims[$query['n']] = $claim;
+                }
+
+                return new Response(200, [], \json_encode([\getmypid(), null !== $claim, \microtime(true) - $start]));
+            })(),
+            '/claimed' => new Response(200, [], \json_encode([\getmypid(), Swerve::claimed($query['n'])])),
+            '/renew'   => new Response(200, [], \json_encode([\getmypid(), isset($this->claims[$query['n']]) && $this->claims[$query['n']]->renew()])),
+            '/release' => (function () use ($query) {
+                $claim = $this->claims[$query['n']] ?? null;
+                $claim?->release();
+                unset($this->claims[$query['n']]);
+
+                return new Response(200, [], \json_encode([\getmypid(), null !== $claim]));
+            })(),
             // Many lookups at once from one request's coroutines: each gets its own answer
             '/cache-many' => new Response(200, [], \json_encode((static function () {
                 $cache = Swerve::cache();
