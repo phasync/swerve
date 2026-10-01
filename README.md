@@ -345,9 +345,10 @@ foreach (Swerve::subscribe('chat') as $message) {
 - Messages travel as JSON, decoded once per worker and shared by its subscribers: a subscriber
   gets the value published (`Swerve::publish('game', ['kill', $id])` an array, `'{}'` a string,
   `['end' => true]` a read-only object: `$message->end`).
-- Messages pass through the master process, which sends each to every worker in the order it
-  read them, so every subscriber sees a topic's messages in the same order. Without the master
-  (swerve embedded in your own process), they are delivered in that process.
+- The master keeps, per topic, which workers have subscribers; a publishing worker writes the
+  message straight into their inboxes. One worker's messages arrive in the order it published
+  them; there is no order between workers. Without the master (swerve embedded in your own
+  process), they are delivered in that process.
 - Delivery is at most once, to the subscriptions that exist when a message reaches their
   worker. There is no history: a worker started after a reload, a recycle or a crash sees
   nothing sent before it. Swerve is one machine; across machines, use Redis, NATS or the like.
@@ -356,8 +357,9 @@ foreach (Swerve::subscribe('chat') as $message) {
 - A message is kept once per worker, however many subscribe, until the slowest subscriber
   read it. One falling more than `maxLag` seconds behind (30 by default,
   `Swerve::subscribe('prices', maxLag: 5)`) gets a `SubscriberLagException` from its loop.
-- Topics are 1 to 255 bytes, messages at most 1 MiB. A worker that leaves messages unread for
-  30 s (its event loop stuck) is killed, also with `--watchdog=0`.
+- Topics are 1 to 255 bytes, messages at most 128 KiB. A worker that does not read its
+  inbox (its event loop stuck) loses the messages sent to it after 0.1 s, with a warning in the
+  log; it does not hold up the publishers.
 
 ## Shared cache
 

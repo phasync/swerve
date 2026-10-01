@@ -34,7 +34,7 @@ final class Subscription implements \IteratorAggregate
         public readonly ?float $heartbeat = null,
     ) {
         if (!Topics::$draining) {
-            $this->subscriber = Topics::join($topic)->subscribe();
+            $this->subscriber = Topics::subscribe($topic);
         }
     }
 

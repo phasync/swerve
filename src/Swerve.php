@@ -47,8 +47,10 @@ final class Swerve
      *
      * Delivery is at most once, to the subscriptions that exist when the message reaches their
      * worker: there is no history, and a worker starting later (after a reload, a recycle, a
-     * crash) sees nothing sent before. Every subscriber sees the messages of a topic in the
-     * same order. Swerve embedded without its master process delivers in this process only.
+     * crash) sees nothing sent before. The messages of one publishing worker arrive in the order
+     * it published them, with no order between workers. A worker that does not read its inbox
+     * loses the messages sent to it after 0.1 s. Swerve embedded without its master process
+     * delivers in this process only.
      *
      * Every message travels as JSON: encoded once here, decoded once in each worker, and every
      * subscriber gets the value published, shared: a string stays a string ('{}' too), a list
@@ -57,9 +59,10 @@ final class Swerve
      *     Swerve::publish('game', ['kill', $playerId]);
      *
      * @param string $topic   1 to 255 bytes
-     * @param mixed  $message anything json_encode() takes except null; at most 1 MiB encoded
+     * @param mixed  $message anything json_encode() takes except null; at most 128 KiB encoded
      *
      * @throws \InvalidArgumentException for a topic or message outside those sizes
+     * @throws \LogicException            while the application loads: the worker serves after that
      * @throws \JsonException            for a value JSON can't express
      * @throws \InvalidArgumentException for null, which a heartbeat subscription yields for "nothing came"
      */

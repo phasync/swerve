@@ -2,6 +2,7 @@
 
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
+use Swerve\Util\Inboxes;
 use Swerve\Util\Topics;
 
 /*
@@ -127,12 +128,12 @@ test('a subscriber that falls further behind than its maxLag gets SubscriberLagE
     expect($got[1])->toMatch('/^A subscriber of "t" fell 0\.1 s behind, more than its 0\.1 s$/');
 });
 
-test('publish() refuses a topic of 0 or over 255 bytes, and a message over 1 MiB', function (string $topic, int $size) {
+test('publish() refuses a topic of 0 or over 255 bytes, and a message over 128 KiB', function (string $topic, int $size) {
     expect(static fn () => Swerve::publish($topic, str_repeat('x', $size)))->toThrow(InvalidArgumentException::class);
 })->with([
     'empty topic'   => ['', 1],
     'long topic'    => [str_repeat('t', 256), 1],
-    'large message' => ['t', (1 << 20) + 1],
+    'large message' => ['t', (1 << 17) + 1],
 ]);
 
 test('frames survive being read in pieces, among status bytes', function () {
@@ -192,25 +193,108 @@ test('in a cluster, a message published in one worker reaches the subscribers in
     }
 })->with(['one worker' => 1, 'four workers' => 4]);
 
-test('the master kills a worker that leaves published messages unread for 30 s, also with the watchdog off', function () {
-    [$process, $addr, $log] = swerve_start(['--watchdog=0'], 2);
+test('a worker that does not read its inbox does not hold up the publishers: they drop its messages with a warning, and it gets the later ones', function () {
+    [$process, $addr, $log] = swerve_start([], 2);
     try {
-        // Stalls one worker's event loop for longer than that
-        $busy = native_connect($addr);
-        fwrite($busy, "GET /busy?s=45 HTTP/1.1\r\nHost: t\r\n\r\n");
-        usleep(300000);
-        // 4 MiB, more than its pipe holds, published through the other worker; a probe that
-        // lands on the stalled one times out
-        $published = 0;
-        $start     = microtime(true);
-        $deadline  = $start + 10;
-        while ($published < 8 && microtime(true) < $deadline) {
-            $published += (int) ('published' === probe($addr, '/publish?topic=room&m=x&times=524288', 0.5));
+        [$subscriber, $pid] = pubsub_subscribe($addr, 'room', 1000);
+        // A connection to the other worker, found before the subscriber's worker stalls: it publishes 800 KB, more than the stalled worker's inbox holds
+        for ($other = null; null === $other;) {
+            $conn = native_connect($addr);
+            fwrite($conn, "GET /pid HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head = native_read_head($conn);
+            if ((int) fread($conn, (int) $head['headers']['content-length']) !== $pid) {
+                $other = $conn;
+            }
         }
-        expect($published)->toBe(8);
-        log_wait($log, '/Killing worker \d+ \(slot \d\): published messages unread for 30 s/', 40);
-        expect(microtime(true) - $start)->toBeGreaterThan(28);
-        expect(probe($addr, '/hello'))->toBe('Hello');
+        // Stalls the subscriber's worker: a connection that asks for its pid, until it lands there
+        for ($busy = null; null === $busy;) {
+            $conn = native_connect($addr);
+            fwrite($conn, "GET /pid HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head = native_read_head($conn);
+            if ((int) fread($conn, (int) $head['headers']['content-length']) === $pid) {
+                fwrite($conn, "GET /busy?s=2 HTTP/1.1\r\nHost: t\r\n\r\n");
+                $busy = $conn;
+            }
+        }
+        usleep(300000);
+        for ($i = 0; $i < 8; ++$i) {
+            fwrite($other, "GET /publish?topic=room&m=x&times=100000 HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head = native_read_head($other);
+            expect(fread($other, (int) $head['headers']['content-length']))->toBe('published');
+        }
+        log_wait($log, '/Worker inbox \d+ is not read: dropping \d+ published messages for it/', 5);
+        expect(native_read_head($busy)['status'])->toBe(200);
+        expect(probe($addr, '/publish?topic=room&m=tail'))->toBe('published');
+        $events = '';
+        while (!str_contains($events, "data: tail\n\n") && null !== ($chunk = native_read_chunk($subscriber))) {
+            $events .= $chunk;
+        }
+        expect($events)->toContain("data: tail\n\n");
+        expect(file_get_contents($log))->not->toContain('Killing worker');
+    } finally {
+        native_stop($process);
+    }
+});
+
+test('Inboxes keeps a bitmap per topic of the inboxes that subscribe, and tells to forget it before it answers', function () {
+    $inboxes = new Inboxes(10);
+    $forgot  = [];
+    $forget  = static function (string $topic) use (&$forgot) {
+        $forgot[] = $topic;
+    };
+    $id = pack('N', 7);
+
+    expect($inboxes->serve(1, $id . 'ga', $forget))->toBe($id);
+    expect($inboxes->serve(1, $id . '+a', $forget))->toBe($id . "\x02");
+    expect($inboxes->serve(9, $id . '+a', $forget))->toBe($id . "\x02\x02");
+    expect($inboxes->serve(9, $id . '+a', $forget))->toBe($id . "\x02\x02"); // again: nothing changed
+    expect($inboxes->serve(1, $id . '+b', $forget))->toBe($id . "\x02");
+    expect($forgot)->toBe(['a', 'a', 'b']);
+
+    // Id 0 asks for no reply; unsubscribing trims the bitmap, and forgets only a change
+    $forgot = [];
+    expect($inboxes->serve(9, "\0\0\0\0-a", $forget))->toBeNull();
+    expect($inboxes->serve(9, "\0\0\0\0-a", $forget))->toBeNull();
+    expect($inboxes->serve(0, $id . 'ga', $forget))->toBe($id . "\x02");
+    expect($forgot)->toBe(['a']);
+
+    // An inbox that drains or is gone leaves every topic
+    $forgot = [];
+    $inboxes->leave(1, $forget);
+    expect($forgot)->toBe(['a', 'b']);
+    expect($inboxes->serve(0, $id . 'ga', $forget))->toBe($id);
+    expect($inboxes->serve(0, $id . 'gb', $forget))->toBe($id);
+});
+
+test('Inboxes hands out each inbox once, empty, until it is released', function () {
+    $inboxes = new Inboxes(2);
+    expect([$inboxes->take(), $inboxes->take(), $inboxes->take()])->toBe([0, 1, null]);
+    $inboxes->release(0);
+    (fn () => stream_socket_sendto($this->write[0], 'left for its last process'))->call($inboxes);
+    expect($inboxes->take())->toBe(0);
+    expect((fn () => @stream_socket_recvfrom($this->read[0], Topics::MAX_DATAGRAM))->call($inboxes))->toBeFalse();
+});
+
+test('after reloads, which reuse the inboxes, subscribers of the new workers get what is published', function () {
+    [$process, $addr, $log] = swerve_start([], 2);
+    try {
+        for ($round = 1; $round <= 3; ++$round) {
+            $subscribers = [];
+            for ($i = 0; $i < 4; ++$i) {
+                [$subscribers[]] = pubsub_subscribe($addr, 'room', 1);
+            }
+            expect(probe($addr, "/publish?topic=room&m=round$round"))->toBe('published');
+            foreach ($subscribers as $conn) {
+                expect(native_read_chunk($conn))->toBe("data: round$round\n\n");
+            }
+            swerve_signal($process, SIGHUP);
+            $deadline = microtime(true) + 10;
+            while (substr_count((string) file_get_contents($log), 'Reload complete') < $round) {
+                expect(microtime(true))->toBeLessThan($deadline);
+                usleep(50000);
+            }
+        }
+        expect(file_get_contents($log))->not->toContain('dropping');
     } finally {
         native_stop($process);
     }

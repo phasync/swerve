@@ -18,12 +18,11 @@ use Swerve\Cache;
  * 'C' to ask to be recycled, and 'D' when it drains; the end of the pair tells the master the
  * worker is gone. The master writes 'T' to make a worker drain and 'L' to make it reopen the
  * log file: not signals, which would cut short the blocking calls of the requests in flight.
- * Among these bytes go the messages of Swerve::publish(), framed (see Topics::frame()): the
- * master sends each one it reads to every worker ready or draining, the sender included, in
- * the order it read them. A worker that leaves them unread for PUBLISH_LAG is killed. A
- * worker that stays silent longer than the watchdog timeout is stuck (a busy loop or a
- * blocking call stalls its whole event loop): it is sent SIGQUIT, to log what it is stuck in,
- * and SIGKILLed a moment later.
+ * Among these bytes go framed requests (see Topics::frame()): the cache's, and the subscriptions'
+ * (see Inboxes), which the master answers; published messages don't pass the master. A worker
+ * that stays silent longer than the watchdog timeout is stuck (a busy loop or a blocking call
+ * stalls its whole event loop): it is sent SIGQUIT, to log what it is stuck in, and SIGKILLed a
+ * moment later.
  *
  * Signals: SIGTERM, SIGINT or SIGQUIT drain every worker within the grace period, SIGKILL what
  * remains and exit; a second one kills at once. SIGHUP or SIGUSR2 reopen the log file (for log
@@ -69,6 +68,10 @@ final class Cluster
 
     /** What Swerve::cache() holds, for every worker: see Cache. */
     private LruCache $cache;
+    /** The workers' inboxes, and who subscribes to what. */
+    private Inboxes $inboxes;
+    /** No inbox was free to start a worker: logged once, until one starts. */
+    private bool $noInbox = false;
     /** Application load and listen: a worker not ready by then is killed as a failed start. */
     public const READY_TIMEOUT = 60.0;
     /** Ready this long, or having served: not part of a crash loop, and resets the slot's failures. */
@@ -92,11 +95,6 @@ final class Cluster
      * run (the process group stopped and continued, a suspended VM): see deadlines().
      */
     public const PAUSED = 1.0;
-    /**
-     * A worker that leaves a published message unread this long is stuck, even with the
-     * watchdog off, and killed: the master would keep every message for it meanwhile.
-     */
-    public const PUBLISH_LAG = 30.0;
 
     /** @var array<int, WorkerProcess> by pid */
     private array $workers = [];
@@ -141,6 +139,8 @@ final class Cluster
         int $cacheBytes = 64 << 20,
     ) {
         $this->cache = new LruCache(maxBytes: $cacheBytes);
+        // Twice the slots: a replacement starts while the worker it replaces drains
+        $this->inboxes = new Inboxes(2 * $numWorkers);
         $this->masterPid = \posix_getpid();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
         if (!\extension_loaded('phasync')) {
@@ -241,6 +241,17 @@ final class Cluster
      */
     private function spawn(int $slot, ?int $replaces): ?Worker
     {
+        $inbox = $this->inboxes->take();
+        if (null === $inbox) {
+            // Draining workers hold them until they exit, within the grace period
+            if (!$this->noInbox) {
+                $this->noInbox = true;
+                $this->logger->notice('Slot {slot}: waiting for a draining worker to exit before starting another', ['slot' => $slot]);
+            }
+
+            return null;
+        }
+        $this->noInbox = false;
         [$master, $child] = System::socketPair();
         // Held until the worker installed its own handlers: the master's must not run in it
         \pcntl_sigprocmask(\SIG_BLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
@@ -258,13 +269,16 @@ final class Cluster
                 $logger->info('Pinned to the NUMA node of CPUs {cpus}', ['cpus' => $cpus]);
             }
 
-            return new Worker($slot, $child, $this->masterPid, $this->grace, $this->watchdog, $logger);
+            [$read, $peers] = $this->inboxes->adopt($inbox);
+
+            return new Worker($slot, $child, $this->masterPid, $this->grace, $this->watchdog, $logger, $inbox, $read, $peers);
         }
         \pcntl_sigprocmask(\SIG_UNBLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
         $now = self::now();
         if (-1 === $pid) {
             \fclose($master);
             \fclose($child);
+            $this->inboxes->release($inbox);
             $this->logger->error('Fork failed for slot {slot}: {error}', ['slot' => $slot, 'error' => \pcntl_strerror(\pcntl_get_last_error())]);
             $this->nextStart[$slot] = $now + $this->backoff(++$this->failures[$slot]);
 
@@ -272,7 +286,7 @@ final class Cluster
         }
         \fclose($child);
         \stream_set_blocking($master, false);
-        $this->workers[$pid] = new WorkerProcess($pid, $slot, $this->generation, $master, $now, $now, $replaces);
+        $this->workers[$pid] = new WorkerProcess($pid, $slot, $this->generation, $master, $now, $now, $inbox, $replaces);
         // Once serving, a start is a restart or a replacement, and its pid is news
         // A restart is news; a replacement is logged as it takes over, see onReady()
         $this->logger->log($this->everReady && null === $replaces ? 'notice' : 'info', 'Started worker {pid} in slot {slot} (generation {generation})' . (null !== $replaces ? ', replacing {old}' : ''), [
@@ -320,7 +334,6 @@ final class Cluster
         }
         $now                  = self::now();
         $this->onlyHeartbeats = true;
-        $round                = []; // published this round, by all workers: forwarded in publishing order
         foreach ($read as $pid => $pipe) {
             $w     = $this->workers[$pid];
             $bytes = (string) @\fread($pipe, 65536);
@@ -332,25 +345,24 @@ final class Cluster
             }
             $w->lastSeen = $now;
             $w->in .= $bytes;
-            $published = false;
-            $bytes     = Topics::parse($w->in, function (string $topic, string $message, string $frame, bool $json, int $at) use (&$published, &$round, $w) {
-                $published = true; // also a cache request: answered at once, and the next round waits for nothing
+            $requested = false;
+            $bytes     = Topics::parse($w->in, function (string $topic, string $message) use (&$requested, $w) {
+                $requested = true; // answered at once, and the next round waits for nothing
                 if (Cache::TOPIC === $topic) {
                     $reply = Cache::serve($this->cache, $message, function (?array $keys) {
-                        $forget = Topics::frame(Cache::FORGET, \serialize($keys));
-                        foreach ($this->workers as $other) {
-                            if (WorkerProcess::STARTING !== $other->state) {
-                                $this->send($other, $forget); // one still starting has read nothing
-                            }
-                        }
+                        $this->forgetAll(Topics::frame(Cache::FORGET, \serialize($keys)));
                     });
                     $this->send($w, Topics::frame(Cache::TOPIC, $reply));
-
-                    return;
+                } elseif (Inboxes::TOPIC === $topic) {
+                    $reply = $this->inboxes->serve($w->inbox, $message, fn (string $topic) => $this->forgetAll(Topics::frame(Inboxes::FORGET, $topic)));
+                    if (null !== $reply) {
+                        $this->send($w, Topics::frame(Inboxes::TOPIC, $reply));
+                    }
+                } else {
+                    throw new \UnexpectedValueException('A worker sent a frame for an unknown topic');
                 }
-                $round[] = [$at, $frame];
             });
-            $this->onlyHeartbeats = $this->onlyHeartbeats && !$published && '' === \trim($bytes, '.');
+            $this->onlyHeartbeats = $this->onlyHeartbeats && !$requested && '' === \trim($bytes, '.');
             if (\str_contains($bytes, 'R') && WorkerProcess::STARTING === $w->state) {
                 $this->onReady($w);
             }
@@ -365,15 +377,11 @@ final class Cluster
                 // KillMode=control-group), and the master is about to stop them all.
                 $w->state         = WorkerProcess::DRAINING;
                 $w->drainingSince = $now;
+                $this->leaveInbox($w);
                 if (!$this->stopSignals) {
                     $this->logger->warning('Worker {pid} (slot {slot}) is draining on a SIGTERM the master did not send', ['pid' => $w->pid, 'slot' => $w->slot]);
                 }
             }
-        }
-        // A worker's own frames are in order already; across workers, the stamps decide
-        \usort($round, static fn (array $a, array $b) => $a[0] <=> $b[0]);
-        foreach ($round as [, $frame]) {
-            $this->publish($frame);
         }
     }
 
@@ -424,11 +432,13 @@ final class Cluster
             // Its last bytes may not have been read yet: a 'Q' right before a request killed it,
             // an 'F' from its shutdown
             $w->in .= (string) @\fread($w->pipe, 1 << 20);
-            $bytes     = Topics::parse($w->in, fn (string $topic, string $message, string $frame) => $this->publish($frame));
+            $bytes     = Topics::parse($w->in, static fn () => null);
             $w->served = $w->served || \str_contains($bytes, 'Q');
             $w->fatal  = $w->fatal || \str_contains($bytes, 'F');
             \fclose($w->pipe);
         }
+        $this->leaveInbox($w);
+        $this->inboxes->release($w->inbox);
         $now    = self::now();
         $killed = null !== $w->killReason ? ", killed: {$w->killReason}" : '';
         $ctx    = ['pid' => $pid, 'slot' => $w->slot, 'how' => $this->describe($status, $w->fatal), 'up' => self::duration($now - $w->started)];
@@ -520,8 +530,6 @@ final class Cluster
                 $this->logger->error('Worker {pid} (slot {slot}) sent no heartbeat for {s} s: killing it (busy loop or blocking call)', ['pid' => $w->pid, 'slot' => $w->slot, 's' => $silent]);
             } elseif (WorkerProcess::DRAINING === $w->state && $now - $w->drainingSince > $this->grace) {
                 $this->kill($w, 'grace expired', 'warning');
-            } elseif (!$w->pending->isEmpty() && $now - $w->pending->bottom()[1] > self::PUBLISH_LAG) {
-                $this->kill($w, 'published messages unread for ' . self::seconds(self::PUBLISH_LAG) . ' s', 'error');
             }
             // Only a worker started since the failures proves the slot starts again: not the one
             // a failing replacement was to take over from, which serves on
@@ -540,44 +548,40 @@ final class Cluster
     }
 
     /**
-     * A message a worker published, for every worker that serves or drains, in the order the
-     * master read them. Not for one still starting: its application doesn't subscribe yet, and
-     * it reads the pipe only once it serves.
+     * Send a frame to every worker that reads its pipe: not to one still starting, which has
+     * read nothing yet and has nothing to forget.
      */
-    private function publish(string $frame): void
+    private function forgetAll(string $frame): void
     {
-        $now = self::now();
         foreach ($this->workers as $w) {
-            if (WorkerProcess::STARTING !== $w->state && $this->send($w, $frame)) {
-                $w->pending->enqueue([$w->queued, $now]);
+            if (WorkerProcess::STARTING !== $w->state) {
+                $this->send($w, $frame);
             }
         }
     }
 
+    /** A worker that drains or is gone has no subscriptions: what is published goes to the others. */
+    private function leaveInbox(WorkerProcess $w): void
+    {
+        $this->inboxes->leave($w->inbox, fn (string $topic) => $this->forgetAll(Topics::frame(Inboxes::FORGET, $topic)));
+    }
+
     /**
      * Queue bytes for a worker, and write what its pipe takes; the rest goes as readPipes()
-     * sees the pipe writable. Returns whether any are left for later.
+     * sees the pipe writable.
      */
-    private function send(WorkerProcess $w, string $bytes): bool
+    private function send(WorkerProcess $w, string $bytes): void
     {
         if (!$w->pipe) {
-            return false;
+            return;
         }
         $w->out .= $bytes;
-        $w->queued += \strlen($bytes);
         $this->flush($w);
-
-        return '' !== $w->out;
     }
 
     private function flush(WorkerProcess $w): void
     {
-        $written = (int) @\fwrite($w->pipe, $w->out);
-        $w->out = \substr($w->out, $written);
-        $w->written += $written;
-        while (!$w->pending->isEmpty() && $w->pending->bottom()[0] <= $w->written) {
-            $w->pending->dequeue();
-        }
+        $w->out = \substr($w->out, (int) @\fwrite($w->pipe, $w->out));
     }
 
     /**
@@ -637,6 +641,7 @@ final class Cluster
         $this->send($w, 'T');
         $w->state         = WorkerProcess::DRAINING;
         $w->drainingSince = self::now();
+        $this->leaveInbox($w);
     }
 
     /**

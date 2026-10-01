@@ -67,8 +67,11 @@ final class Worker
     private readonly int $stallCheck;
 
     /**
-     * @param resource $pipe     the worker's end of the socket pair to the master
-     * @param float    $watchdog the master's watchdog timeout, see the SIGALRM handler; 0 = off
+     * @param resource             $pipe     the worker's end of the socket pair to the master
+     * @param float                $watchdog the master's watchdog timeout, see the SIGALRM handler; 0 = off
+     * @param int                  $inboxId  the worker's inbox, see Inboxes
+     * @param resource             $inbox    its read end
+     * @param array<int, resource> $peers    the other inboxes' write ends, by inbox
      */
     public function __construct(
         public readonly int $slot,
@@ -77,6 +80,9 @@ final class Worker
         private readonly float $grace,
         float $watchdog,
         public readonly LoggerInterface $logger,
+        int $inboxId,
+        private $inbox,
+        array $peers,
     ) {
         $this->startedAt = \microtime(true);
         [$this->wake, $this->wakeWrite] = System::socketPair();
@@ -148,6 +154,7 @@ final class Worker
         \pcntl_sigprocmask(\SIG_UNBLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
         \stream_set_blocking($pipe, false);
         Topics::$toMaster = fn (string $topic, string $message, bool $json = false) => $this->send(Topics::frame($topic, $message, $json));
+        Topics::connect($inboxId, $peers, $logger);
     }
 
     /**
@@ -245,6 +252,7 @@ final class Worker
             phasync::go($this->tick(...));
             phasync::go($this->awaitTerm(...));
             phasync::go($this->awaitMaster(...));
+            phasync::go($this->awaitInbox(...));
         }
     }
 
@@ -364,7 +372,7 @@ final class Worker
 
     /**
      * Act on what the master sends: 'T' to drain, 'L' to reopen the log file after log
-     * rotation, and published messages, see Topics. Bytes, not signals: a signal cuts short the
+     * rotation, and the replies to its requests, see Cache and Topics. Bytes, not signals: a signal cuts short the
      * blocking calls (sleep(), stream_select()) of the requests in flight, which a drain is there
      * to let finish. Ends at the end of the pipe, when the master died; tick() acts on that.
      */
@@ -378,10 +386,11 @@ final class Worker
                 return;
             }
             $buffer .= $bytes;
-            $status = Topics::parse($buffer, static fn (string $topic, string $message, string $frame, bool $json) => match ($topic) {
-                Cache::TOPIC  => Cache::reply($message),
-                Cache::FORGET => Cache::forget($message),
-                default       => Topics::deliver($topic, $message, $json),
+            $status = Topics::parse($buffer, static fn (string $topic, string $message) => match ($topic) {
+                Cache::TOPIC    => Cache::reply($message),
+                Cache::FORGET   => Cache::forget($message),
+                Inboxes::TOPIC  => Topics::answer($message),
+                Inboxes::FORGET => Topics::forget($message),
             });
             if (\str_contains($status, 'L') && $this->logger instanceof Logger) {
                 $this->logger->reopen();
@@ -389,6 +398,21 @@ final class Worker
             if (\str_contains($status, 'T') && !$this->draining) {
                 $this->drain('the master asked');
             }
+        }
+    }
+
+    /**
+     * Deliver the messages other workers published to this worker's inbox, one datagram each.
+     * A burst is read in turns, so that the other coroutines are not starved.
+     */
+    private function awaitInbox(): void
+    {
+        while (true) {
+            phasync::readable($this->inbox, \PHP_FLOAT_MAX);
+            for ($n = 0; $n < 128 && false !== ($datagram = @\stream_socket_recvfrom($this->inbox, Topics::MAX_DATAGRAM)); ++$n) {
+                Topics::receive($datagram);
+            }
+            \error_clear_last(); // an empty inbox
         }
     }
 

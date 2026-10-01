@@ -175,15 +175,15 @@ final class System {
      *
      * @return array{0: resource, 1: resource}
      */
-    public static function socketPair(): array
+    public static function socketPair(int $type = \SOCK_STREAM): array
     {
         if (\defined('SOCK_CLOEXEC')) {
-            \socket_create_pair(\AF_UNIX, \SOCK_STREAM | \SOCK_CLOEXEC, 0, $pair);
+            \socket_create_pair(\AF_UNIX, $type | \SOCK_CLOEXEC, 0, $pair);
 
             return [\socket_export_stream($pair[0]), \socket_export_stream($pair[1])];
         }
 
-        return \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
+        return \stream_socket_pair(\STREAM_PF_UNIX, \SOCK_DGRAM === $type ? \STREAM_SOCK_DGRAM : \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
     }
 
     /**

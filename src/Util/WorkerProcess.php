@@ -25,26 +25,16 @@ final class WorkerProcess
     /** Sent 'F': a PHP fatal error ends it. */
     public bool $fatal = false;
 
-    /** Bytes read from it that don't make a whole message yet, see Topics::parse(). */
+    /** Bytes read from it that don't make a whole frame yet, see Topics::parse(). */
     public string $in = '';
     /** Bytes for it that its pipe did not take yet, see Cluster::send(). */
     public string $out = '';
-    /** Bytes ever queued in $out, and ever written from it. */
-    public int $queued = 0;
-    public int $written = 0;
-    /**
-     * When each message still in $out was queued, and where it ends (counted as $queued): the
-     * front one is the oldest not sent yet.
-     *
-     * @var \SplQueue<array{int, float}>
-     */
-    public \SplQueue $pending;
-
     /** Why the master SIGKILLed it, for the exit log; set once, so it is killed once. */
     public ?string $killReason = null;
 
     /**
      * @param resource|null $pipe     the master's end of the socket pair; null once it reached EOF
+     * @param int           $inbox    its inbox, see Inboxes
      * @param int|null      $replaces the SERVING worker this one takes over from, in a reload or recycle
      */
     public function __construct(
@@ -54,8 +44,8 @@ final class WorkerProcess
         public $pipe,
         public readonly float $started,
         public float $lastSeen,
+        public readonly int $inbox,
         public readonly ?int $replaces,
     ) {
-        $this->pending = new \SplQueue();
     }
 }

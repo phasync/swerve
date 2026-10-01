@@ -280,9 +280,7 @@ final class HttpServer implements ServerInterface
      */
     private function adopt($socket, string $peer, ?\Socket $sock): void
     {
-        if (null === $sock) {
-            \stream_set_blocking($socket, false);
-        }
+        null === $sock ? \stream_set_blocking($socket, false) : \socket_set_nonblock($sock);
         $connection = new HttpConnection($socket, $peer, $this->dispatcher, $this->logger, $this->bufferResponses, $this->maxBodySize, $sock);
         $id         = \spl_object_id($connection);
 

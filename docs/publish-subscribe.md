@@ -16,12 +16,12 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 
 ## What it promises
 
-- **Order**: every subscriber sees a topic's messages in the same order. Messages pass through
-  the master process, which sends each one to every worker in the order it read them. That is
-  not necessarily the order things happened in your storage: two requests in different workers
-  that update a row one after the other may publish in the other order. When a message carries
-  state (a count, a document), give it a version from storage (a counter incremented in the
-  same transaction) and let clients ignore one older than what they have.
+- **Order**: the messages of one publishing worker arrive in the order it published them. There
+  is no order between workers: the publisher writes straight into the inbox of each worker with
+  subscribers, and two subscribers may see messages from different workers in different orders,
+  as may two requests that update a row one after the other. When a message carries state (a
+  count, a document), give it a version from storage (a counter incremented in the same
+  transaction) and let clients ignore one older than what they have.
 - **At most once**: to the subscriptions that exist when the message reaches their worker. There
   is no history and no retry: a subscriber that starts later, a worker started after a reload,
   a recycle or a crash, see nothing sent before. Keep what must not be lost in storage, and use
@@ -55,7 +55,7 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 
 `Swerve::publish(string $topic, string $message): void`
 
-- Topics are 1 to 255 bytes, messages at most 1 MiB; larger ones throw
+- Topics are 1 to 255 bytes, messages at most 128 KiB; larger ones throw
   `InvalidArgumentException`.
 - It returns once the message is on its way, not when it is delivered.
 - Every message travels as JSON: encoded once where it is published, decoded once in each
@@ -98,8 +98,11 @@ started when the application loads, subscribes and drops its cached copy.
 
 ## Limits
 
-A worker that leaves messages unread for 30 s (its event loop stuck in blocking code) is
-killed by the master, even with `--watchdog=0`: the master would keep every message for it
-meanwhile.
+A worker's inbox holds about 200 KB. A worker that stops reading it (its event loop stuck in
+blocking code) does not hold up the publishers: after 0.1 s they drop what they could not
+deliver to it and log a warning, and it gets what is published after it reads again.
+
+`Swerve::publish()` works once the worker serves, not while `swerve.php` loads; before that it
+throws `LogicException`.
 
 Next: [Command line](command-line.md).
