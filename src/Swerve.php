@@ -51,8 +51,8 @@ final class Swerve
      * same order. Swerve embedded without its master process delivers in this process only.
      *
      * Every message travels as JSON: encoded once here, decoded once in each worker, and every
-     * subscriber gets the value published, shared: a string stays a string ('{}' too), an array
-     * an array, and objects arrive as associative arrays.
+     * subscriber gets the value published, shared: a string stays a string ('{}' too), a list
+     * an array, and an object (an array with keys) a read-only SealedObject: `$message->end`.
      *
      *     Swerve::publish('game', ['kill', $playerId]);
      *

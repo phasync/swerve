@@ -6,6 +6,7 @@
  */
 
 use Swerve\CLI\Address;
+use Swerve\Util\SealedObject;
 use Swerve\CLI\Args;
 use Swerve\CLI\Argument;
 use Swerve\CLI\Flag;
@@ -377,4 +378,59 @@ test('a port is plain decimal digits: no whitespace, sign or leading zero', func
 
 test('empty IPv6 brackets are refused as an address, not looked up as a host name', function () {
     expect(fn () => Swerve\CLI\Address::normalize('[]:80'))->toThrow(InvalidArgumentException::class, 'host:port');
+});
+
+// --- SealedObject ----------------------------------------------------------------------------
+
+test('SealedObject: nested objects are sealed too, the same instance every time, and reading looks like stdClass', function () {
+    $message = SealedObject::seal(json_decode('{"end":true,"user":{"name":"a","tags":[{"t":1},2]},"empty":{}}'));
+    expect($message)->toBeInstanceOf(SealedObject::class);
+    expect($message->end)->toBeTrue();
+    expect(isset($message->end))->toBeTrue();
+    expect(isset($message->missing))->toBeFalse();
+    expect($message->missing ?? 'default')->toBe('default');
+    expect($message->user)->toBeInstanceOf(SealedObject::class);
+    expect($message->user)->toBe($message->user);
+    expect($message->user->name)->toBe('a');
+    expect($message->user->tags[0])->toBeInstanceOf(SealedObject::class);
+    expect($message->user->tags[0]->t)->toBe(1);
+    expect($message->user->tags[1])->toBe(2);
+    expect($message->empty)->toBeInstanceOf(SealedObject::class); // {} stays an object, unlike with assoc = true
+    expect(array_keys(iterator_to_array($message)))->toBe(['end', 'user', 'empty']);
+    expect(json_encode($message))->toBe('{"end":true,"user":{"name":"a","tags":[{"t":1},2]},"empty":{}}');
+});
+
+test('SealedObject: nothing can be attached, changed or removed, also under the names of its own members', function () {
+    $message = SealedObject::seal(json_decode('{"a":1,"inner":"x","sealed":"y"}'));
+    expect($message->inner)->toBe('x');
+    expect($message->sealed)->toBe('y');
+    foreach (['a', 'new', 'inner', 'sealed'] as $name) {
+        expect(fn () => $message->$name = 2)->toThrow(LogicException::class);
+        expect(function () use ($message, $name) { unset($message->$name); })->toThrow(LogicException::class);
+    }
+    expect($message->a)->toBe(1);
+    // What json_encode() takes is a copy
+    $copy = $message->jsonSerialize();
+    $copy->a = 2;
+    expect($message->a)->toBe(1);
+});
+
+test('SealedObject: a list at the top keeps its objects sealed, scalars pass through', function () {
+    $list = SealedObject::seal(json_decode('[{"a":1},[{"b":2}],"s",3]'));
+    expect($list[0])->toBeInstanceOf(SealedObject::class);
+    expect($list[1][0]->b)->toBe(2);
+    expect([$list[2], $list[3]])->toBe(['s', 3]);
+    expect(SealedObject::seal('{}'))->toBe('{}');
+});
+
+test('SealedObject: reading a missing property warns, as stdClass does', function () {
+    $message = SealedObject::seal(json_decode('{"a":1}'));
+    $seen = null;
+    set_error_handler(function (int $no, string $str) use (&$seen) { $seen = $str; return true; });
+    try {
+        expect($message->nope)->toBeNull();
+    } finally {
+        restore_error_handler();
+    }
+    expect($seen)->toContain('Undefined property')->toContain('$nope');
 });

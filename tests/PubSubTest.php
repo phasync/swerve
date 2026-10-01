@@ -300,7 +300,8 @@ test('without a master, a message is delivered as JSON would deliver it, strings
             return $message;
         }
     });
-    expect($received)->toBe(['a' => 1.0, 'o' => ['x' => 1]]); // objects arrive as arrays, as from another worker
+    expect($received->a)->toBe(1.0); // an array with keys is a JSON object, as from another worker
+    expect($received->o->x)->toBe(1);
     $strings = phasync::run(static function () {
         $subscription = Swerve::subscribe('local-strings');
         Swerve::publish('local-strings', '{}');

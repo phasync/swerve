@@ -75,12 +75,13 @@ final class Topics
      */
     /**
      * A message for this process's subscribers of $topic. A JSON message is decoded here, once
-     * for all of them: they share the value (arrays are copied only if one changes it).
+     * for all of them: they share the value (an array is copied only if one changes it; an object
+     * is a SealedObject, which nobody can change).
      */
     public static function deliver(string $topic, string $message, bool $json = false): void
     {
         if (isset(self::$writers[$topic])) {
-            self::$writers[$topic]->write([\hrtime(true), $json ? \json_decode($message, true, 512, \JSON_THROW_ON_ERROR) : $message]);
+            self::$writers[$topic]->write([\hrtime(true), $json ? SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR)) : $message]);
         }
     }
 

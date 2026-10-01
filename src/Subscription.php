@@ -42,7 +42,7 @@ final class Subscription implements \IteratorAggregate
      * The messages, as they come; null after each $heartbeat seconds without one. Ends when the
      * process drains.
      *
-     * @return \Generator<int, mixed> each message as published (a JSON message decoded), or null for a heartbeat
+     * @return \Generator<int, mixed> each message as published (a JSON message decoded; an object as a SealedObject), or null for a heartbeat
      *
      * @throws SubscriberLagException
      */

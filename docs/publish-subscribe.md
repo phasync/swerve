@@ -60,7 +60,8 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 - It returns once the message is on its way, not when it is delivered.
 - Every message travels as JSON: encoded once where it is published, decoded once in each
   worker, and every subscriber gets the value that was published, shared. A string stays a
-  string (`'{}'` too), an array an array; objects arrive as associative arrays. `null` is
+  string (`'{}'` too), a list an array; an object (an array with keys) arrives as a read-only
+  `Swerve\Util\SealedObject`: read `$message->end`, and no subscriber can change what the others see. `null` is
   refused: a subscription with a heartbeat yields `null` for "nothing came".
 - Messages go to the subscribers in the workers, never to a browser by themselves. Publish
   values as they are (`Swerve::publish('game', ['kill', $playerId])`), so 10,000 subscribers don't
