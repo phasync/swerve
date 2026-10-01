@@ -221,3 +221,145 @@ test('WebSocket: a subscription loop in a PSR-15 handler forwards messages and c
     }
     expect(log_count($log, '/(ERROR|CRITICAL|WARNING)/'))->toBe(0, file_get_contents($log));
 });
+
+/** What the $onClose of /websocket-events saw in the worker, once there are $count of them (and a moment for more). */
+function ws_closes(string $addr, int $count): array
+{
+    $deadline = microtime(true) + 3;
+    do {
+        $closes = json_decode((string) probe($addr, '/ws-closes'), true);
+        usleep(50_000);
+    } while (count($closes) < $count && microtime(true) < $deadline);
+    usleep(100_000); // a second trigger would show
+
+    return json_decode((string) probe($addr, '/ws-closes'), true);
+}
+
+test('WebSocket: events in, sequential code out: a message from one client reaches the other, and a published end returns the callback', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $a = ws_connect($addr, '/websocket-chat');
+        $b = ws_connect($addr, '/websocket-chat');
+        usleep(200_000); // both callbacks subscribed
+        ws_send($a, 1, 'hello from a');
+        expect(ws_read($b))->toBe([1, 'hello from a']);
+        expect(ws_read($a))->toBe([1, 'hello from a']);
+        ws_send($b, 1, 'and b');
+        expect(ws_read($a))->toBe([1, 'and b']);
+        expect(ws_read($b))->toBe([1, 'and b']);
+        expect(probe($addr, '/publish?topic=chat&m=end'))->toBe('published');
+        foreach ([$a, $b] as $conn) {
+            expect(ws_read($conn))->toBe([8, pack('n', 1000)]);
+            ws_send($conn, 8, pack('n', 1000));
+            expect(ws_read($conn))->toBeNull();
+        }
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
+});
+
+test('WebSocket: $onMessage gets the data and whether it is binary', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-events');
+        ws_send($conn, 1, 'hi');
+        expect(ws_read($conn))->toBe([1, 't:' . bin2hex('hi')]);
+        ws_send($conn, 2, "\x00\xFF");
+        expect(ws_read($conn))->toBe([1, 'b:00ff']);
+        ws_send($conn, 1, 'frag', false);
+        ws_send($conn, 0, 'mented');
+        expect(ws_read($conn))->toBe([1, 't:' . bin2hex('fragmented')]);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
+});
+
+test('WebSocket: $onClose fires once when the client says goodbye, with its code and reason, or 1005 without one', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-events');
+        ws_send($conn, 8, pack('n', 1001) . 'leaving');
+        expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
+        expect(ws_closes($addr, 1))->toBe([[1001, 'leaving']]);
+
+        $conn = ws_connect($addr, '/websocket-events');
+        ws_send($conn, 8, '');
+        expect(ws_read($conn))->toBe([8, pack('n', 1000)]);
+        expect(ws_closes($addr, 2))->toBe([[1001, 'leaving'], [1005, '']]);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
+});
+
+test('WebSocket: $onClose fires once when the server calls end(), with the code and reason it gave', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-events');
+        ws_send($conn, 1, 'end');
+        expect(ws_read($conn))->toBe([8, pack('n', 4000) . 'server done']);
+        ws_send($conn, 8, pack('n', 4000));
+        expect(ws_read($conn))->toBeNull();
+        expect(ws_closes($addr, 1))->toBe([[4000, 'server done']]);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
+});
+
+test('WebSocket: $onClose fires once, with 1006, when the connection is reset', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-events');
+        usleep(100_000);
+        $socket = socket_import_stream($conn);
+        socket_set_option($socket, SOL_SOCKET, SO_LINGER, ['l_onoff' => 1, 'l_linger' => 0]);
+        socket_close($socket);
+        expect(ws_closes($addr, 1))->toBe([[1006, '']]);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
+
+test('WebSocket: a throwing $onMessage listener closes with 1011, is logged, and $onClose still fires', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-events');
+        ws_send($conn, 1, 'throw');
+        expect(ws_read($conn))->toBe([8, pack('n', 1011)]);
+        expect(ws_read($conn))->toBeNull();
+        log_wait($log, '/the WebSocket listener failed/');
+        expect(ws_closes($addr, 1))->toBe([[1011, '']]);
+    } finally {
+        native_stop($process);
+    }
+});
+
+test('WebSocket: receive() throws a LogicException while $onMessage has listeners', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-mixed');
+        expect(ws_read($conn))->toBe([1, 'LogicException']);
+        expect(ws_read($conn))->toBe([8, pack('n', 1000)]);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
+});
+
+test('WebSocket: a once() listener gets the first message, and the next ones can be received', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    try {
+        $conn = ws_connect($addr, '/websocket-once');
+        ws_send($conn, 1, 'one');
+        ws_send($conn, 1, 'two');
+        ws_send($conn, 1, 'three');
+        expect([ws_read($conn), ws_read($conn), ws_read($conn)])->toBe([[1, 'once:one'], [1, 'pull:two'], [1, 'pull:three']]);
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|failed)/i'))->toBe(0, file_get_contents($log));
+});

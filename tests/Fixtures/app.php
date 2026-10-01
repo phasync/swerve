@@ -361,6 +361,9 @@ return new class($version) implements RequestHandlerInterface {
     /** WebSocket callbacks of /websocket-news still running, see /news-live. */
     private int $newsLive = 0;
 
+    /** @var list<array{int, string}> what the $onClose of /websocket-events saw, see /ws-closes */
+    private array $wsCloses = [];
+
     public function __construct(private string $version)
     {
     }
@@ -444,11 +447,61 @@ return new class($version) implements RequestHandlerInterface {
             '/websocket-feed' => WebSocket::from($request, function (WebSocket $ws) {
                 foreach (Swerve::subscribe('feed') as $message) {
                     if ($message instanceof \Swerve\Util\SealedObject && ($message->end ?? false)) {
-                        $ws->close();
+                        $ws->end();
 
                         return;
                     }
                     $ws->send(\is_string($message) ? $message : \json_encode($message));
+                }
+            }),
+            // A chat: what the browser sends is published (events in, sequential code out); "end" published ends it
+            '/websocket-chat' => WebSocket::from($request, static function (WebSocket $ws) {
+                $ws->onMessage->listen(static function (string $data) {
+                    Swerve::publish('chat', $data);
+                });
+                foreach (Swerve::subscribe('chat') as $out) {
+                    if ('end' === $out) {
+                        return;
+                    }
+                    $ws->send($out);
+                }
+            }),
+            // Events: echoes with the binary flag ("t:"/"b:"); "end" calls end(4000, 'server done'), "throw" throws
+            '/websocket-events' => WebSocket::from($request, function (WebSocket $ws) {
+                $ws->onClose->listen(function (int $code, string $reason) {
+                    $this->wsCloses[] = [$code, $reason];
+                });
+                $ws->onMessage->listen(static function (string $data, bool $binary) use ($ws) {
+                    if ('end' === $data) {
+                        $ws->end(4000, 'server done');
+                    } elseif ('throw' === $data) {
+                        throw new RuntimeException('the WebSocket listener failed');
+                    } else {
+                        $ws->send(($binary ? 'b:' : 't:') . \bin2hex($data));
+                    }
+                });
+                \phasync::sleep(3600); // until the connection ends
+            }),
+            '/ws-closes' => new Response(200, [], \json_encode($this->wsCloses)),
+            // The first message goes to a once() listener, the rest are pulled
+            '/websocket-once' => WebSocket::from($request, static function (WebSocket $ws) {
+                $first = new \stdClass();
+                $ws->onMessage->once(static function (string $data) use ($ws, $first) {
+                    $ws->send("once:$data");
+                    \phasync::raiseFlag($first);
+                });
+                \phasync::awaitFlag($first);
+                foreach ($ws as $message) {
+                    $ws->send("pull:$message");
+                }
+            }),
+            // receive() while $onMessage has listeners
+            '/websocket-mixed' => WebSocket::from($request, static function (WebSocket $ws) {
+                $ws->onMessage->listen(static fn () => null);
+                try {
+                    $ws->receive();
+                } catch (LogicException $e) {
+                    $ws->send('LogicException');
                 }
             }),
             '/news-live' => new Response(200, [], \json_encode([\getmypid(), $this->newsLive])),

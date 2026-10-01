@@ -33,7 +33,7 @@ return new class implements RequestHandlerInterface {
                         $ws->send($message);
                     }
                 } catch (SubscriberLagException) {
-                    $ws->close(1008); // too far behind; the browser reconnects
+                    $ws->end(1008); // too far behind; the browser reconnects
                 } catch (CancelledException) {
                     // The browser left, see below
                 }

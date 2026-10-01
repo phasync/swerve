@@ -97,43 +97,47 @@ a `101` over FastCGI, so `--fastcgi` answers an upgrade with 501.
 messages, ping and pong, close codes, UTF-8 checks, and a limit on message size (1 MiB). The
 callback runs in a coroutine of its own after the 101, and the connection closes when it
 returns (1000) or throws (1011, logged). One coroutine receives; any may send. Swerve pings
-every 15 s, so proxies keep a quiet connection open. The chat example:
+every 15 s, so proxies keep a quiet connection open. A chat: inbound messages are events,
+outbound ones plain sequential code:
 
 ```php
 use Swerve\Http\WebSocket;
 
 return WebSocket::from($request, static function (WebSocket $ws) {
-    $subscription = Swerve::subscribe('chat');
-    $forward      = phasync::go(static function () use ($ws, $subscription) {
-        try {
-            foreach ($subscription as $message) {
-                $ws->send($message);
-            }
-        } catch (SubscriberLagException) {
-            $ws->close(1008);
-        } catch (CancelledException) {
-        }
+    $ws->onMessage->listen(static function (string $data, bool $binary) {
+        Swerve::publish('chat', $data);                // validate it first, see the example
     });
-
-    foreach ($ws as $message) {                        // ends when the connection closes
-        Swerve::publish('chat', $message);             // validate it first, see the example
-    }
-
-    if (!$forward->isTerminated()) {
-        phasync::cancel($forward);                     // stops forwarding; ends the subscription
+    foreach (Swerve::subscribe('chat') as $message) {  // ends when the client leaves
+        $ws->send($message);
     }
 });
 ```
+
+The reader of the connection calls the `onMessage` listeners one at a time, in the order the
+messages arrived, so a slow listener holds back the reading. Pings are answered, and the callback
+is cancelled when the connection closes, so the loop above ends with its client. `$ws->end($code,
+$reason)` closes the connection early; returning does the same with 1000. `onClose` listeners get
+`($code, $reason)` once when the connection has ended, whichever side ended it: the client's code
+(1005 when it sent none), the one given to `end()`, 1011 after an exception, or 1006 when the
+connection ended without a close frame.
 
 Make the callback `static` when you write it in a controller method: a plain closure keeps
 `$this`, and with it the controller and often the whole application, alive for as long as the
 socket is open (measured in a Laminas controller: 380 KiB a socket, against 84 KiB).
 
-A callback that only sends, such as a loop over a subscription, ends when its client leaves:
-the connection is read all the time, and the callback is cancelled when it closes.
+The pull style is the alternative to `onMessage`: `$ws->receive()` returns the next message, or
+null once closed, and the WebSocket can be iterated; `isBinary()` tells a binary message from
+text. Using it while `onMessage` has listeners throws a `LogicException`.
 
-`$ws->receive()` returns the next message, or null once closed; `isBinary()` tells a binary
-message from text, `sendBinary()` sends one, and `close($code)` says goodbye.
+```php
+return WebSocket::from($request, static function (WebSocket $ws) {
+    foreach ($ws as $message) {                        // ends when the connection closes
+        $ws->send("echo: $message");
+    }
+});
+```
+
+`sendBinary()` sends a binary message. `send()` and `end()` may be called from any coroutine.
 
 For another protocol, extend `Swerve\Http\ProtocolUpgrade`, the base of `WebSocket`: implement
 `handshake()` (the 101's headers, or a refusal), and speak the protocol with its `read()`,

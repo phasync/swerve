@@ -37,7 +37,7 @@ abstract class ProtocolUpgrade
     private readonly UpgradeStream $out;
     private bool $writable = true;
 
-    final protected function __construct(private readonly StreamInterface $in)
+    protected function __construct(private readonly StreamInterface $in)
     {
         $this->out = new UpgradeStream();
     }
@@ -119,7 +119,7 @@ abstract class ProtocolUpgrade
             return true;
         } catch (TimeoutException) {
             $this->in->close();
-            $this->end();
+            self::end(); // not a subclass's end(), which may write
 
             return false;
         }

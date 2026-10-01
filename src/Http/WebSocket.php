@@ -7,31 +7,43 @@ use phasync\CancelledException;
 use phasync\TimeoutException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\StreamInterface;
 use phasync\Psr\Response;
+use phasync\Util\Event;
 
 /**
  * A WebSocket connection (RFC 6455), server side.
  *
  *     return WebSocket::from($request, function (WebSocket $ws) {
- *         foreach ($ws as $message) {           // ends when the connection closes
- *             $ws->send("echo: $message");
+ *         $ws->onMessage->listen(function (string $data) {      // inbound: events
+ *             Swerve::publish('chat', $data);
+ *         });
+ *         foreach (Swerve::subscribe('chat') as $out) {         // outbound: plain sequential code
+ *             if ('end' === $out) {
+ *                 return;                                       // returning closes the socket (1000)
+ *             }
+ *             $ws->send($out);
  *         }
  *     });
  *
  * The callback runs in a coroutine of its own after the handshake; the connection closes when
- * it returns (1000), or throws (1011, and swerve logs the exception). A request that is not a
- * WebSocket handshake is answered 426 or 400.
+ * it returns (1000), or throws (1011, and swerve logs the exception). end() closes it early. A
+ * request that is not a WebSocket handshake is answered 426 or 400.
  *
- * One coroutine receives; send() and close() may be called from any. The connection is read
- * all the time, also when the callback only sends: pings from the client are answered, and when
- * the client leaves the callback is cancelled, so a loop such as
+ * The connection is read all the time, also when the callback only sends: pings from the client
+ * are answered, and when the client leaves the callback is cancelled, so the loop above ends
+ * with its client. A message goes to the $onMessage listeners, one at a time, in the order they
+ * arrived: a slow listener holds back the reading. The server pings every connection every
+ * PING_INTERVAL seconds, from one coroutine for all of them, so proxies don't close a quiet one.
  *
- *     foreach (Swerve::subscribe('news') as $message) {
- *         $ws->send($message);
+ * The pull style is the alternative to $onMessage, and the two don't mix: receive() throws
+ * while $onMessage has listeners.
+ *
+ *     foreach ($ws as $message) {               // ends when the connection closes
+ *         $ws->send("echo: $message");
  *     }
  *
- * ends with its client. The server pings every connection every PING_INTERVAL seconds, from
- * one coroutine for all of them, so proxies don't close a quiet connection.
+ * send() and end() may be called from any coroutine.
  */
 class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
 {
@@ -43,9 +55,19 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
     /** Messages received and not yet taken by receive(); the reader waits while there are INBOX. */
     public const INBOX = 64;
 
+    /** Called with (string $data, bool $binary) for each text or binary message received. */
+    public readonly Event $onMessage;
+
+    /** Called once with (int $code, string $reason) when the connection has ended, see end(). */
+    public readonly Event $onClose;
+
     private string $buffer = '';
     private bool $closed   = false;
     private bool $binary   = false;
+
+    /** How the connection ended, set by whoever ended it first, see note(). */
+    private ?int $code     = null;
+    private string $reason = '';
 
     /** @var list<array{0: string, 1: bool}> */
     private array $inbox = [];
@@ -60,13 +82,25 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
     /** The reader saw the connection end: receive() returns null once the inbox is empty. */
     private bool $readerDone = false;
 
+    protected function __construct(StreamInterface $in)
+    {
+        parent::__construct($in);
+        $this->onMessage = new Event();
+        $this->onClose   = new Event();
+    }
+
     /**
      * The next text or binary message, or null once the connection is closed: by the client, by
-     * close(), because the client broke the protocol, or because swerve drains (a shutdown or
+     * end(), because the client broke the protocol, or because swerve drains (a shutdown or
      * reload), which closes it with 1001.
+     *
+     * @throws \LogicException while $onMessage has listeners: they get the messages
      */
     public function receive(): ?string
     {
+        if ($this->onMessage->hasListeners()) {
+            throw new \LogicException('receive() and $onMessage are alternatives: the listeners get the messages');
+        }
         while (!$this->inbox && !$this->readerDone) {
             phasync::awaitFlag($this);
         }
@@ -107,24 +141,29 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
                     || ($control ? !$fin || $length > 125 || $opcode > 10 // control frames: whole and short
                         : $opcode > 2 || (0 === $opcode) !== (null !== $message)) // a continuation continues something
                 ) {
-                    $this->close(1002);
+                    $this->end(1002);
 
                     return null;
                 }
                 if ($length > self::MAX_MESSAGE - \strlen($message ?? '')) {
-                    $this->close(1009);
+                    $this->end(1009);
 
                     return null;
                 }
                 $mask    = $this->need(4);
                 $payload = $length > 0 ? $this->need($length) ^ \substr(\str_repeat($mask, \intdiv($length, 4) + 1), 0, $length) : '';
             } catch (\UnderflowException) {
-                $this->close(1001); // the client's side ended, or swerve drains: going away
+                $this->note(1006, ''); // no close frame came
+                $this->end(1001);      // the client's side ended, or swerve drains: going away
 
                 return null;
             }
             if (8 === $opcode) {
-                $this->close(1 === $length ? 1002 : ($length >= 2 ? \unpack('n', $payload)[1] : 1000));
+                $code = $length >= 2 ? \unpack('n', $payload)[1] : 1005;
+                if (1 !== $length) {
+                    $this->note($code, \substr($payload, 2));
+                }
+                $this->end(1 === $length ? 1002 : (1005 === $code ? 1000 : $code));
 
                 return null;
             }
@@ -137,7 +176,7 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
                 $message = ($message ?? '') . $payload;
                 if ($fin) {
                     if ($text && !\preg_match('//u', $message)) {
-                        $this->close(1007); // text must be UTF-8
+                        $this->end(1007); // text must be UTF-8
 
                         return null;
                     }
@@ -182,14 +221,25 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
 
     /**
      * Say goodbye, once: receive() returns null from then on, and the connection closes after
-     * the client's own goodbye, or a moment without one.
+     * the client's own goodbye, or a moment without one. $onClose gets $code and $reason, unless
+     * the client said goodbye first.
      */
-    public function close(int $code = 1000, string $reason = ''): void
+    public function end(int $code = 1000, string $reason = ''): void
     {
         if (!$this->closed) {
+            $this->note($code, $reason);
             $this->frame(8, \pack('n', $code) . $reason);
             $this->closed = true;
-            $this->end();
+            parent::end();
+        }
+    }
+
+    /** Remember how the connection ended, if nobody did yet; 1005 is "no code", 1006 "no goodbye". */
+    private function note(int $code, string $reason): void
+    {
+        if (null === $this->code) {
+            $this->code   = $code;
+            $this->reason = $reason;
         }
     }
 
@@ -213,24 +263,25 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
 
     /**
      * Read the connection while the callback runs in a coroutine of its own: messages go to the
-     * inbox for receive(), pings are answered, and when the connection ends (the client left or
-     * closed, or swerve drains) the callback is cancelled if it still runs. So a callback that
-     * only sends, such as one forwarding a subscription, ends when its client is gone.
+     * $onMessage listeners, or to the inbox for receive() when there are none; pings are
+     * answered, and when the connection ends (the client left or closed, or swerve drains) the
+     * callback is cancelled if it still runs. So a callback that only sends, such as one
+     * forwarding a subscription, ends when its client is gone.
      */
     protected function run(\Closure $callback): void
     {
         $app = phasync::go(function () use ($callback) {
             try {
                 $callback($this);
-                $this->close(1000);
+                $this->end(1000);
             } catch (CancelledException $e) {
                 if (!$this->readerDone) {
-                    $this->close(1011);
+                    $this->end(1011);
                     throw $e;
                 }
                 // The connection ended, and the reader stopped the callback: nothing went wrong
             } catch (\Throwable $e) {
-                $this->close(1011);
+                $this->end(1011);
                 throw $e;
             } finally {
                 phasync::raiseFlag($this); // the reader may wait for room nobody will make now
@@ -238,8 +289,22 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
         });
         self::$open[\spl_object_id($this)] = $this;
         self::keepAlive();
+        $failure = null; // the first exception wins: a listener's, then $onClose's
         try {
             while (null !== ($message = $this->readMessage())) {
+                if ($this->onMessage->hasListeners()) {
+                    try {
+                        if (!$app->isTerminated()) {
+                            $this->onMessage->trigger($message[0], $message[1]);
+                        }
+                    } catch (\Throwable $e) {
+                        $this->end(1011);
+
+                        throw $e;
+                    }
+
+                    continue;
+                }
                 while (\count($this->inbox) >= self::INBOX && !$app->isTerminated()) {
                     phasync::awaitFlag($this); // the client sends faster than the callback receives
                 }
@@ -248,16 +313,25 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
                     phasync::raiseFlag($this);
                 }
             }
-        } finally {
-            $this->readerDone = true;
-            phasync::raiseFlag($this);
-            unset(self::$open[\spl_object_id($this)]);
-            if (!self::$open && null !== self::$lastClosed) {
-                phasync::raiseFlag(self::$lastClosed); // the ping loop ends now, not after its sleep
-            }
-            if (!$app->isTerminated()) {
-                phasync::cancel($app);
-            }
+        } catch (\Throwable $e) {
+            $failure = $e;
+        }
+        $this->readerDone = true;
+        phasync::raiseFlag($this);
+        unset(self::$open[\spl_object_id($this)]);
+        if (!self::$open && null !== self::$lastClosed) {
+            phasync::raiseFlag(self::$lastClosed); // the ping loop ends now, not after its sleep
+        }
+        try {
+            $this->onClose->trigger($this->code ?? 1006, $this->reason);
+        } catch (\Throwable $e) {
+            $failure ??= $e;
+        }
+        if (!$app->isTerminated()) {
+            phasync::cancel($app);
+        }
+        if (null !== $failure) {
+            throw $failure;
         }
         phasync::await($app); // its exception, if any, for swerve's log
     }
