@@ -1,10 +1,11 @@
 <?php
 
+use Swerve\OrderedChannel;
 use Swerve\Swerve;
 use Swerve\Util\Topics;
 
 /*
- * Swerve::publishOrdered() and subscribeOrdered(): an append-only log on disk that every worker
+ * OrderedChannel: an append-only log on disk that every worker
  * appends to and every ordered subscriber reads, so that they all see one order. Across real
  * forked workers, then in this process (no master).
  */
@@ -368,9 +369,10 @@ test('SWERVE_TMPDIR is the base of the claims directory and the ordered logs, wh
 test('without a master, ordered subscribers receive in publishing order, apart from plain ones, and end with their coroutines', function () {
     $got = phasync::run(function () {
         $plain   = Swerve::subscribe('e');
+        $channel = new OrderedChannel('e');
         $readers = [];
         $got     = [];
-        foreach (['plain' => $plain, 'a' => Swerve::subscribeOrdered('e'), 'b' => Swerve::subscribeOrdered('e')] as $name => $subscription) {
+        foreach (['plain' => $plain, 'a' => $channel->subscribe(), 'b' => $channel->subscribe()] as $name => $subscription) {
             $readers[] = phasync::go(static function () use ($subscription, $name, &$got) {
                 $want = 'plain' === $name ? 2 : 5;
                 foreach ($subscription as $message) {
@@ -383,7 +385,7 @@ test('without a master, ordered subscribers receive in publishing order, apart f
         }
         unset($plain, $subscription);
         foreach (range(1, 5) as $i) {
-            Swerve::publishOrdered('e', $i);
+            $channel->write($i);
             if ($i <= 2) {
                 Swerve::publish('e', "p$i");
             }
@@ -410,17 +412,44 @@ test('Swerve refuses topics outside 1 to 255 bytes, null, a message over 128 KiB
 
         return false;
     };
-    expect($refused(fn () => Swerve::publishOrdered('', 'x')))->toBeTrue();
-    expect($refused(fn () => Swerve::publishOrdered(str_repeat('t', 256), 'x')))->toBeTrue();
-    expect($refused(fn () => Swerve::publishOrdered('t', null)))->toBeTrue();
-    expect($refused(fn () => Swerve::publishOrdered('t', str_repeat('x', 1 << 17))))->toBeTrue();
-    expect($refused(fn () => Swerve::subscribeOrdered('')))->toBeTrue();
-    expect($refused(fn () => Swerve::subscribeOrdered(str_repeat('t', 256))))->toBeTrue();
+    expect($refused(fn () => (new OrderedChannel(''))->write('x')))->toBeTrue();
+    expect($refused(fn () => (new OrderedChannel(str_repeat('t', 256)))->write('x')))->toBeTrue();
+    expect($refused(fn () => (new OrderedChannel('t'))->write(null)))->toBeTrue();
+    expect($refused(fn () => (new OrderedChannel('t'))->write(str_repeat('x', 1 << 17))))->toBeTrue();
+    expect($refused(fn () => (new OrderedChannel(''))->subscribe()))->toBeTrue();
+    expect($refused(fn () => (new OrderedChannel(str_repeat('t', 256)))->subscribe()))->toBeTrue();
     foreach (["\0t", "\0o" . str_repeat('a', 64)] as $topic) {
         expect($refused(fn () => Swerve::publish($topic, 'x')))->toBeTrue();
         expect($refused(fn () => Swerve::subscribe($topic)))->toBeTrue();
-        expect($refused(fn () => Swerve::publishOrdered($topic, 'x')))->toBeTrue();
-        expect($refused(fn () => Swerve::subscribeOrdered($topic)))->toBeTrue();
+        expect($refused(fn () => (new OrderedChannel($topic))->write('x')))->toBeTrue();
+        expect($refused(fn () => (new OrderedChannel($topic))->subscribe()))->toBeTrue();
     }
-    expect($refused(fn () => Swerve::publishOrdered(str_repeat('t', 255), 'x')))->toBeFalse(); // the longest topic
+        expect($refused(fn () => (new OrderedChannel(str_repeat('t', 255)))->write('x')))->toBeFalse(); // the longest topic
+    expect($refused(fn () => new OrderedChannel("\0t")))->toBeFalse(); // a name is checked when written or subscribed to
+});
+
+test('foreach over an OrderedChannel subscribes at the foreach', function () {
+    $got = phasync::run(function () {
+        $channel = new OrderedChannel('f');
+        $channel->write('before'); // nobody subscribes yet
+        $reader = phasync::go(static function () use ($channel) {
+            $got = [];
+            foreach ($channel as $message) {
+                $got[] = $message;
+                if (2 === count($got)) {
+                    break;
+                }
+            }
+
+            return $got;
+        });
+        phasync::sleep(0.01); // the reader is in its foreach
+        $channel->write('one');
+        $channel->write('two');
+
+        return phasync::await($reader);
+    });
+
+    expect($got)->toBe(['one', 'two']);
+    expect(Topics::active())->toBe([]);
 });

@@ -4,7 +4,6 @@ namespace Swerve;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
-use Swerve\Util\OrderedLog;
 use Swerve\Util\Topics;
 
 /**
@@ -90,47 +89,7 @@ final class Swerve
         return new Subscription($topic, $maxLag, $heartbeat);
     }
 
-    /**
-     * Like publish(), to the ordered subscribers of $topic, see subscribeOrdered(): the message
-     * is appended to the topic's log on disk, which is how they get one order. A separate
-     * namespace from publish(): plain subscribers do not see it, and ordered ones do not see
-     * publish(). While the topic has no ordered subscriber anywhere, nothing is written and the
-     * message is dropped, as publish() does.
-     *
-     * @throws \InvalidArgumentException as publish() does, and for a topic starting with "\0"
-     * @throws \LogicException            while the application loads: the worker serves after that
-     * @throws \JsonException            for a value JSON can't express
-     */
-    public static function publishOrdered(string $topic, mixed $message): void
-    {
-        self::refuseInternal($topic);
-        OrderedLog::publish($topic, $message);
-    }
-
-    /**
-     * Like subscribe(), to what publishOrdered() appends to the topic's log: every ordered
-     * subscriber, in every worker, receives the messages in one and the same order, and each
-     * publisher's own messages keep theirs.
-     *
-     *     foreach (Swerve::subscribeOrdered('ledger') as $entry) { ... }
-     *
-     * A message appended is not lost to a worker dying. Not delivered: messages published while
-     * there was no ordered subscriber (nobody appends then), and messages older than the
-     * retention of about 30 s: a subscriber that falls that far behind gets a
-     * SubscriberLagException. A worker is woken by a datagram per message, which may be dropped;
-     * it looks at the log at least every second. See docs/publish-subscribe.md.
-     *
-     * @throws \InvalidArgumentException for a topic of 0 or over 255 bytes, or starting with "\0"
-     * @throws \LogicException           while the application loads: the worker serves after that
-     */
-    public static function subscribeOrdered(string $topic, float $maxLag = 30.0, ?float $heartbeat = null): Subscription
-    {
-        self::refuseInternal($topic);
-
-        return OrderedLog::subscribe($topic, $maxLag, $heartbeat);
-    }
-
-    /** Topics starting with "\0" are swerve's own: the ordered log's channels, among others. */
+    /** Topics starting with "\0" are swerve's own: the ordered log's channels, among others (see OrderedChannel). */
     private static function refuseInternal(string $topic): void
     {
         if (\str_starts_with($topic, "\0")) {

@@ -89,7 +89,7 @@ final class Topics
     }
 
     /**
-     * What publish() sends and publishOrdered() writes: $message as JSON, after the checks of
+     * What publish() sends and OrderedChannel::write() writes: $message as JSON, after the checks of
      * the topic and the message.
      */
     public static function encode(string $topic, mixed $message): string
@@ -120,7 +120,7 @@ final class Topics
 
             return;
         }
-        if ('' !== $bitmap = self::bitmap('publish', $topic)) {
+        if ('' !== $bitmap = self::bitmap('Swerve::publish', $topic)) {
             self::fanOut($topic, $message, $bitmap);
         }
     }
@@ -132,7 +132,7 @@ final class Topics
     public static function bitmap(string $caller, string $topic): string
     {
         if (!Cache::$listening) {
-            throw new \LogicException("Swerve::$caller() is there once the worker serves, not while swerve.php loads");
+            throw new \LogicException("$caller() is there once the worker serves, not while swerve.php loads");
         }
 
         return self::$bitmaps->get($topic) ?? self::fetch($topic);

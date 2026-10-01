@@ -9,7 +9,7 @@ use Swerve\Cache;
 use Swerve\Subscription;
 
 /**
- * The log behind Swerve::publishOrdered() and Swerve::subscribeOrdered(): per topic, files in a
+ * The log behind OrderedChannel: per topic, files in a
  * directory the master made before it forked the workers (see directory()), appended to by every
  * worker with one write() on an O_APPEND descriptor. The kernel serializes appends to a file, so
  * the order of the frames in it is the one order every ordered subscriber sees. A frame is the
@@ -103,7 +103,7 @@ final class OrderedLog
             return;
         }
         $wake = self::WAKE . $id;
-        if ('' === $bitmap = Topics::bitmap('publishOrdered', $wake)) {
+        if ('' === $bitmap = Topics::bitmap('OrderedChannel::write', $wake)) {
             return; // no ordered subscriber anywhere: nobody appends
         }
         $bucket = self::bucket(self::now());
@@ -134,7 +134,7 @@ final class OrderedLog
             throw new \InvalidArgumentException('A topic is 1 to ' . Topics::MAX_TOPIC . ' bytes, not ' . \strlen($topic));
         }
         if (null !== Topics::$toMaster && !Cache::$listening) {
-            throw new \LogicException('Swerve::subscribeOrdered() is there once the worker serves, not while swerve.php loads');
+            throw new \LogicException('OrderedChannel::subscribe() is there once the worker serves, not while swerve.php loads');
         }
         $id           = \hash('sha256', $topic);
         $subscription = new Subscription(self::MESSAGES . $id, $maxLag, $heartbeat);

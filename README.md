@@ -354,8 +354,9 @@ foreach (Swerve::subscribe('chat') as $message) {
   nothing sent before it. Swerve is one machine; across machines, use Redis, NATS or the like.
 - A subscription ends when its last reference goes: a `break`, the variable going out of scope,
   the request's coroutine ending. A topic costs nothing in a worker without subscribers.
-- `Swerve::publishOrdered('ledger', $m)` and `Swerve::subscribeOrdered('ledger')` give every
-  ordered subscriber, in every worker, the same order, apart from the plain topics of that name.
+- `new \Swerve\OrderedChannel('ledger')` is for many publishers that need one common order: its
+  `write()` and `subscribe()` (or `foreach ($channel as $m)`) give every subscriber, in every
+  worker, the same order, apart from the plain topic of that name.
   The workers append to a log file in the master's temporary directory, and a message that was
   appended survives the death of its worker. Files are kept for about 30 s, a subscriber further
   behind gets a `SubscriberLagException`, and nothing is written while nobody subscribes.

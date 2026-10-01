@@ -940,12 +940,12 @@ return new class($version) implements RequestHandlerInterface {
                 return new Response(200, ['Content-Type' => 'text/event-stream'], $out);
             })(),
             '/sse-live'       => new Response(200, [], (string) $this->sseLive),
-            // Swerve::subscribe() (?ordered=1: subscribeOrdered()) as Server-Sent Events: "ready <pid>"
+            // Swerve::subscribe() (?ordered=1: an OrderedChannel) as Server-Sent Events: "ready <pid>"
             // once subscribed, then ?n= messages of ?topic=; ?maxlag= seconds, ?stall= seconds before
             // the first is read; "lag" if the subscription throws SubscriberLagException
             '/subscribe'      => (static function () use ($query) {
                 $maxLag       = (float) ($query['maxlag'] ?? 30);
-                $subscription = isset($query['ordered']) ? Swerve::subscribeOrdered($query['topic'], $maxLag) : Swerve::subscribe($query['topic'], $maxLag);
+                $subscription = isset($query['ordered']) ? (new \Swerve\OrderedChannel($query['topic']))->subscribe($maxLag) : Swerve::subscribe($query['topic'], $maxLag);
                 $out          = new UnbufferedStream(65536, PHP_FLOAT_MAX);
                 $out->append('data: ready ' . \getmypid() . "\n\n");
                 phasync::go(static function () use ($subscription, $out, $query) {
@@ -975,18 +975,18 @@ return new class($version) implements RequestHandlerInterface {
                 return new Response(200, [], 'published');
             })(),
             // ?count= messages "<?id>:<i>:" and ?size= (0) more bytes to ?topic=, ?sleep= ms (0.5) apart, with
-            // publishOrdered() for ?ordered=1; answers the pid
+            // an OrderedChannel for ?ordered=1; answers the pid
             '/publish-seq'    => (static function () use ($query) {
                 for ($i = 0; $i < (int) $query['count']; ++$i) {
                     $message = $query['id'] . ':' . $i . ':' . \str_repeat((string) ($i % 10), (int) ($query['size'] ?? 0));
-                    isset($query['ordered']) ? Swerve::publishOrdered($query['topic'], $message) : Swerve::publish($query['topic'], $message);
+                    isset($query['ordered']) ? (new \Swerve\OrderedChannel($query['topic']))->write($message) : Swerve::publish($query['topic'], $message);
                     phasync::sleep((float) ($query['sleep'] ?? 0.5) / 1000);
                 }
 
                 return new Response(200, [], (string) \getmypid());
             })(),
             '/publish-ordered' => (static function () use ($query) {
-                Swerve::publishOrdered($query['topic'], $query['m']);
+                (new \Swerve\OrderedChannel($query['topic']))->write($query['m']);
 
                 return new Response(200, [], 'published');
             })(),
