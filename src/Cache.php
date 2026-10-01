@@ -11,9 +11,11 @@ use Swerve\Util\Topics;
  * The cache every worker shares, from Swerve::cache(): a PSR-16 cache held by the master
  * process, the least recently used entries evicted past --cache-size.
  *
- *     $cache = Swerve::cache();
- *     $user  = $cache->get("user:$id") ?? load_user($id);
- *     $cache->set("user:$id", $user, 60);
+ * ```php
+ * $cache = Swerve::cache();
+ * $user  = $cache->get("user:$id") ?? load_user($id);
+ * $cache->set("user:$id", $user, 60);
+ * ```
  *
  * Two layers. Each worker keeps what it read (and what it found missing) in a local layer of
  * LOCAL_BYTES, so a repeated read costs no trip to the master. Writes go to the master, which
@@ -28,14 +30,32 @@ use Swerve\Util\Topics;
  * moment in every layer (the monotonic clock is the machine's). The contents last as long as
  * the master: a rolling reload keeps them, a restart empties them. Without a master (the
  * application served by something other than swerve's workers), the cache is the process's own.
+ *
+ * It needs the master, so a read that has to ask it, and every write, throw a `LogicException`
+ * while `swerve.php` loads: the worker serves after that. A key is a non-empty string without
+ * `{}()/\@:`, else a {@see CacheKeyException} is thrown.
+ *
+ * @see Swerve::cache
+ * @see Swerve::claim
+ * @see Swerve\CacheKeyException
  */
 final class Cache implements CacheInterface
 {
-    /** Internal topics: requests and replies between a worker and the master; keys to forget. */
-    public const TOPIC  = "\0cache";
+    /**
+     * The internal topic of the requests and replies between a worker and the master.
+     *
+     * @internal
+     */
+    public const TOPIC = "\0cache";
+
+    /**
+     * The internal topic on which the master tells the workers which keys to forget.
+     *
+     * @internal
+     */
     public const FORGET = "\0cache-forget";
 
-    /** A worker's local layer. */
+    /** Bytes of a worker's local layer. */
     public const LOCAL_BYTES = 8 << 20;
 
     private static ?self $instance = null;
@@ -59,20 +79,46 @@ final class Cache implements CacheInterface
         $this->layer = new LruCache(maxBytes: null === Topics::$toMaster ? 64 << 20 : self::LOCAL_BYTES);
     }
 
+    /**
+     * The cache of this process: the one {@see Swerve::cache()} returns.
+     *
+     * @see Swerve::cache
+     */
     public static function instance(): self
     {
         return self::$instance ??= new self();
     }
 
+    /**
+     * The value stored under `$key`, or `$default` when there is none or it has expired.
+     *
+     * ```php
+     * $user = Swerve::cache()->get("user:$id") ?? load_user($id);
+     * ```
+     *
+     * @throws CacheKeyException for an invalid key
+     *
+     * @see Cache::set
+     */
     public function get(string $key, mixed $default = null): mixed
     {
         return $this->getMultiple([$key], $default)[$key];
     }
 
     /**
+     * The values of `$keys`, by key: `$default` for those missing or expired.
+     *
+     * ```php
+     * ['a' => $a, 'b' => $b] = Swerve::cache()->getMultiple(['a', 'b']);
+     * ```
+     *
      * @param iterable<string> $keys
      *
      * @return array<string, mixed>
+     *
+     * @throws CacheKeyException for an invalid key
+     *
+     * @see Cache::setMultiple
      */
     public function getMultiple(iterable $keys, mixed $default = null): array
     {
@@ -84,18 +130,51 @@ final class Cache implements CacheInterface
         return $values;
     }
 
+    /**
+     * Whether a value is stored under `$key` and has not expired.
+     *
+     * @throws CacheKeyException for an invalid key
+     */
     public function has(string $key): bool
     {
         return '' !== $this->fetch(self::keys([$key]))[$key];
     }
 
+    /**
+     * Store `$value` under `$key` for every worker, for `$ttl` seconds or until evicted.
+     *
+     * The value is serialized in the calling worker. Once this returns, every worker has been told to
+     * forget the key and fetches the new value when it next reads it.
+     *
+     * ```php
+     * Swerve::cache()->set("user:$id", $user, 60);
+     * ```
+     *
+     * @param int|\DateInterval|null $ttl seconds, an interval, or null for no expiry; zero or less deletes the key
+     *
+     * @return bool false when the value is larger than the cache holds
+     *
+     * @throws CacheKeyException for an invalid key
+     * @throws \LogicException   while the application loads: the worker serves after that
+     *
+     * @see Cache::get
+     * @see Cache::delete
+     */
     public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null): bool
     {
         return $this->setMultiple([$key => $value], $ttl);
     }
 
     /**
+     * Store several values, by key, with one `$ttl`, as {@see Cache::set()} does.
+     *
      * @param iterable<string, mixed> $values
+     * @param int|\DateInterval|null  $ttl    seconds, an interval, or null for no expiry; zero or less deletes the keys
+     *
+     * @return bool false when a value is larger than the cache holds
+     *
+     * @throws CacheKeyException for an invalid key
+     * @throws \LogicException   while the application loads: the worker serves after that
      */
     public function setMultiple(iterable $values, null|int|\DateInterval $ttl = null): bool
     {
@@ -113,19 +192,37 @@ final class Cache implements CacheInterface
         return $this->call(['set', $items, $ttl]);
     }
 
+    /**
+     * Remove `$key` from the cache of every worker.
+     *
+     * @return bool true, also when there was nothing to remove
+     *
+     * @throws CacheKeyException for an invalid key
+     * @throws \LogicException   while the application loads: the worker serves after that
+     */
     public function delete(string $key): bool
     {
         return $this->deleteMultiple([$key]);
     }
 
     /**
+     * Remove several keys, as {@see Cache::delete()} does.
+     *
      * @param iterable<string> $keys
+     *
+     * @throws CacheKeyException for an invalid key
+     * @throws \LogicException   while the application loads: the worker serves after that
      */
     public function deleteMultiple(iterable $keys): bool
     {
         return $this->call(['delete', self::keys($keys)]);
     }
 
+    /**
+     * Remove everything from the cache of every worker.
+     *
+     * @throws \LogicException while the application loads: the worker serves after that
+     */
     public function clear(): bool
     {
         return $this->call(['clear']);
@@ -137,6 +234,8 @@ final class Cache implements CacheInterface
      * that the writer, too, hears of it before its reply.
      *
      * @param \Closure(?list<string> $keys): void $forget
+     *
+     * @internal
      */
     public static function serve(LruCache $store, string $message, \Closure $forget): string
     {
@@ -152,6 +251,8 @@ final class Cache implements CacheInterface
 
     /**
      * In a worker: forget keys, as the master says after a write; null forgets everything.
+     *
+     * @internal
      */
     public static function forget(string $message): void
     {
@@ -172,6 +273,8 @@ final class Cache implements CacheInterface
     /**
      * In a worker: a reply from the master. What it fetched is stored in the local layer now,
      * in the order of the master's messages, then the caller waiting for it wakes.
+     *
+     * @internal
      */
     public static function reply(string $message): void
     {

@@ -11,8 +11,9 @@ use phasync\Psr\Response;
 use phasync\Psr\StreamFactory;
 
 /**
- * Serve the files of a directory, and pass every other request on: `--public=<dir>`, or as
- * middleware of your own, `new StaticFiles(__DIR__ . '/public')`.
+ * PSR-15 middleware that serves the files of a directory and passes every other request on.
+ *
+ * It is what `--public=<dir>` installs; use it as middleware of your own for the same behaviour.
  *
  * A GET or HEAD request whose path names a file below the directory gets that file: streamed,
  * with its Content-Type (by extension), Content-Length, Last-Modified and ETag; `304 Not
@@ -24,6 +25,12 @@ use phasync\Psr\StreamFactory;
  * directory (`..`, a symlink pointing outside it), a name starting with a dot (`.env`,
  * `.git/`; `.well-known/` is served), a PHP file (`.php`, `.phtml`, `.phar`, `.inc`: a source is
  * never sent), and a directory without index.html. Nothing is ever listed.
+ *
+ * ```php
+ * $app->add(new Swerve\StaticFiles(__DIR__ . '/public'));   // Slim
+ * ```
+ *
+ * @see Swerve\Dispatcher
  */
 final class StaticFiles implements MiddlewareInterface
 {
@@ -42,7 +49,15 @@ final class StaticFiles implements MiddlewareInterface
     private readonly string $root;
 
     /**
-     * @throws \InvalidArgumentException when $directory is not a directory
+     * Serve the files below `$directory`.
+     *
+     * ```php
+     * $files = new StaticFiles(__DIR__ . '/public');
+     * ```
+     *
+     * @param string $directory the document root; resolved to its real path now
+     *
+     * @throws \InvalidArgumentException when `$directory` is not a directory
      */
     public function __construct(string $directory)
     {
@@ -53,6 +68,14 @@ final class StaticFiles implements MiddlewareInterface
         $this->root = $root;
     }
 
+    /**
+     * The file the request names, or the handler's response when it names none that is served.
+     *
+     * @param ServerRequestInterface  $request the request to answer from the directory, if it names a file
+     * @param RequestHandlerInterface $handler the application: gets every request this does not serve
+     *
+     * @return ResponseInterface the file (200, 206, 304, 416), a 301 to a directory's trailing slash, or the handler's response
+     */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $method = $request->getMethod();

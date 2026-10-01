@@ -6,12 +6,15 @@ use phasync;
 use Swerve\Util\System;
 
 /**
- * A handle on a name that one holder at a time can hold across the whole server, from
- * Swerve::claim(). The handle claims nothing until acquire().
+ * A handle on a name that one holder at a time can hold across the whole server, from {@see Swerve::claim()}.
  *
- *     if ($claim = Swerve::claim('nightly-report')->acquire()) {
- *         ...
- *     }                                     // released when $claim goes out of scope
+ * The handle claims nothing until `acquire()`.
+ *
+ * ```php
+ * if ($claim = Swerve::claim('nightly-report')->acquire()) {
+ *     ...
+ * }                                     // released when $claim goes out of scope
+ * ```
  *
  * A claim is a file in a temporary directory (below $SWERVE_TMPDIR, by default the system's)
  * that the master creates before it forks the workers: a hard link to a file with the pid of the
@@ -23,6 +26,18 @@ use Swerve\Util\System;
  * is not held up. Names are a namespace of their own, apart from the cache's keys. Without a
  * master it works the same, in a directory of the process that dies with it: two handles
  * conflict, also in one process.
+ *
+ * ```php
+ * $claim = Swerve::claim('import');
+ * if ($claim->acquire(timeout: 5.0)) {      // tries every 20 ms for up to 5 s
+ *     import_feed();
+ *     $claim->release();
+ * }
+ * ```
+ *
+ * @see Swerve::claim
+ * @see Swerve::cache
+ * @see Swerve::draining
  */
 final class Claim
 {
@@ -37,6 +52,13 @@ final class Claim
     private readonly string $path;
     private bool $held = false;
 
+    /**
+     * A handle on `$name`; {@see Swerve::claim()} is how an application gets one.
+     *
+     * @param string $name any non-empty string
+     *
+     * @throws \InvalidArgumentException for an empty name
+     */
     public function __construct(public readonly string $name)
     {
         if ('' === $name) {
@@ -72,7 +94,14 @@ final class Claim
         }
     }
 
-    /** Whether nobody holds the name now; nothing is claimed. */
+    /**
+     * Whether nobody holds the name now; nothing is claimed.
+     *
+     * Another worker may take the name before the caller acts on the answer: use
+     * {@see Claim::acquire()} to take it.
+     *
+     * @see Claim::held
+     */
     public function available(): bool
     {
         \clearstatcache(true, $this->path);
@@ -81,9 +110,23 @@ final class Claim
     }
 
     /**
-     * Take the name, trying every 20 ms for up to $timeout seconds when another holds it:
-     * whoever tries first when it frees gets it, in no order. Returns this handle when it holds
-     * the name, also if it did already; null when it could not.
+     * Take the name, trying every 20 ms for up to `$timeout` seconds when another holds it.
+     *
+     * Whoever tries first when the name frees gets it, in no order. Returns this handle when it
+     * holds the name, also if it did already; null when it could not.
+     *
+     * ```php
+     * if ($leader = Swerve::claim('leader')->acquire()) {
+     *     // this worker holds the name until $leader is released or destroyed
+     * }
+     * ```
+     *
+     * @param float $timeout seconds to keep trying while another holds the name; 0 tries once
+     *
+     * @return static|null this handle, or null when the name is held by another
+     *
+     * @see Claim::release
+     * @see Claim::available
      */
     public function acquire(float $timeout = 0.0): ?static
     {
@@ -101,13 +144,19 @@ final class Claim
         return $this;
     }
 
-    /** Whether this handle holds the name. */
+    /** Whether this handle holds the name: it was acquired and not released. */
     public function held(): bool
     {
         return $this->held;
     }
 
-    /** Give the claim up, so that another can take it. */
+    /**
+     * Give the claim up, so that another can take it.
+     *
+     * Does nothing when this handle holds nothing.
+     *
+     * @see Claim::acquire
+     */
     public function release(): void
     {
         if ($this->held) {

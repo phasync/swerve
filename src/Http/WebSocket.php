@@ -14,17 +14,19 @@ use phasync\Util\Event;
 /**
  * A WebSocket connection (RFC 6455), server side.
  *
- *     return WebSocket::from($request, function (WebSocket $ws) {
- *         $ws->onMessage->listen(function (string $data) {      // inbound: events
- *             Swerve::publish('chat', $data);
- *         });
- *         foreach (Swerve::subscribe('chat') as $out) {         // outbound: plain sequential code
- *             if ('end' === $out) {
- *                 return;                                       // returning closes the socket (1000)
- *             }
- *             $ws->send($out);
- *         }
+ * ```php
+ * return WebSocket::from($request, function (WebSocket $ws) {
+ *     $ws->onMessage->listen(function (string $data) {      // inbound: events
+ *         Swerve::publish('chat', $data);
  *     });
+ *     foreach (Swerve::subscribe('chat') as $out) {         // outbound: plain sequential code
+ *         if ('end' === $out) {
+ *             return;                                       // returning closes the socket (1000)
+ *         }
+ *         $ws->send($out);
+ *     }
+ * });
+ * ```
  *
  * The callback runs in a coroutine of its own after the handshake; the connection closes when
  * it returns (1000), or throws (1011, and swerve logs the exception). end() closes it early. A
@@ -39,26 +41,56 @@ use phasync\Util\Event;
  * The pull style is the alternative to $onMessage, and the two don't mix: receive() throws
  * while $onMessage has listeners.
  *
- *     foreach ($ws as $message) {               // ends when the connection closes
- *         $ws->send("echo: $message");
- *     }
+ * ```php
+ * foreach ($ws as $message) {               // ends when the connection closes
+ *     $ws->send("echo: $message");
+ * }
+ * ```
  *
- * send() and end() may be called from any coroutine.
+ * `send()` and `end()` may be called from any coroutine.
+ *
+ * @see Swerve\Http\ProtocolUpgrade
+ * @see Swerve::publish
+ * @see Swerve::subscribe
  */
 class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
 {
     /** The largest message received; a larger one closes the connection with 1009. */
     public const MAX_MESSAGE = 1 << 20;
 
+    /** Seconds between the pings the server sends to every open connection. */
     public const PING_INTERVAL = 15.0;
 
     /** Messages received and not yet taken by receive(); the reader waits while there are INBOX. */
     public const INBOX = 64;
 
-    /** Called with (string $data, bool $binary) for each text or binary message received. */
+    /**
+     * Called with `(string $data, bool $binary)` for each text or binary message received.
+     *
+     * The listeners are called one at a time, in the order the messages arrived, in the
+     * coroutine that reads the connection: a slow listener holds back the reading. A listener
+     * that throws closes the connection with 1011 and the exception is logged.
+     *
+     * ```php
+     * $ws->onMessage->listen(function (string $data, bool $binary) use ($ws) {
+     *     $ws->send("got " . strlen($data) . " bytes");
+     * });
+     * ```
+     */
     public readonly Event $onMessage;
 
-    /** Called once with (int $code, string $reason) when the connection has ended, see end(). */
+    /**
+     * Called once with `(int $code, string $reason)` when the connection has ended, whichever side ended it.
+     *
+     * The code is the client's (1005 when it sent none), the one given to {@see WebSocket::end()},
+     * 1011 after an exception, or 1006 when the connection ended without a close frame.
+     *
+     * ```php
+     * $ws->onClose->listen(function (int $code, string $reason) {
+     *     Swerve::log()->info('websocket closed: {code} {reason}', ['code' => $code, 'reason' => $reason]);
+     * });
+     * ```
+     */
     public readonly Event $onClose;
 
     private string $buffer = '';
@@ -90,11 +122,21 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
     }
 
     /**
-     * The next text or binary message, or null once the connection is closed: by the client, by
-     * end(), because the client broke the protocol, or because swerve drains (a shutdown or
-     * reload), which closes it with 1001.
+     * The next text or binary message, or null once the connection is closed.
      *
-     * @throws \LogicException while $onMessage has listeners: they get the messages
+     * Closed by the client, by `end()`, because the client broke the protocol, or because swerve
+     * drains (a shutdown or reload), which closes it with 1001. Waits for a message. It is the
+     * alternative to `$onMessage`, and the two don't mix.
+     *
+     * ```php
+     * while (null !== ($message = $ws->receive())) {
+     *     $ws->send(strrev($message));
+     * }
+     * ```
+     *
+     * @throws \LogicException while `$onMessage` has listeners: they get the messages
+     *
+     * @see WebSocket::isBinary
      */
     public function receive(): ?string
     {
@@ -190,7 +232,10 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
     }
 
     /**
-     * The messages received, until the connection closes.
+     * The messages received, until the connection closes: `foreach ($ws as $message)`.
+     *
+     * Each step is a {@see WebSocket::receive()}, so it throws the same `LogicException` while
+     * `$onMessage` has listeners.
      *
      * @return \Generator<int, string>
      */
@@ -201,28 +246,69 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
         }
     }
 
-    /** Whether the message receive() returned last was binary, rather than text. */
+    /**
+     * Whether the message `receive()` returned last was binary, rather than text.
+     *
+     * @see WebSocket::receive
+     */
     public function isBinary(): bool
     {
         return $this->binary;
     }
 
-    /** Send a text message, which must be UTF-8; nothing once the connection is closed. */
+    /**
+     * Send a text message; nothing happens once the connection is closed.
+     *
+     * May be called from any coroutine. Waits while the client reads slowly, and gives the
+     * client up after `ProtocolUpgrade::WRITE_TIMEOUT` seconds.
+     *
+     * ```php
+     * $ws->send(json_encode(['type' => 'welcome']));
+     * ```
+     *
+     * @param string $text the message, which must be UTF-8
+     *
+     * @see WebSocket::sendBinary
+     */
     public function send(string $text): void
     {
         $this->frame(1, $text);
     }
 
-    /** Send a binary message; nothing once the connection is closed. */
+    /**
+     * Send a binary message; nothing happens once the connection is closed.
+     *
+     * ```php
+     * $ws->sendBinary(pack('N', 42));
+     * ```
+     *
+     * @param string $data the message
+     *
+     * @see WebSocket::send
+     */
     public function sendBinary(string $data): void
     {
         $this->frame(2, $data);
     }
 
     /**
-     * Say goodbye, once: receive() returns null from then on, and the connection closes after
-     * the client's own goodbye, or a moment without one. $onClose gets $code and $reason, unless
-     * the client said goodbye first.
+     * Close the connection: send a close frame with `$code` and `$reason`, once.
+     *
+     * `receive()` returns null from then on, and the connection closes after the client's own
+     * goodbye, or a moment without one. `$onClose` fires once, with the code and reason of whoever
+     * said goodbye first. Returning from the callback does the same with 1000. May be called from
+     * any coroutine.
+     *
+     * ```php
+     * $ws->onMessage->listen(function (string $data) use ($ws) {
+     *     if ('bye' === $data) {
+     *         $ws->end(1000, 'bye');
+     *     }
+     * });
+     * ```
+     *
+     * @param int    $code   the close code (RFC 6455, section 7.4): 1000 is a normal closure
+     * @param string $reason the close frame's reason text
      */
     public function end(int $code = 1000, string $reason = ''): void
     {
@@ -243,6 +329,11 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
         }
     }
 
+    /**
+     * Whether the connection is closed: `end()` was called, the client said goodbye, or the connection ended.
+     *
+     * @see WebSocket::end
+     */
     public function isClosed(): bool
     {
         return $this->closed;
@@ -262,8 +353,9 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
     }
 
     /**
-     * Read the connection while the callback runs in a coroutine of its own: messages go to the
-     * $onMessage listeners, or to the inbox for receive() when there are none; pings are
+     * Read the connection while the callback runs in a coroutine of its own.
+     *
+     * Messages go to the `$onMessage` listeners, or to the inbox for receive() when there are none; pings are
      * answered, and when the connection ends (the client left or closed, or swerve drains) the
      * callback is cancelled if it still runs. So a callback that only sends, such as one
      * forwarding a subscription, ends when its client is gone.

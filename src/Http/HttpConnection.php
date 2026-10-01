@@ -36,10 +36,10 @@ use Swerve\ResponderInterface;
  * frame a body two ways (request smuggling) or doesn't parse is refused with a 4xx/5xx and the
  * connection closes.
  *
- * The request's getParsedBody() is always null, since the body is never read for the
- * application: parse it from the body stream, as Slim's BodyParsingMiddleware does. A response
- * body must be readable: Slim's NonBufferedBody echoes to PHP's output instead, which only a
- * classic SAPI sends to the client, so it gets 500 here.
+ * The request's getParsedBody() is a POST form's fields, parsed when first asked for, and null
+ * for any other body: parse that from the body stream, as Slim's BodyParsingMiddleware does.
+ * A response body must be readable: Slim's NonBufferedBody echoes to PHP's output instead,
+ * which only a classic SAPI sends to the client, so it gets 500 here.
  *
  * @internal
  */
