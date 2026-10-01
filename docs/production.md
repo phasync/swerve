@@ -10,6 +10,9 @@ composer require phasync/phasync-ext
 vendor/bin/swerve --version     # ... phasync-ext 0.5.0
 ```
 
+Swerve runs without it, which is fine for development; the master logs a notice at start when it
+is not loaded.
+
 With it:
 
 - A worker waits on its sockets with epoll, and is not limited to about 1,000 open connections

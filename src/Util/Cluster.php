@@ -143,6 +143,9 @@ final class Cluster
         $this->cache = new LruCache(maxBytes: $cacheBytes);
         $this->masterPid = \posix_getpid();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
+        if (!\extension_loaded('phasync')) {
+            $this->logger->notice('phasync-ext is not loaded: fine for development, but in production it lifts the limit of about 960 connections per worker and speeds up waiting (composer require phasync/phasync-ext)');
+        }
         if ('0' === \trim((string) @\file_get_contents('/proc/sys/net/ipv4/tcp_migrate_req'))) {
             $this->logger->info('net.ipv4.tcp_migrate_req=0: connections queued on a closing listener are reset during reload/recycle; set it to 1 for lossless handovers');
         }

@@ -194,3 +194,30 @@ test('WebSocket: quiet connections are pinged every PING_INTERVAL seconds, by on
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
 });
+
+test('WebSocket: a subscription loop in a PSR-15 handler forwards messages and closes the socket on an end message', function () {
+    [$process, $addr, $log] = swerve_start(workers: 2);
+    try {
+        $clients = [];
+        for ($i = 0; $i < 4; ++$i) {
+            $clients[] = ws_connect($addr, '/websocket-feed');
+        }
+        usleep(200_000); // every callback subscribed
+        expect(probe($addr, '/publish?topic=feed&m=one'))->toBe('published');
+        expect(probe($addr, '/publish-json?topic=feed&m=two'))->toBe('published');
+        foreach ($clients as $conn) {
+            expect(ws_read($conn))->toBe([1, 'one']);
+            expect(json_decode(ws_read($conn)[1], true))->toBe(['m' => 'two', 'n' => 1, 'list' => [1, 2]]);
+        }
+        expect(probe($addr, '/publish-end?topic=feed'))->toBe('published');
+        foreach ($clients as $conn) {
+            expect(ws_read($conn))->toBe([8, pack('n', 1000)]);
+            ws_send($conn, 8, pack('n', 1000));
+            expect(fread($conn, 1))->toBe('');
+            fclose($conn);
+        }
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|WARNING)/'))->toBe(0, file_get_contents($log));
+});

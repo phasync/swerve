@@ -432,6 +432,17 @@ return new class($version) implements RequestHandlerInterface {
                     --$this->newsLive;
                 }
             }),
+            // A WebSocket that forwards 'feed' and closes itself on a message saying it ends
+            '/websocket-feed' => WebSocket::from($request, function (WebSocket $ws) {
+                foreach (Swerve::subscribe('feed') as $message) {
+                    if ($message instanceof \Swerve\Util\SealedObject && ($message->end ?? false)) {
+                        $ws->close();
+
+                        return;
+                    }
+                    $ws->send(\is_string($message) ? $message : \json_encode($message));
+                }
+            }),
             '/news-live' => new Response(200, [], \json_encode([\getmypid(), $this->newsLive])),
             // Swerve::cache(): ?k= and ?v= (JSON), ?ttl= seconds; answers with the worker's pid
             '/cache-set' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->set($query['k'], \json_decode($query['v'], true), isset($query['ttl']) ? (int) $query['ttl'] : null)])),
@@ -837,6 +848,11 @@ return new class($version) implements RequestHandlerInterface {
             // A structured message, sent as JSON: ['m' => ?m, 'n' => 1, 'list' => [1, 2]]
             '/publish-json'   => (static function () use ($query) {
                 Swerve::publish($query['topic'], ['m' => $query['m'], 'n' => 1, 'list' => [1, 2]]);
+
+                return new Response(200, [], 'published');
+            })(),
+            '/publish-end'    => (static function () use ($query) {
+                Swerve::publish($query['topic'], ['end' => true]);
 
                 return new Response(200, [], 'published');
             })(),

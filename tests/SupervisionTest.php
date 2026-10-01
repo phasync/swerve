@@ -2008,3 +2008,10 @@ test('a worker\'s accepts leave no error behind for the application\'s shutdown 
     expect($recorded)->not->toBeEmpty();
     expect(\array_filter($recorded))->toBe([]); // phasync/swerve#2: "stream_socket_accept(): Accept failed"
 })->with(['http', 'fastcgi']);
+
+test('startup: the log recommends phasync-ext when it is not loaded, and says nothing when it is', function () {
+    [$process, $addr, $log] = swerve_start(workers: 1);
+    native_stop($process);
+    $notice = '/phasync-ext is not loaded/';
+    expect(log_count($log, $notice))->toBe(extension_loaded('phasync') ? 0 : 1, file_get_contents($log));
+});
