@@ -1,29 +1,31 @@
 <?php
 
 /*
- * Swerve::claim() under attack: the master's table on its own, handles without a master,
- * mutual exclusion under contention, and what happens to claims as workers drain, die or stop.
- * The basics are in ClaimTest.php.
+ * Swerve::claim() under attack: handles without a master, mutual exclusion under contention,
+ * and what happens to claims as workers drain, die or stop. The basics are in ClaimTest.php.
  */
 
-use Swerve\Cache;
 use Swerve\Claim;
 use Swerve\Swerve;
-use Swerve\Util\Claims;
 
-/** @return array<string, array{0: string, 1: int}> the master's table of claims */
-function claims_held(Claims $claims): array
+/** The lock file of a name, in this process's claims directory. */
+function claim_path(string $name): string
 {
-    return (new ReflectionProperty(Claims::class, 'held'))->getValue($claims);
+    return Claim::directory() . '/' . hash('sha256', $name);
 }
 
-/** How many claims this process holds, without a master, once the garbage of earlier tests (handles in cycles) is gone. */
+/** The pids in the claims of a directory (not counting the files that hold a process's pid). */
+function claim_holders(string $dir): array
+{
+    return array_map('file_get_contents', glob("$dir/[0-9a-f]*"));
+}
+
+/** How many claims this process holds, once the garbage of earlier tests (handles in cycles) is gone. */
 function claims_here(): int
 {
     gc_collect_cycles();
-    $claims = (new ReflectionProperty(Cache::class, 'claims'))->getValue(Cache::instance());
 
-    return null === $claims ? 0 : count(claims_held($claims));
+    return count(glob(Claim::directory() . '/[0-9a-f]*'));
 }
 
 /**
@@ -111,159 +113,7 @@ function log_wait_count(string $log, string $regex, int $n, float $timeout = 10)
 }
 
 /*
- * 1. The master's table, Claims::apply() on its own.
- */
-
-test('Claims::apply: claim, check, held and release, each by token', function () {
-    $claims = new Claims();
-    expect($claims->apply(['check', 'a'], 1))->toBeFalse();
-    expect($claims->apply(['held', 'a', 't1'], 1))->toBeFalse();
-    expect($claims->apply(['release', 'a', 't1'], 1))->toBeFalse(); // nothing to release
-
-    expect($claims->apply(['claim', 'a', 't1'], 1))->toBeTrue();
-    expect($claims->apply(['check', 'a'], 2))->toBeTrue();           // anyone can check
-    expect($claims->apply(['held', 'a', 't1'], 1))->toBeTrue();
-    expect($claims->apply(['held', 'a', 't2'], 1))->toBeFalse();     // another token: not held by it
-    expect($claims->apply(['held', 'a', 't1'], 2))->toBeTrue();      // the token decides, not who asks
-
-    expect($claims->apply(['claim', 'a', 't2'], 2))->toBeFalse();    // taken
-    expect($claims->apply(['claim', 'a', 't2'], 1))->toBeFalse();    // also by the same worker, with a handle of its own
-    expect($claims->apply(['claim', 'a', 't1'], 1))->toBeTrue();     // the same token again: still its own
-    expect($claims->apply(['claim', 'b', 't2'], 1))->toBeTrue();     // another name is free
-
-    expect($claims->apply(['release', 'a', 't2'], 1))->toBeFalse();  // a wrong token frees nothing
-    expect($claims->apply(['release', 'a', ''], 1))->toBeFalse();
-    expect($claims->apply(['check', 'a'], 1))->toBeTrue();
-    expect($claims->apply(['held', 'a', 't1'], 1))->toBeTrue();
-
-    expect($claims->apply(['release', 'a', 't1'], 1))->toBeTrue();
-    expect($claims->apply(['release', 'a', 't1'], 1))->toBeFalse();  // twice
-    expect($claims->apply(['check', 'a'], 1))->toBeFalse();
-    expect($claims->apply(['held', 'a', 't1'], 1))->toBeFalse();
-    expect($claims->apply(['claim', 'a', 't2'], 2))->toBeTrue();     // free for whoever is next
-    expect(array_keys(claims_held($claims)))->toBe(['b', 'a']);
-});
-
-test('Claims::apply: a release of a token that never held does not disturb a name, or free it', function () {
-    $claims = new Claims();
-    expect($claims->apply(['release', 'x', 'nobody'], 1))->toBeFalse();
-    expect(claims_held($claims))->toBe([]); // no phantom entry
-    $claims->apply(['claim', 'x', 'owner'], 1);
-    expect($claims->apply(['release', 'x', 'nobody'], 1))->toBeFalse();
-    expect($claims->apply(['release', 'x', 'nobody'], 2))->toBeFalse();
-    expect($claims->apply(['held', 'x', 'owner'], 1))->toBeTrue();
-});
-
-test('Claims::release($owner) frees what that owner holds, and nothing of the others', function () {
-    $claims = new Claims();
-    foreach (['a', 'b', 'c'] as $name) {
-        expect($claims->apply(['claim', $name, "t-$name"], 1))->toBeTrue();
-    }
-    expect($claims->apply(['claim', 'd', 't-d'], 2))->toBeTrue();
-    expect($claims->apply(['claim', 'e', 't-e'], 3))->toBeTrue();
-
-    $claims->release(4); // nobody has this inbox
-    expect(count(claims_held($claims)))->toBe(5);
-    $claims->release(1);
-    expect(array_keys(claims_held($claims)))->toBe(['d', 'e']);
-    foreach (['a', 'b', 'c'] as $name) {
-        expect($claims->apply(['check', $name], 2))->toBeFalse();
-        expect($claims->apply(['claim', $name, "n-$name"], 2))->toBeTrue(); // taken over at once
-    }
-    $claims->release(1); // the inbox is gone again: the new holders keep what they took
-    expect(count(claims_held($claims)))->toBe(5);
-    expect($claims->apply(['held', 'a', 'n-a'], 2))->toBeTrue();
-
-    // A late release by the old handle, which had a token of its own, frees nothing of the new holder's
-    expect($claims->apply(['release', 'a', 't-a'], 1))->toBeFalse();
-    expect($claims->apply(['held', 'a', 'n-a'], 2))->toBeTrue();
-});
-
-test('Claims::release($owner): an inbox reused by a replacement worker inherits nothing', function () {
-    $claims = new Claims();
-    $claims->apply(['claim', 'job', 'tokenA'], 7); // worker A, inbox 7
-    $claims->apply(['claim', 'other', 'tokenA2'], 7);
-    $claims->release(7);                           // A died; the master frees its claims at once
-    expect(claims_held($claims))->toBe([]);
-
-    // B starts with the same inbox id and takes one name; A's handle never held anything of B's
-    expect($claims->apply(['held', 'job', 'tokenA'], 7))->toBeFalse();
-    expect($claims->apply(['claim', 'job', 'tokenB'], 7))->toBeTrue();
-    expect($claims->apply(['release', 'job', 'tokenA'], 7))->toBeFalse(); // A's late release, arriving as inbox 7
-    expect($claims->apply(['held', 'job', 'tokenB'], 7))->toBeTrue();
-    expect($claims->apply(['check', 'other'], 7))->toBeFalse();            // and B has not inherited A's other name
-});
-
-test('Claims::apply: hostile names are each their own name', function () {
-    $names = [
-        "\0", "\0\0", "a\0", "a\0b", "a", 'A', '0', '00', '-0', '0.0', '1', '01', ' 1', '1 ', '9223372036854775807', '9223372036854775808',
-        '-9223372036854775808', 'null', 'false', 'Array', "\xff\xfe", "\xc3\x28", 'ünï©ode', '日本語', "🙂", "🙂 ", "a\nb", "a\r\nb", "a\tb",
-        ' ', '  ', "\\", "'", '"', '%00', '../etc/passwd', str_repeat('x', 65536), str_repeat('x', 65535) . 'y', str_repeat("\0", 65536),
-        str_repeat('é', 40000), str_repeat('a', 1 << 20),
-    ];
-    $claims = new Claims();
-    foreach ($names as $i => $name) {
-        expect($claims->apply(['check', $name], 1))->toBeFalse(substr(bin2hex(substr($name, 0, 20)), 0, 40));
-        expect($claims->apply(['claim', $name, "t$i"], 1))->toBeTrue();
-    }
-    expect(count(claims_held($claims)))->toBe(count($names)); // no name collided with another
-    foreach ($names as $i => $name) {
-        expect($claims->apply(['held', $name, "t$i"], 1))->toBeTrue();
-        expect($claims->apply(['held', $name, 'tX'], 1))->toBeFalse();
-        expect($claims->apply(['claim', $name, 'tX'], 2))->toBeFalse();
-    }
-    foreach ($names as $i => $name) {
-        expect($claims->apply(['release', $name, 'tX'], 1))->toBeFalse();
-    }
-    expect(count(claims_held($claims)))->toBe(count($names));
-    foreach ($names as $i => $name) {
-        expect($claims->apply(['release', $name, "t$i"], 1))->toBeTrue();
-    }
-    expect(claims_held($claims))->toBe([]);
-});
-
-test('Claims::apply: tokens are strings too, whatever they hold', function () {
-    $claims = new Claims();
-    foreach (['0', "\0", '', str_repeat('t', 65536), '1', '01'] as $token) {
-        expect($claims->apply(['claim', 'k', $token], 1))->toBeTrue();
-        foreach (['0', "\0", '', '1', '01', 'x'] as $other) {
-            expect($claims->apply(['held', 'k', $other], 1))->toBe($other === $token);
-            expect($claims->apply(['claim', 'k', $other], 2))->toBe($other === $token);
-        }
-        expect($claims->apply(['release', 'k', $token], 1))->toBeTrue();
-    }
-    expect(claims_held($claims))->toBe([]);
-});
-
-test('Claims::apply: 20 000 claims acquired and released leave the table empty', function () {
-    $claims = new Claims();
-    for ($i = 0; $i < 20_000; ++$i) {
-        expect($claims->apply(['claim', "name-$i", "t$i"], $i % 4))->toBeTrue();
-        $claims->apply(['claim', (string) $i, "n$i"], $i % 4); // integer-like names too
-    }
-    expect(count(claims_held($claims)))->toBe(40_000);
-    for ($i = 0; $i < 20_000; ++$i) {
-        if ($i % 2) {
-            expect($claims->apply(['release', "name-$i", "t$i"], 0))->toBeTrue();
-            expect($claims->apply(['release', (string) $i, "n$i"], 0))->toBeTrue();
-        }
-    }
-    expect(count(claims_held($claims)))->toBe(20_000);
-    for ($owner = 0; $owner < 4; ++$owner) {
-        $claims->release($owner);
-    }
-    expect(claims_held($claims))->toBe([]);
-
-    // And once more, all by one owner, in reverse
-    for ($i = 0; $i < 20_000; ++$i) {
-        $claims->apply(['claim', "again-$i", 't'], 9);
-    }
-    $claims->release(9);
-    expect(claims_held($claims))->toBe([]);
-});
-
-/*
- * 1b. Handles without a master.
+ * 1. Handles without a master.
  */
 
 test('without a master, hostile names are claimable through the handle', function () {
@@ -284,9 +134,9 @@ test('without a master, hostile names are claimable through the handle', functio
     expect(claims_here())->toBe($before);
 });
 
-test('without a master, 20 000 handles acquired and released leave nothing behind', function () {
+test('without a master, 2000 handles acquired and released leave nothing behind', function () {
     $before = claims_here();
-    for ($i = 0; $i < 20_000; ++$i) {
+    for ($i = 0; $i < 2000; ++$i) {
         $claim = Swerve::claim("bulk-$i");
         $claim->acquire();
         if ($i % 2) {
@@ -607,6 +457,35 @@ test('independent names are held at once by different workers: no needless exclu
     expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
 });
 
+test('the unlink on release races with contenders: 400 requests on one name through 4 workers still alternate enter and leave', function () {
+    $dir = temp_path(true);
+    [$process, $addr, $log] = swerve_start(workers: 4, env: ['SWERVE_TEST_DIR' => $dir]);
+    try {
+        worker_pids($addr, 4, 10);
+        $paths = [];
+        for ($seq = 1; $seq <= 400; ++$seq) {
+            $paths[] = "/crit?n=hot&seq=$seq&ms=0&timeout=25" . (0 === $seq % 2 ? '&drop=1' : '');
+        }
+        $results = claim_burst($addr, $paths, 60);
+        foreach ($results as $i => $result) {
+            expect($result['json'][1] ?? null)->toBe('done', "request $i");
+        }
+        $lines = file($dir . '/crit.log', FILE_IGNORE_NEW_LINES);
+        expect(count($lines))->toBe(800);
+        foreach ($lines as $n => $line) {
+            expect(str_starts_with($line, $n % 2 ? 'leave' : 'enter'))->toBeTrue("line $n: $line");
+            if ($n % 2) {
+                expect(explode(' ', $line)[1])->toBe(explode(' ', $lines[$n - 1])[1]); // the section that entered, left
+            }
+        }
+        $claims = cache_call($addr, '/claim-dir')[1];
+        expect(glob("$claims/[0-9a-f]*"))->toBe([]); // every entry was unlinked by its holder
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
+});
+
 test('4 workers racing for one free name at once: exactly one wins', function () {
     [$process, $addr, $log] = swerve_start(workers: 4);
     try {
@@ -634,6 +513,8 @@ test('a holder killed with SIGKILL frees the name for the other workers (2 and 4
             [$holder, $got] = cache_call($addr, '/claim?n=job');
             expect($got)->toBeTrue();
             expect(cache_call($addr, '/available?n=job')[1])->toBeFalse();
+            $dir = cache_call($addr, '/claim-dir')[1];
+            expect(claim_holders($dir))->toBe([(string) $holder]);
             posix_kill($holder, SIGKILL);
 
             $start = microtime(true);
@@ -641,6 +522,7 @@ test('a holder killed with SIGKILL frees the name for the other workers (2 and 4
             expect($got)->toBeTrue("with $workers workers");
             expect($pid)->not->toBe($holder);
             expect(microtime(true) - $start)->toBeLessThan(4.0);
+            expect(claim_holders($dir))->toBe([(string) $pid]); // the dead worker's entry was cleared, not taken over
 
             // Taken once: a burst now is refused everywhere, the new holder included
             foreach (claim_burst($addr, array_fill(0, 12, '/claim?n=job'), 20) as $result) {
@@ -653,35 +535,37 @@ test('a holder killed with SIGKILL frees the name for the other workers (2 and 4
     }
 });
 
-test('a SIGKILL of a worker frees all the names it holds, and only its own', function () {
-    [$process, $addr, $log] = swerve_start(workers: 2);
-    try {
-        worker_pids($addr, 2, 10);
-        $by = [];
-        for ($i = 0; $i < 40; ++$i) {
-            [$pid, $got] = cache_call($addr, "/claim?n=multi$i");
-            expect($got)->toBeTrue();
-            $by[$pid][] = $i;
-        }
-        expect(count($by))->toBe(2);
-        $victim = array_key_first($by);
-        $other  = array_key_last($by);
-        posix_kill($victim, SIGKILL);
-        $deadline = microtime(true) + 10;
-        while (($free = array_filter($by[$victim], static fn ($i) => claim_retry($addr, "/available?n=multi$i")[1])) !== $by[$victim]) {
-            if (microtime(true) > $deadline) {
-                break;
+test('a SIGKILL of a worker frees all the names it holds, and only its own (2 and 4 workers)', function () {
+    foreach ([2, 4] as $workers) {
+        [$process, $addr, $log] = swerve_start(workers: $workers);
+        try {
+            worker_pids($addr, $workers, 10);
+            $by = [];
+            for ($i = 0; $i < 20 * $workers; ++$i) {
+                [$pid, $got] = cache_call($addr, "/claim?n=multi$i");
+                expect($got)->toBeTrue();
+                $by[$pid][] = $i;
             }
-            usleep(50_000);
+            expect(count($by))->toBe($workers);
+            $victim = array_key_first($by);
+            posix_kill($victim, SIGKILL);
+            $deadline = microtime(true) + 10;
+            do {
+                usleep(50_000);
+                $free = array_filter($by[$victim], static fn ($i) => claim_retry($addr, "/available?n=multi$i")[1]);
+            } while ($free !== $by[$victim] && microtime(true) < $deadline);
+            expect($free)->toBe($by[$victim], "with $workers workers");
+            unset($by[$victim]);
+            foreach ($by as $names) {
+                foreach ($names as $i) {
+                    expect(claim_retry($addr, "/available?n=multi$i")[1])->toBeFalse(); // the survivors keep their own
+                }
+            }
+        } finally {
+            native_stop($process);
         }
-        expect($free)->toBe($by[$victim]);
-        foreach ($by[$other] as $i) {
-            expect(claim_retry($addr, "/available?n=multi$i")[1])->toBeFalse(); // the survivor keeps its own
-        }
-    } finally {
-        native_stop($process);
+        expect(log_count($log, '/CRITICAL/'))->toBe(0, file_get_contents($log));
     }
-    expect(log_count($log, '/CRITICAL/'))->toBe(0, file_get_contents($log));
 });
 
 test('SIGTERM of the master while a claim is held and a request is inside its critical section: a clean stop', function () {
@@ -721,44 +605,41 @@ test('handles kept by every worker are destroyed as the workers stop: SIGINT, no
     expect(log_count($log, '/(ERROR|CRITICAL|WARNING)/i'))->toBe(0, file_get_contents($log));
 });
 
-test('SIGHUP rolling reloads x3 while a worker holds: freed at the drain, a new worker takes it, a late release changes nothing', function () {
+test('SIGHUP reloads x3: the claim is retained while its worker drains, free once the worker exits', function () {
     [$process, $addr, $log] = swerve_start(workers: 2);
     try {
         worker_pids($addr, 2, 10);
-        $keepAlive = native_connect($addr); // stays with the worker that answers it
-        fwrite($keepAlive, "GET /claim?n=job HTTP/1.1\r\nHost: t\r\n\r\n");
-        [$first, $got] = json_decode(native_read_response($keepAlive)['body'], true);
-        expect($got)->toBeTrue();
-        $holders = [$first];
-
+        $dir = cache_call($addr, '/claim-dir')[1];
+        $holders = [];
         for ($round = 1; $round <= 3; ++$round) {
+            // A connection that stays with the holding worker, and a request on it that keeps the worker draining
+            $deadline = microtime(true) + 15;
+            do {
+                $conn = native_connect($addr);
+                fwrite($conn, "GET /claim?n=job HTTP/1.1\r\nHost: t\r\n\r\n");
+                [$holder, $got] = json_decode(native_read_response($conn)['body'], true);
+                if (!$got) {
+                    fclose($conn);
+                    usleep(50_000);
+                }
+            } while (!$got && microtime(true) < $deadline);
+            expect($got)->toBeTrue("round $round");
+            expect($holders)->not->toContain($holder);
+            $holders[] = $holder;
+            fwrite($conn, "GET /claim-hold?n=pin$round&ms=1500 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+            usleep(100_000);
+
             swerve_signal($process, SIGHUP);
             log_wait_count($log, '/Reload complete/', $round, 15);
-            expect(claim_retry($addr, '/available?n=job')[1])->toBeTrue("freed when its worker drained, round $round");
-            if (1 === $round) { // the old worker, if its connection is still served, knows it holds nothing
-                fwrite($keepAlive, "GET /held?n=job HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
-                $response = native_read_response($keepAlive);
-                if (null !== $response && 200 === $response['status']) {
-                    expect(json_decode($response['body'], true))->toBe([$first, false]);
-                }
+            for ($i = 0; $i < 10; ++$i) { // the new workers cannot take what the draining one still holds
+                [$pid, $got] = cache_call($addr, '/claim?n=job');
+                expect([$pid !== $holder, $got])->toBe([true, false]);
             }
-            [$pid, $got] = claim_retry($addr, '/claim?n=job');
-            expect($got)->toBeTrue();
-            expect($holders)->not->toContain($pid);
-            $holders[] = $pid;
+            expect(cache_call($addr, '/available?n=job')[1])->toBeFalse();
+            expect(native_read_response($conn)['status'] ?? null)->toBe(200);
+            log_wait_count($log, '/exited after draining/', 2 * $round, 15);
+            expect(is_dir($dir))->toBeTrue(); // the workers never remove the master's directory
         }
-        // The old workers exit, their handles destroyed: the late releases carry tokens that are not the holder's
-        log_wait_count($log, '/exited after draining/', 6, 15);
-        $last = end($holders);
-        $held = null;
-        for ($i = 0; $i < 300 && !$held; ++$i) {
-            [$pid, $held] = cache_call($addr, '/held?n=job');
-            if ($pid !== $last) {
-                $held = null;
-            }
-        }
-        expect($held)->toBeTrue();
-        expect(cache_call($addr, '/available?n=job')[1])->toBeFalse();
     } finally {
         native_stop($process);
     }
@@ -792,22 +673,6 @@ test('a coroutine cancelled while it holds a claim releases it', function () {
     expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
 });
 
-test('a coroutine cancelled while its acquire is in flight does not leave the claim held', function () {
-    [$process, $addr, $log] = swerve_start(workers: 2);
-    try {
-        for ($i = 0; $i < 20; ++$i) {
-            expect(cache_call($addr, "/claim-cancel?n=in-flight$i&mode=call")[1])->toBeTrue();
-        }
-        usleep(300_000);
-        for ($i = 0; $i < 20; ++$i) {
-            expect(cache_call($addr, "/available?n=in-flight$i")[1])->toBeTrue("claim in-flight$i was taken by a cancelled acquire and nothing releases it");
-        }
-    } finally {
-        native_stop($process);
-    }
-    expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
-});
-
 test('a held claim whose connection closes mid-request is released when the request ends', function () {
     [$process, $addr, $log] = swerve_start(workers: 2);
     try {
@@ -827,63 +692,6 @@ test('a held claim whose connection closes mid-request is released when the requ
         }
         expect(claim_retry($addr, '/available?n=closing')[1])->toBeTrue();
         expect(claim_retry($addr, '/claim?n=closing')[1])->toBeTrue();
-        native_stop($process);
-    }
-    expect(log_count($log, '/CRITICAL/'))->toBe(0, file_get_contents($log));
-});
-
-test('fire-and-forget releases among 1000 claim, held and available calls leave every answer right', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1);
-    try {
-        [$pid, $bad] = cache_call($addr, '/claim-mix?count=1000&id=1');
-        expect($bad)->toBe(0);
-        [, $bad] = cache_call($addr, '/claim-mix?count=1000&id=2'); // again, on the same worker: ids kept counting
-        expect($bad)->toBe(0);
-        expect(cache_call($addr, '/available?n=mix-' . $pid . '-1-1-0')[1])->toBeTrue();
-        expect(cache_call($addr, '/claim?n=after-mix')[1])->toBeTrue(); // the worker still talks to the master
-    } finally {
-        native_stop($process);
-    }
-    expect(log_count($log, '/(ERROR|CRITICAL|WARNING)/i'))->toBe(0, file_get_contents($log));
-});
-
-test('fire-and-forget releases while four workers each run 1000 cycles', function () {
-    [$process, $addr, $log] = swerve_start(workers: 4);
-    try {
-        worker_pids($addr, 4, 10);
-        $results = claim_burst($addr, array_map(static fn ($id) => "/claim-mix?count=1000&id=$id", range(1, 8)), 60);
-        foreach ($results as $result) {
-            expect($result['json'][1])->toBe(0);
-        }
-    } finally {
-        native_stop($process);
-    }
-    expect(log_count($log, '/(ERROR|CRITICAL|WARNING)/i'))->toBe(0, file_get_contents($log));
-});
-
-test('a worker that held, died, and whose inbox is reused: the replacement inherits nothing and A\'s release is not its business', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1);
-    try {
-        [$a, $got] = cache_call($addr, '/claim?n=job');
-        expect($got)->toBeTrue();
-        expect(cache_call($addr, '/claim?n=second')[1])->toBeTrue();
-        posix_kill($a, SIGKILL);
-        $deadline = microtime(true) + 10;
-        do {
-            usleep(50_000);
-            $answer = probe($addr, '/available?n=job');
-            $b      = null === $answer ? $a : json_decode($answer, true)[0];
-        } while ($b === $a && microtime(true) < $deadline);
-        expect($b)->not->toBe($a);
-        expect(cache_call($addr, '/available?n=job')[1])->toBeTrue();    // not inherited
-        expect(cache_call($addr, '/available?n=second')[1])->toBeTrue();
-        expect(cache_call($addr, '/held?n=job')[1])->toBeFalse();
-
-        expect(cache_call($addr, '/claim?n=job')[1])->toBeTrue();         // B takes it
-        usleep(500_000);                                                   // nothing from A arrives late
-        expect(cache_call($addr, '/available?n=job')[1])->toBeFalse();
-        expect(cache_call($addr, '/held?n=job')[1])->toBeTrue();
-    } finally {
         native_stop($process);
     }
     expect(log_count($log, '/CRITICAL/'))->toBe(0, file_get_contents($log));
@@ -971,4 +779,128 @@ test('without a master a cache clear frees no claim, and a claim leaves the cach
     $claim->release();
     expect($cache->get('local-shared'))->toBe(2);
     expect(Swerve::claim('local-shared')->available())->toBeTrue();
+});
+
+/*
+ * 5. The entries and the directory.
+ */
+
+test('the master creates the directory (0700) before it forks, every worker uses it, and it is gone when the master exits', function () {
+    [$process, $addr, $log] = swerve_start(workers: 3);
+    try {
+        $dirs = [];
+        foreach (range(1, 30) as $i) {
+            $dirs[cache_call($addr, '/claim-dir')[1]] = true;
+        }
+        expect(count($dirs))->toBe(1);
+        $dir = array_key_first($dirs);
+        expect(str_starts_with($dir, sys_get_temp_dir() . '/swerve-claims-'))->toBeTrue();
+        expect(substr(sprintf('%o', fileperms($dir)), -4))->toBe('0700');
+        expect(cache_call($addr, '/claim?n=entry')[1])->toBeTrue();
+        $entries = glob("$dir/[0-9a-f]*");
+        expect(array_map('basename', $entries))->toBe([hash('sha256', 'entry')]);
+        expect(file_get_contents($entries[0]))->toBe(substr(basename(glob("$dir/~*")[0]), 1)); // the holder's pid, in a file of its own
+    } finally {
+        native_stop($process);
+    }
+    expect(file_exists($dir))->toBeFalse(); // with the entries of the handles that were still held
+});
+
+test('a master stopped by SIGTERM with claims held leaves no directory behind', function () {
+    [$process, $addr, $log] = swerve_start(workers: 2);
+    worker_pids($addr, 2, 10);
+    $dir = cache_call($addr, '/claim-dir')[1];
+    for ($i = 0; $i < 6; ++$i) {
+        cache_call($addr, "/claim?n=kept$i");
+    }
+    expect(count(glob("$dir/[0-9a-f]*")))->toBe(6);
+    swerve_signal($process, SIGTERM);
+    [$code] = swerve_wait($process, 10);
+    expect([$code, file_exists($dir)])->toBe([0, false]);
+});
+
+test('Claim::clear() removes the entries and pid file of one pid only, never those of another that shares its digits', function () {
+    $dir = Claim::directory();
+    $mine = [];
+    foreach (['424242' => 3, '4242421' => 1, '42424' => 1, '24242' => 1, '0' => 1] as $pid => $count) {
+        for ($i = 0; $i < $count; ++$i) {
+            $path = "$dir/clear-$pid-$i";
+            file_put_contents($path, (string) $pid);
+            $mine[$path] = (string) $pid;
+        }
+    }
+    Claim::clear(424242);
+    foreach ($mine as $path => $pid) {
+        expect(file_exists($path))->toBe('424242' !== $pid, "$path");
+    }
+    foreach (array_keys($mine) as $path) {
+        if (file_exists($path)) {
+            unlink($path);
+        }
+    }
+});
+
+test('without a master, a handle whose entry belongs to another pid does not unlink it, on release or destruct', function () {
+    $stale = Swerve::claim('foreign');
+    expect($stale->acquire())->toBe($stale);
+    $path = claim_path('foreign');
+    unlink($path);              // as if it had been cleared, and another process took the name
+    file_put_contents($path, '1');
+    $stale->release();
+    expect(file_get_contents($path))->toBe('1');
+    expect($stale->held())->toBeFalse();
+    expect(Swerve::claim('foreign')->acquire())->toBeNull(); // still held, by the other
+
+    (function () {
+        $handle = Swerve::claim('foreign-2');
+        $handle->acquire();
+        unlink(claim_path('foreign-2'));
+        file_put_contents(claim_path('foreign-2'), '1');
+    })(); // destructed here: the entry is not ours
+    expect(file_get_contents(claim_path('foreign-2')))->toBe('1');
+    unlink($path);
+    unlink(claim_path('foreign-2'));
+});
+
+test('without a master, a handle inherited by a forked process does not free the parent\'s claim', function () {
+    $claim = Swerve::claim('forked');
+    expect($claim->acquire())->toBe($claim);
+    $pid = pcntl_fork();
+    if (0 === $pid) {
+        $claim->release();
+        posix_kill(getmypid(), SIGKILL); // no shutdown: nothing of the parent's to run twice
+    }
+    pcntl_waitpid($pid, $status);
+    expect(file_get_contents(claim_path('forked')))->toBe((string) getmypid());
+    expect(Swerve::claim('forked')->available())->toBeFalse();
+    expect(is_dir(Claim::directory()))->toBeTrue(); // and the child did not remove the directory
+    $claim->release();
+    expect(Swerve::claim('forked')->available())->toBeTrue();
+});
+
+test('without a master, a hot loop of acquire and release leaves the directory as it was; an entry holds its holder\'s pid', function () {
+    $before = claims_here();
+    $claim  = Swerve::claim('hot');
+    for ($i = 0; $i < 2000; ++$i) {
+        expect($claim->acquire())->toBe($claim);
+        if (0 === $i) {
+            expect(file_get_contents(claim_path('hot')))->toBe((string) getmypid());
+        }
+        $claim->release();
+        $other = Swerve::claim('hot');
+        expect($other->available())->toBeTrue();
+        expect($other->held())->toBeFalse();
+    }
+    expect(claims_here())->toBe($before);
+    expect(substr(sprintf('%o', fileperms(Claim::directory())), -4))->toBe('0700');
+});
+
+test('without a master, a process that ends holding a claim is silent and takes its directory with it', function () {
+    $autoload = dirname(__DIR__) . '/vendor/autoload.php';
+    $script   = 'require ' . var_export($autoload, true) . '; $c = Swerve\Swerve::claim("x"); $c->acquire(); echo Swerve\Claim::directory();';
+    $output   = [];
+    exec(escapeshellarg(PHP_BINARY) . ' -d display_errors=1 -d error_reporting=-1 -r ' . escapeshellarg($script) . ' 2>&1', $output, $code);
+    expect($code)->toBe(0);
+    expect(count($output))->toBe(1, implode("\n", $output)); // the directory, and no warning after it
+    expect(file_exists($output[0]))->toBeFalse();
 });

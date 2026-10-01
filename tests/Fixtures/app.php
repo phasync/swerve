@@ -508,16 +508,19 @@ return new class($version) implements RequestHandlerInterface {
                 $claim->acquire();
                 throw new RuntimeException('claim-boom');
             })(),
-            // Acquires ?n= in a coroutine that is cancelled: ?mode=hold once it holds the claim and
-            // sleeps, ?mode=call at once, while the master may be taking the claim yet
+            // Acquires ?n= in a coroutine that is cancelled while it sleeps holding the claim
             '/claim-cancel' => (static function () use ($query) {
                 $co = phasync::go(static function () use ($query) {
                     $claim = Swerve::claim($query['n']);
                     $claim->acquire();
                     phasync::sleep(30);
                 });
-                phasync::sleep('hold' === $query['mode'] ? 0.1 : 0);
+                phasync::sleep(0.1);
                 phasync::cancel($co);
+                try {
+                    phasync::await($co); // it unwinds, and its handle goes, before this answers
+                } catch (\Throwable) {
+                }
 
                 return new Response(200, [], \json_encode([\getmypid(), true]));
             })(),
@@ -529,31 +532,8 @@ return new class($version) implements RequestHandlerInterface {
 
                 return new Response(200, [], \json_encode([\getmypid(), $got]));
             })(),
-            // ?count= acquire / held / available / drop cycles in 10 coroutines of this one worker,
-            // fire-and-forget releases among the calls; ?id= tells the requests apart; answers [pid, number of answers that were wrong]
-            '/claim-mix' => (static function () use ($query) {
-                $bad   = 0;
-                $pid   = \getmypid();
-                $cycle = static function (string $name) use (&$bad) {
-                    $claim = Swerve::claim($name);
-                    $bad  += null === $claim->acquire() ? 1 : 0;
-                    $bad  += $claim->held() ? 0 : 1;
-                    $bad  += Swerve::claim($name)->available() ? 1 : 0;
-                    $claim = null; // the release has no reply; the next question is answered after it
-                    $bad  += Swerve::claim($name)->available() ? 0 : 1;
-                };
-                $coroutines = [];
-                foreach (\range(1, 10) as $c) {
-                    $coroutines[] = phasync::go(static function () use ($cycle, $c, $pid, $query) {
-                        for ($i = 0; $i < (int) $query['count'] / 10; ++$i) {
-                            $cycle("mix-$pid-{$query['id']}-$c-$i");
-                        }
-                    });
-                }
-                \array_map(phasync::await(...), $coroutines);
-
-                return new Response(200, [], \json_encode([$pid, $bad]));
-            })(),
+            // The claims directory, to see that it is the master's and is removed
+            '/claim-dir' => new Response(200, [], \json_encode([\getmypid(), \Swerve\Claim::directory()])),
             // The claim named by the request body, for names that do not fit a query: ?op= claim|available|release
             '/claim-raw' => (function () use ($request, $query) {
                 $name = (string) $request->getBody();

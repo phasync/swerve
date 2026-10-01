@@ -5,40 +5,93 @@ namespace Swerve;
 use phasync;
 
 /**
- * A handle on a name that one worker at a time can hold across the whole server, from
+ * A handle on a name that one holder at a time can hold across the whole server, from
  * Swerve::claim(). The handle claims nothing until acquire().
  *
  *     if ($claim = Swerve::claim('nightly-report')->acquire()) {
  *         ...
  *     }                                     // released when $claim goes out of scope
  *
- * The master decides, so two workers never hold the same name. A claim is held until it is
- * released, its handle is destroyed, or its worker drains or dies (a stalled worker is killed by
- * the watchdog): whoever acquires next takes over at once. Each handle has a token of its own, so
- * a stale handle can neither hold nor release what another holds. Names are a namespace of their
- * own, apart from the cache's keys. Without a master (served by something else than swerve's
- * workers) a name is held once at a time in the process.
+ * A claim is a file in a temporary directory that the master creates before it forks the workers:
+ * a hard link to a file with the pid of the holder in it. Linking is atomic and fails while the
+ * name is held, so the first to try when the name is free wins, there is no queue, and a waiting
+ * acquire() tries again every 20 ms. It is held until it is released, its handle is destroyed, or
+ * its worker exits or dies (the master clears what a dead worker held). Draining does not release
+ * a claim: a long-lived holder should release it itself when Swerve::draining(), so that a reload
+ * is not held up. Names are a namespace of their own, apart from the cache's keys. Without a
+ * master it works the same, in a directory of the process that dies with it: two handles
+ * conflict, also in one process.
  */
 final class Claim
 {
     /** Seconds between a waiting acquire()'s attempts. */
     private const POLL = 0.02;
 
-    private readonly string $token;
-    private bool $acquired = false;
+    private static ?string $directory = null;
+    private static int $creator       = 0;
+    private static bool $removed      = false;
+    /** The pid that pidFile() was written for. */
+    private static int $written = 0;
+
+    private readonly string $path;
+    private bool $held = false;
 
     public function __construct(public readonly string $name)
     {
         if ('' === $name) {
             throw new \InvalidArgumentException('A claim needs a name');
         }
-        $this->token = \bin2hex(\random_bytes(8));
+        $this->path = self::directory() . '/' . \hash('sha256', $name);
     }
 
-    /** Whether nobody holds the name now; one trip to the master, nothing is claimed. */
+    /**
+     * The directory of the claims. The master creates it before it forks, so that the workers
+     * inherit it; without a master it is created here, at first use. It is removed, with what is in
+     * it, when the creating process exits; a forked worker never removes it.
+     *
+     * @internal
+     */
+    public static function directory(): string
+    {
+        if (null === self::$directory) {
+            self::$directory = \sys_get_temp_dir() . '/swerve-claims-' . \bin2hex(\random_bytes(8));
+            \mkdir(self::$directory, 0700);
+            self::$creator = \getmypid();
+            \register_shutdown_function(static function () {
+                if (\getmypid() === self::$creator) {
+                    foreach (\glob(self::$directory . '/*') as $file) {
+                        \unlink($file);
+                    }
+                    \rmdir(self::$directory);
+                    self::$removed = true;
+                }
+            });
+        }
+
+        return self::$directory;
+    }
+
+    /**
+     * The master, when worker $pid has exited: what it held is free.
+     *
+     * @internal
+     */
+    public static function clear(int $pid): void
+    {
+        foreach (\glob(self::directory() . '/*') as $file) {
+            // A live worker may release its claim between the listing and here
+            if ((string) $pid === @\file_get_contents($file)) {
+                \unlink($file);
+            }
+        }
+    }
+
+    /** Whether nobody holds the name now; nothing is claimed. */
     public function available(): bool
     {
-        return !Cache::instance()->call(['check', $this->name]);
+        \clearstatcache(true, $this->path);
+
+        return !\file_exists($this->path);
     }
 
     /**
@@ -49,14 +102,11 @@ final class Claim
     public function acquire(float $timeout = 0.0): ?static
     {
         $deadline = \hrtime(true) / 1e9 + $timeout;
-        // From here on the master may take the name: a coroutine cancelled while the call is in flight
-        // never learns it did, so the destructor must release (harmless when it did not)
-        $this->acquired = true;
-        while (!Cache::instance()->call(['claim', $this->name, $this->token])) {
+        // EEXIST is the answer 'held', not an error. (symlink() would be the natural link, but PHP
+        // follows an existing link at the destination and creates what it points at: no EEXIST)
+        while (!($this->held = $this->held || @\link(self::pidFile(), $this->path))) {
             $left = $deadline - \hrtime(true) / 1e9;
             if ($left <= 0) {
-                $this->acquired = false;
-
                 return null;
             }
             phasync::sleep(\min(self::POLL, $left));
@@ -65,24 +115,41 @@ final class Claim
         return $this;
     }
 
-    /** Whether this handle holds the name right now, as the master says: not released, and its worker not drained. */
+    /** Whether this handle holds the name. */
     public function held(): bool
     {
-        return Cache::instance()->call(['held', $this->name, $this->token]);
+        return $this->held;
     }
 
     /** Give the claim up, so that another can take it. */
     public function release(): void
     {
-        Cache::instance()->call(['release', $this->name, $this->token]);
-        $this->acquired = false;
+        if ($this->held) {
+            $this->held = false;
+            // Not what another process holds, when this handle was inherited by a fork; nor
+            // after the directory was removed at shutdown
+            if (!self::$removed && (string) \getmypid() === \file_get_contents($this->path)) {
+                \unlink($this->path);
+            }
+        }
     }
 
-    /** Releases without waiting for the master's reply: a destructor must not suspend. */
+    /** Releases: synchronous, so it cannot suspend. */
     public function __destruct()
     {
-        if ($this->acquired) {
-            Cache::instance()->send(['release', $this->name, $this->token]);
+        $this->release();
+    }
+
+    /** This process's file with its pid in it, which every claim of the process links to. */
+    private static function pidFile(): string
+    {
+        $pid  = \getmypid();
+        $file = self::directory() . '/~' . $pid;
+        if (self::$written !== $pid) {
+            \file_put_contents($file, (string) $pid);
+            self::$written = $pid;
         }
+
+        return $file;
     }
 }

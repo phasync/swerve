@@ -96,7 +96,8 @@ final class Swerve
 
     /**
      * A handle on the name $name, one holder at a time across the workers; claims nothing until
-     * acquire() is called: `Swerve::claim('name')->acquire()` is null, or the held handle. See Claim.
+     * acquire() is called: `Swerve::claim('name')->acquire()` is null, or the held handle. It is
+     * held until released, destroyed, or its worker exits or dies. See Claim.
      */
     public static function claim(string $name): Claim
     {

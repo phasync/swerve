@@ -5,6 +5,7 @@ namespace Swerve\Util;
 use phasync\Util\LruCache;
 use Psr\Log\LoggerInterface;
 use Swerve\Cache;
+use Swerve\Claim;
 
 /**
  * The master process: forks one worker per slot and supervises them until stopped.
@@ -68,7 +69,6 @@ final class Cluster
 
     /** What Swerve::cache() holds, for every worker: see Cache. */
     private LruCache $cache;
-    private Claims $claims;
     /** The workers' inboxes, and who subscribes to what. */
     private Inboxes $inboxes;
     /** No inbox was free to start a worker: logged once, until one starts. */
@@ -139,11 +139,11 @@ final class Cluster
         private readonly string $serving,
         int $cacheBytes = 64 << 20,
     ) {
-        $this->cache  = new LruCache(maxBytes: $cacheBytes);
-        $this->claims = new Claims();
+        $this->cache = new LruCache(maxBytes: $cacheBytes);
         // Twice the slots: a replacement starts while the worker it replaces drains
         $this->inboxes = new Inboxes(2 * $numWorkers);
         $this->masterPid = \posix_getpid();
+        Claim::directory(); // before the first fork: the workers inherit it, see Claim
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
         if (!\extension_loaded('phasync')) {
             $this->logger->notice('phasync-ext is not loaded: fine for development, but in production it lifts the limit of about 960 connections per worker and speeds up waiting (composer require phasync/phasync-ext)');
@@ -351,12 +351,10 @@ final class Cluster
             $bytes     = Topics::parse($w->in, function (string $topic, string $message) use (&$requested, $w) {
                 $requested = true; // answered at once, and the next round waits for nothing
                 if (Cache::TOPIC === $topic) {
-                    $reply = Cache::serve($this->cache, $this->claims, $w->inbox, $message, function (?array $keys) {
+                    $reply = Cache::serve($this->cache, $message, function (?array $keys) {
                         $this->forgetAll(Topics::frame(Cache::FORGET, \serialize($keys)));
                     });
-                    if (null !== $reply) {
-                        $this->send($w, Topics::frame(Cache::TOPIC, $reply));
-                    }
+                    $this->send($w, Topics::frame(Cache::TOPIC, $reply));
                 } elseif (Inboxes::TOPIC === $topic) {
                     $reply = $this->inboxes->serve($w->inbox, $message, fn (string $topic) => $this->forgetAll(Topics::frame(Inboxes::FORGET, $topic)));
                     if (null !== $reply) {
@@ -443,6 +441,7 @@ final class Cluster
         }
         $this->leaveInbox($w);
         $this->inboxes->release($w->inbox);
+        Claim::clear($pid);
         $now    = self::now();
         $killed = null !== $w->killReason ? ", killed: {$w->killReason}" : '';
         $ctx    = ['pid' => $pid, 'slot' => $w->slot, 'how' => $this->describe($status, $w->fatal), 'up' => self::duration($now - $w->started)];
@@ -564,10 +563,9 @@ final class Cluster
         }
     }
 
-    /** A worker that drains or is gone has no subscriptions and no claims: what is published goes to the others. */
+    /** A worker that drains or is gone has no subscriptions: what is published goes to the others. */
     private function leaveInbox(WorkerProcess $w): void
     {
-        $this->claims->release($w->inbox);
         $this->inboxes->leave($w->inbox, fn (string $topic) => $this->forgetAll(Topics::frame(Inboxes::FORGET, $topic)));
     }
 

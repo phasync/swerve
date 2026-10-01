@@ -1,7 +1,8 @@
 <?php
 
 /*
- * Swerve::claim(): one holder per name across the workers, decided by the master.
+ * Swerve::claim(): one holder per name across the workers: a file in the master's directory with its holder's pid in it,
+ * cleared by the master when that worker is gone.
  */
 
 use Swerve\Claim;
@@ -59,23 +60,6 @@ test('held() is true in the holding worker only; a release lets another worker c
         expect($released)->toBeTrue();
 
         expect(cache_call($addr, '/claim?n=job')[1])->toBeTrue(); // free again, whoever asks
-    } finally {
-        native_stop($process);
-    }
-    expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
-});
-
-test('a claim is freed at once when its worker drains', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1);
-    try {
-        [$old, $got] = cache_call($addr, '/claim?n=job');
-        expect($got)->toBeTrue();
-        swerve_signal($process, SIGHUP);
-        log_wait($log, '/Reload complete/');
-        [$pid, $available] = available_by($addr, 'job');
-        expect([$pid !== $old, $available])->toBe([true, true]);
-        [$pid, $got] = cache_call($addr, '/claim?n=job');
-        expect([$pid !== $old, $got])->toBe([true, true]);
     } finally {
         native_stop($process);
     }
@@ -211,7 +195,7 @@ test('without a master available() and an acquire with a timeout work in the pro
     expect(Swerve::claim('wait')->available())->toBeFalse();
 });
 
-test('without a master a claim is the process\'s own; a stale holder cannot affect the new one', function () {
+test('without a master a claim is the process\'s own; a stale handle cannot affect the new holder', function () {
     $claim = Swerve::claim('local');
     expect($claim)->toBeInstanceOf(Claim::class);
     expect($claim->acquire())->toBe($claim);
@@ -221,7 +205,7 @@ test('without a master a claim is the process\'s own; a stale holder cannot affe
 
     $second = Swerve::claim('local');
     expect($second->acquire())->toBe($second);
-    expect($claim->held())->toBeFalse(); // the stale holder, with a token of its own
+    expect($claim->held())->toBeFalse(); // the stale handle
     $claim->release();                   // and it frees nothing
     expect(Swerve::claim('local')->acquire())->toBeNull();
     expect($second->held())->toBeTrue();

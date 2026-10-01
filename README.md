@@ -384,8 +384,8 @@ $cache->set("user:$id", $user, 60);
 
 ### Claims
 
-`Swerve::claim($name)` gives a handle on a name that one worker at a time can hold, decided by
-the master: a job that must not run twice, a leader. The handle claims nothing yet.
+`Swerve::claim($name)` gives a handle on a name that one worker at a time can hold: a job that
+must not run twice, a leader. The handle claims nothing yet.
 
 ```php
 function nightlyReport(): void
@@ -397,16 +397,17 @@ function nightlyReport(): void
 ```
 
 - `available()` tells whether nobody holds the name, claiming nothing. `acquire($timeout)` takes
-  it and returns the handle, or `null`; with a `$timeout` it polls every 20 ms for the name to
-  come free (no fairness: whoever tries first gets it). On a handle that holds the name already,
-  it returns the handle. `held()` asks the master whether this handle holds it: a claim is
-  freed at once when its worker drains, so a handle can lose it. `release()` gives it up.
-- A claim has no TTL: it is held until released, destroyed, or its worker drains or dies (the
-  watchdog kills a stalled worker). Names are apart from the cache's keys, and a claim is never
-  evicted. Without the master, claims are the process's own.
-- A destroyed handle releases without waiting for the master. A release message that is lost
-  still falls back to the worker's exit. A handle kept in a static or in a reference cycle is
-  destroyed late, and releases late.
+  it and returns the handle, or `null`; with a `$timeout` it tries again every 20 ms until the
+  name is free (no queue: the first to try when it frees wins). On a handle that holds the name
+  already, it returns the handle. `held()` tells whether this handle holds it. `release()` gives
+  it up.
+- A claim has no TTL: it is held until released, destroyed, or its worker exits or dies (the
+  master clears a dead worker's claims). Draining does not release it: a long-lived holder
+  should release it itself when `Swerve::draining()`, so that a reload is not held up. Names are
+  apart from the cache's keys.
+- A claim is a file in a temporary directory that the master creates and removes: a hard link
+  to a file with its holder's pid in it. Linking is atomic, and fails while the name is held.
+  Without the master it works the same, in a directory of the process that dies with it.
 
 ## Code written for PHP-FPM
 
