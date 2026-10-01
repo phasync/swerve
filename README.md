@@ -221,8 +221,10 @@ application: `/css/site.css` is `public/css/site.css`, `/` is `public/index.html
 streamed, with their Content-Type, Content-Length, Last-Modified and ETag; a browser's
 revalidation gets `304 Not Modified`, and a `Range` request (video, resumed downloads) `206
 Partial Content`. Other methods than GET and HEAD, names starting with a dot (`.env`, `.git/`;
-`.well-known/` is served), and paths leading out of the directory (`..`, a symlink pointing
-outside) go to the application; directories are never listed.
+`.well-known/` is served), PHP files (`.php`, `.phtml`, `.phar`, `.inc`: a source is never sent),
+and paths leading out of the directory (`..`, a symlink pointing outside) go to the application;
+directories are never listed. This is deliberately small: for a lot of static content, or
+anything beyond this, let nginx or a CDN serve it in front of swerve.
 
 The same is PSR-15 middleware for your own stack, with swerve or any other server:
 `$app->add(new Swerve\StaticFiles(__DIR__ . '/public'))` in Slim.
