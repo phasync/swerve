@@ -22,8 +22,8 @@ use phasync\Psr\StreamFactory;
  *
  * Not served, but passed on to the application: other methods, a path that leaves the
  * directory (`..`, a symlink pointing outside it), a name starting with a dot (`.env`,
- * `.git/`; `.well-known/` is served), and a directory without index.html. Nothing is ever
- * listed.
+ * `.git/`; `.well-known/` is served), a PHP file (`.php`, `.phtml`, `.phar`, `.inc`: a source is
+ * never sent), and a directory without index.html. Nothing is ever listed.
  */
 final class StaticFiles implements MiddlewareInterface
 {
@@ -57,7 +57,7 @@ final class StaticFiles implements MiddlewareInterface
     {
         $method = $request->getMethod();
         $path   = \rawurldecode($request->getUri()->getPath());
-        if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)#', $path)) {
+        if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)|\.(?:php\d?|phps|phtml|phar|inc)$#i', $path)) {
             return $handler->handle($request);
         }
         \clearstatcache(true, $this->root . $path);

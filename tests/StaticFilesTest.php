@@ -146,3 +146,14 @@ test('--public needs a directory, and HTTP', function () {
     exec("$swerve --public=/tmp --fastcgi=9000 " . escapeshellarg(__DIR__ . '/Fixtures/app.php') . ' 2>&1', $out, $code);
     expect([$code, $out[0]])->toBe([2, 'swerve: --buffer-responses, --max-body and --public only apply to --http']);
 });
+
+test('a PHP file in the public directory is passed to the application, never sent as source', function () {
+    $dir = static_dir();
+    foreach (['index.php', 'config.PHP', 'page.phtml', 'tool.phar', 'lib.inc', 'old.php5'] as $name) {
+        file_put_contents("$dir/$name", '<?php $secret = 1;');
+    }
+    $files = new StaticFiles($dir);
+    foreach (['/index.php', '/config.PHP', '/page.phtml', '/tool.phar', '/lib.inc', '/old.php5'] as $target) {
+        expect((string) static_get($files, $target)->getBody())->toBe('app');
+    }
+});
