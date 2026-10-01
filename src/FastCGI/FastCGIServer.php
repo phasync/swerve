@@ -11,6 +11,8 @@ use Swerve\Util\System;
  * FastCGI (--fastcgi), for a web server in front of swerve, such as nginx or HAProxy. Requests
  * are multiplexed on the connections it keeps open. A protocol upgrade is not
  * served: no front server tunnels a 101 over FastCGI, so it needs HTTP mode.
+ *
+ * @internal
  */
 final class FastCGIServer implements ServerInterface
 {

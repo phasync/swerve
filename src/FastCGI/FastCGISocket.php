@@ -12,6 +12,11 @@ use Swerve\Dispatcher;
 use Swerve\Http\ServerRequest;
 use Swerve\ProtocolErrorException;
 
+/**
+ * One FastCGI connection: reads records, dispatches the requests and writes the responses.
+ *
+ * @internal
+ */
 final class FastCGISocket
 {
     private mixed $socket;

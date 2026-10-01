@@ -4,6 +4,11 @@ namespace Swerve\CLI;
 
 use InvalidArgumentException;
 
+/**
+ * A positional argument of the `swerve` command.
+ *
+ * @internal
+ */
 final class Argument
 {
     public function __construct(

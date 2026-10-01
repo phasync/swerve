@@ -52,6 +52,8 @@ use Swerve\Claim;
  *
  * A slot can briefly hold several processes (one starting, one serving, several draining);
  * slot-keyed resources must tolerate the overlap.
+ *
+ * @internal
  */
 final class Cluster
 {

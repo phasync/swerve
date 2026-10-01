@@ -12,6 +12,8 @@ use Psr\Log\LoggerInterface;
  * A coroutine that fails when nobody awaits it, such as a background task the application
  * started with phasync::go(), is logged here; the rest of the worker serves on. Without a
  * handler the failure would fail the worker's phasync::run(), which drops every coroutine.
+ *
+ * @internal
  */
 final readonly class LoggingContext implements ExceptionHandlerInterface
 {

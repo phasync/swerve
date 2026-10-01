@@ -40,6 +40,8 @@ use Swerve\ResponderInterface;
  * application: parse it from the body stream, as Slim's BodyParsingMiddleware does. A response
  * body must be readable: Slim's NonBufferedBody echoes to PHP's output instead, which only a
  * classic SAPI sends to the client, so it gets 500 here.
+ *
+ * @internal
  */
 final class HttpConnection implements ResponderInterface
 {
@@ -248,11 +250,15 @@ final class HttpConnection implements ResponderInterface
     private bool $atEof = false;
 
     /**
-     * @param resource $socket      a connected, non-blocking stream: what is waited on, and closed
-     * @param ?\Socket $sock        the same connection as ext-sockets' object, which is read and
-     *                              written instead when given (faster than the stream)
-     * @param int      $maxBodySize a larger request body gets 413, by its Content-Length before
-     *                              the application runs, or when a chunk would exceed it
+     * @param resource        $socket          a connected, non-blocking stream: what is waited on, and closed
+     * @param string          $peer            the client's address as `host:port`
+     * @param Dispatcher      $dispatcher      the application's entry point
+     * @param LoggerInterface $logger
+     * @param bool            $bufferResponses read each response body whole before sending it
+     * @param int             $maxBodySize     a larger request body gets 413, by its Content-Length before
+     *                                         the application runs, or when a chunk would exceed it
+     * @param ?\Socket        $sock            the same connection as ext-sockets' object, which is read and
+     *                                         written instead when given (faster than the stream)
      */
     public function __construct(
         private readonly mixed $socket,

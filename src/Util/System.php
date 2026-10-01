@@ -3,6 +3,11 @@ namespace Swerve\Util;
 
 use Exception;
 
+/**
+ * Operating system helpers.
+ *
+ * @internal
+ */
 final class System {
 
     /**

@@ -9,6 +9,8 @@ use phasync\Util\Console;
  * arguments may come in any order; an option's value is attached (`--workers=4`, `-w4`) or
  * the next word (`--workers 4`, `-w 4`); flags may be grouped (`-vv`, `-qv`); `--` ends the
  * options.
+ *
+ * @internal
  */
 final class Args
 {

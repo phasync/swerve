@@ -11,6 +11,8 @@ namespace Swerve\CLI;
  * - `localhost:8080`: a host name, resolved once, at start
  * - `unix:/run/swerve.sock`, `unix:///run/swerve.sock` or `/run/swerve.sock`: a Unix domain
  *   socket; a relative path is relative to the directory where swerve started
+ *
+ * @internal
  */
 final class Address
 {

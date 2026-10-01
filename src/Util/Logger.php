@@ -7,6 +7,11 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\LoggerTrait;
 use Psr\Log\LogLevel;
 
+/**
+ * The PSR-3 logger of swerve: writes to the console, filtered by level.
+ *
+ * @internal
+ */
 class Logger implements LoggerInterface
 {
     use LoggerTrait;

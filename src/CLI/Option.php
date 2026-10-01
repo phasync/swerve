@@ -4,6 +4,11 @@ namespace Swerve\CLI;
 
 use InvalidArgumentException;
 
+/**
+ * An option of the `swerve` command that takes a value, such as `--workers`.
+ *
+ * @internal
+ */
 final class Option implements ArgInterface
 {
     public function __construct(

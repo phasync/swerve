@@ -4,6 +4,8 @@ namespace Swerve\Util;
 
 /**
  * The master's record of one worker process, see Cluster.
+ *
+ * @internal
  */
 final class WorkerProcess
 {

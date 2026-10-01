@@ -21,6 +21,8 @@ use Swerve\Util\System;
  * A worker serves at most so many connections at once that its file descriptors stay below
  * the limit (see run()); more wait in the kernel's accept queue. At that limit, connections
  * waiting on their client are closed to make room, see reclaim().
+ *
+ * @internal
  */
 final class HttpServer implements ServerInterface
 {

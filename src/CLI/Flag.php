@@ -4,6 +4,11 @@ namespace Swerve\CLI;
 
 use InvalidArgumentException;
 
+/**
+ * A boolean flag of the `swerve` command, such as `-v`.
+ *
+ * @internal
+ */
 final class Flag implements ArgInterface
 {
     public function __construct(

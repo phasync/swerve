@@ -8,6 +8,8 @@ use Swerve\Util\ObjectPoolTrait;
 
 /**
  * A FastCGI record: parsing from a buffer and building the records swerve sends.
+ *
+ * @internal
  */
 final class Record implements ObjectPoolInterface
 {

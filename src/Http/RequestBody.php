@@ -82,6 +82,8 @@ use Psr\Http\Message\StreamInterface;
  * the body larger than $maxSize (413), and every later read throws it again; the connection
  * answers with its status (or, after the response, just closes), even when the application
  * caught it.
+ *
+ * @internal
  */
 final class RequestBody implements StreamInterface
 {

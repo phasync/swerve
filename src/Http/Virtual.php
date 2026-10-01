@@ -31,6 +31,8 @@ use phasync\Psr\Response;
  * phasync context (Superglobals), so each request sees its own while its coroutines run.
  *
  * Needs phasync-ext 0.5.0-alpha15 or later: see available().
+ *
+ * @internal
  */
 final class Virtual
 {

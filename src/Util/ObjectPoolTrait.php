@@ -2,6 +2,11 @@
 
 namespace Swerve\Util;
 
+/**
+ * A static pool of instances for {@see ObjectPoolInterface}.
+ *
+ * @internal
+ */
 trait ObjectPoolTrait
 {
     private static array $pool        = [];

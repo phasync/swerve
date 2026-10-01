@@ -16,6 +16,8 @@ use Swerve\Cache;
  * SIGINT and SIGHUP are ignored: Ctrl+C and a closing terminal signal the whole process
  * group, and only the master decides what happens to the workers. SIGQUIT logs what the
  * worker is doing: the requests in flight, and where the code runs.
+ *
+ * @internal
  */
 final class Worker
 {
