@@ -5,6 +5,30 @@ use Exception;
 
 final class System {
 
+    /**
+     * A new directory (mode 0700, a random name starting with $prefix) below $SWERVE_TMPDIR, or
+     * the system's temporary directory. Created by the master before it forks, so that the
+     * workers inherit it; removed, with the files in it, when the creating process exits: a
+     * forked worker never removes it. $removed is called after that.
+     */
+    public static function tempDirectory(string $prefix, ?\Closure $removed = null): string
+    {
+        $directory = (\getenv('SWERVE_TMPDIR') ?: \sys_get_temp_dir()) . "/$prefix-" . \bin2hex(\random_bytes(8));
+        \mkdir($directory, 0700);
+        $creator = \getmypid();
+        \register_shutdown_function(static function () use ($directory, $creator, $removed) {
+            if (\getmypid() === $creator) {
+                foreach (\glob("$directory/*") as $file) {
+                    \unlink($file);
+                }
+                \rmdir($directory);
+                $removed && $removed();
+            }
+        });
+
+        return $directory;
+    }
+
     public static function getCPUCount(): int {
         self::assertProcFS('/proc/cpuinfo');
         $c = \file_get_contents('/proc/cpuinfo');

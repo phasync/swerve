@@ -144,6 +144,7 @@ final class Cluster
         $this->inboxes = new Inboxes(2 * $numWorkers);
         $this->masterPid = \posix_getpid();
         Claim::directory(); // before the first fork: the workers inherit it, see Claim
+        OrderedLog::directory();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
         if (!\extension_loaded('phasync')) {
             $this->logger->notice('phasync-ext is not loaded: fine for development, but in production it lifts the limit of about 960 connections per worker and speeds up waiting (composer require phasync/phasync-ext)');

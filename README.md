@@ -354,6 +354,14 @@ foreach (Swerve::subscribe('chat') as $message) {
   nothing sent before it. Swerve is one machine; across machines, use Redis, NATS or the like.
 - A subscription ends when its last reference goes: a `break`, the variable going out of scope,
   the request's coroutine ending. A topic costs nothing in a worker without subscribers.
+- `Swerve::publishOrdered('ledger', $m)` and `Swerve::subscribeOrdered('ledger')` give every
+  ordered subscriber, in every worker, the same order, apart from the plain topics of that name.
+  The workers append to a log file in the master's temporary directory, and a message that was
+  appended survives the death of its worker. Files are kept for about 30 s, a subscriber further
+  behind gets a `SubscriberLagException`, and nothing is written while nobody subscribes.
+  `SWERVE_TMPDIR` names the directory the master makes its temporary directories in (default
+  the system's temporary directory; tmpfs such as `/dev/shm` is fine). Nothing is synced or
+  durable beyond the master.
 - A message is kept once per worker, however many subscribe, until the slowest subscriber
   read it. One falling more than `maxLag` seconds behind (30 by default,
   `Swerve::subscribe('prices', maxLag: 5)`) gets a `SubscriberLagException` from its loop.
@@ -405,7 +413,7 @@ function nightlyReport(): void
   master clears a dead worker's claims). Draining does not release it: a long-lived holder
   should release it itself when `Swerve::draining()`, so that a reload is not held up. Names are
   apart from the cache's keys.
-- A claim is a file in a temporary directory that the master creates and removes: a hard link
+- A claim is a file in a temporary directory (under `$SWERVE_TMPDIR`) that the master creates and removes: a hard link
   to a file with its holder's pid in it. Linking is atomic, and fails while the name is held.
   Without the master it works the same, in a directory of the process that dies with it.
 

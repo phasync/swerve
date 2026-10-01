@@ -21,6 +21,11 @@ use Swerve\Swerve;
  * the load fail.
  */
 $testDir = \getenv('SWERVE_TEST_DIR') ?: null;
+if ($segment = \getenv('SWERVE_TEST_SEGMENT')) {
+    // The ordered log's segments, short enough to rotate in a test
+    \Swerve\Util\OrderedLog::$segment = (float) $segment;
+    \Swerve\Util\OrderedLog::$grace   = (float) $segment / 10;
+}
 if ($testDir && \file_exists("$testDir/crash")) {
     exit(3);
 }
@@ -935,19 +940,28 @@ return new class($version) implements RequestHandlerInterface {
                 return new Response(200, ['Content-Type' => 'text/event-stream'], $out);
             })(),
             '/sse-live'       => new Response(200, [], (string) $this->sseLive),
-            // Swerve::subscribe() as Server-Sent Events: "ready <pid>" once subscribed, then ?n=
-            // messages of ?topic=
+            // Swerve::subscribe() (?ordered=1: subscribeOrdered()) as Server-Sent Events: "ready <pid>"
+            // once subscribed, then ?n= messages of ?topic=; ?maxlag= seconds, ?stall= seconds before
+            // the first is read; "lag" if the subscription throws SubscriberLagException
             '/subscribe'      => (static function () use ($query) {
-                $subscription = Swerve::subscribe($query['topic']);
+                $maxLag       = (float) ($query['maxlag'] ?? 30);
+                $subscription = isset($query['ordered']) ? Swerve::subscribeOrdered($query['topic'], $maxLag) : Swerve::subscribe($query['topic'], $maxLag);
                 $out          = new UnbufferedStream(65536, PHP_FLOAT_MAX);
                 $out->append('data: ready ' . \getmypid() . "\n\n");
                 phasync::go(static function () use ($subscription, $out, $query) {
                     $i = 0;
-                    foreach ($subscription as $message) {
-                        $out->append('data: ' . (\is_string($message) ? $message : 'json ' . \json_encode($message)) . "\n\n");
-                        if (++$i >= (int) $query['n']) {
-                            break;
+                    if (isset($query['stall'])) {
+                        phasync::sleep((float) $query['stall']);
+                    }
+                    try {
+                        foreach ($subscription as $message) {
+                            $out->append('data: ' . (\is_string($message) ? $message : 'json ' . \json_encode($message)) . "\n\n");
+                            if (++$i >= (int) $query['n']) {
+                                break;
+                            }
                         }
+                    } catch (\Swerve\SubscriberLagException) {
+                        $out->append("data: lag\n\n");
                     }
                     $out->end();
                 });
@@ -959,6 +973,29 @@ return new class($version) implements RequestHandlerInterface {
                 Swerve::publish($query['topic'], ['m' => $query['m'], 'n' => 1, 'list' => [1, 2]]);
 
                 return new Response(200, [], 'published');
+            })(),
+            // ?count= messages "<?id>:<i>:" and ?size= (0) more bytes to ?topic=, ?sleep= ms (0.5) apart, with
+            // publishOrdered() for ?ordered=1; answers the pid
+            '/publish-seq'    => (static function () use ($query) {
+                for ($i = 0; $i < (int) $query['count']; ++$i) {
+                    $message = $query['id'] . ':' . $i . ':' . \str_repeat((string) ($i % 10), (int) ($query['size'] ?? 0));
+                    isset($query['ordered']) ? Swerve::publishOrdered($query['topic'], $message) : Swerve::publish($query['topic'], $message);
+                    phasync::sleep((float) ($query['sleep'] ?? 0.5) / 1000);
+                }
+
+                return new Response(200, [], (string) \getmypid());
+            })(),
+            '/publish-ordered' => (static function () use ($query) {
+                Swerve::publishOrdered($query['topic'], $query['m']);
+
+                return new Response(200, [], 'published');
+            })(),
+            // Blocks the worker's event loop for ?ms= (a busy wait: with phasync-ext, usleep() yields)
+            '/block'          => (#[\phasync\Uninterruptible] static function () use ($query) {
+                for ($end = \microtime(true) + (int) $query['ms'] / 1000; \microtime(true) < $end;) {
+                }
+
+                return new Response(200, [], 'blocked');
             })(),
             '/publish-end'    => (static function () use ($query) {
                 Swerve::publish($query['topic'], ['end' => true]);

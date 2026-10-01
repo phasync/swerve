@@ -21,7 +21,8 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
   subscribers, and two subscribers may see messages from different workers in different orders,
   as may two requests that update a row one after the other. When a message carries state (a
   count, a document), give it a version from storage (a counter incremented in the same
-  transaction) and let clients ignore one older than what they have.
+  transaction) and let clients ignore one older than what they have. For one order across all
+  subscribers, see Ordered subscriptions below.
 - **At most once**: to the subscriptions that exist when the message reaches their worker. There
   is no history and no retry: a subscriber that starts later, a worker started after a reload,
   a recycle or a crash, see nothing sent before. Keep what must not be lost in storage, and use
@@ -50,6 +51,42 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
   since.
 - A topic costs nothing in a worker without subscribers: messages to it are dropped there.
   Topics like `room:42` or `user:1234` are fine; a topic lives while it has subscribers.
+
+## Ordered subscriptions
+
+`Swerve::publishOrdered(string $topic, mixed $message)` and
+`Swerve::subscribeOrdered(string $topic, float $maxLag = 30.0, ?float $heartbeat = null)`: every
+ordered subscriber, in every worker, receives the messages of a topic in one and the same order,
+and each publisher's own messages keep their order in it. Ordered topics are apart from plain
+ones: `publish()` does not reach `subscribeOrdered()`, nor the reverse.
+
+```php
+Swerve::publishOrdered('ledger', ['debit', 12]);
+
+foreach (Swerve::subscribeOrdered('ledger') as $entry) { ... }
+```
+
+- Every publishing worker appends the message to a file in a directory of the master's, in one
+  `write()` on an `O_APPEND` descriptor; the kernel's order of appends is the order. Each worker
+  with subscribers reads the file as it grows, and wakes on a datagram from the publisher. A
+  worker that dies after it appended loses nothing: the message is in the file.
+- Nothing is written while the topic has no ordered subscriber, and the writing stops a second
+  or so after the last one ends. Such messages are lost, as plain ones are: a subscriber sees
+  what is published after `subscribeOrdered()` returned.
+- The files are in a directory of the master's (mode 0700, under `$SWERVE_TMPDIR`, by default
+  the system's temporary directory; tmpfs such as `/dev/shm` is fine). They are not synced and
+  hold nothing beyond the master's life. A file covers 10 s, and one is unlinked when it is more
+  than 30 s old: this is also how far a subscriber can be behind and still get its messages.
+- A subscriber that is more than `$maxLag` behind gets a `SubscriberLagException`, as for plain
+  topics; so does one whose worker did not run its event loop for 30 s, and its files were
+  removed before it read them.
+- A wake-up is best effort, like any message: a reader that missed one finds the message at its
+  next look, at most a second later. The one way left for an inversion is a publisher that stalls
+  for more than a second between reading the clock and appending; its message may then be missed
+  by readers that have moved on.
+- Topics starting with `"\0"` are swerve's own: the four functions refuse them. Available once
+  the worker serves, not while `swerve.php` loads. Without the master, it works in the process,
+  in publishing order.
 
 ## Publishing
 

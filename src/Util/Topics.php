@@ -88,7 +88,11 @@ final class Topics
         self::$bitmaps = new LruCache(maxBytes: self::BITMAP_BYTES);
     }
 
-    public static function publish(string $topic, mixed $message): void
+    /**
+     * What publish() sends and publishOrdered() writes: $message as JSON, after the checks of
+     * the topic and the message.
+     */
+    public static function encode(string $topic, mixed $message): string
     {
         if (null === $message) {
             throw new \InvalidArgumentException('null is no message: a subscription with a heartbeat yields null when none came');
@@ -104,19 +108,40 @@ final class Topics
         if (\strlen($message) > self::MAX_MESSAGE) {
             throw new \InvalidArgumentException('A message is at most ' . self::MAX_MESSAGE . ' bytes, not ' . \strlen($message));
         }
+
+        return $message;
+    }
+
+    public static function publish(string $topic, mixed $message): void
+    {
+        $message = self::encode($topic, $message);
         if (null === self::$toMaster) {
             self::deliver($topic, $message); // decoded again: what subscribers get never depends on where it came from
 
             return;
         }
+        if ('' !== $bitmap = self::bitmap('publish', $topic)) {
+            self::fanOut($topic, $message, $bitmap);
+        }
+    }
+
+    /**
+     * The master's bitmap of the workers with a subscription on the topic, kept until the master
+     * says to forget it: '' for none. Needs a master, and a worker that serves.
+     */
+    public static function bitmap(string $caller, string $topic): string
+    {
         if (!Cache::$listening) {
-            throw new \LogicException('Swerve::publish() is there once the worker serves, not while swerve.php loads');
+            throw new \LogicException("Swerve::$caller() is there once the worker serves, not while swerve.php loads");
         }
-        $bitmap = self::$bitmaps->get($topic) ?? self::fetch($topic);
-        $length = \strlen($bitmap);
-        if (0 === $length) {
-            return;
-        }
+
+        return self::$bitmaps->get($topic) ?? self::fetch($topic);
+    }
+
+    /** A JSON message to every worker in $bitmap, this one included. */
+    public static function fanOut(string $topic, string $message, string $bitmap): void
+    {
+        $length   = \strlen($bitmap);
         $datagram = \chr(\strlen($topic)) . $topic . $message;
         for ($byte = 0; $byte < $length; ++$byte) {
             if (0 === $bits = \ord($bitmap[$byte])) {
@@ -147,14 +172,20 @@ final class Topics
     /**
      * A JSON message for this process's subscribers of $topic, if any: decoded here, once for
      * all of them. They share the value (an array is copied only if one changes it; an object
-     * is a SealedObject, which nobody can change). Each message carries when it arrived, for
-     * Subscription's lag check.
+     * is a SealedObject, which nobody can change). Each message carries when it arrived (now,
+     * unless $arrived says), for Subscription's lag check.
      */
-    public static function deliver(string $topic, string $message): void
+    public static function deliver(string $topic, string $message, ?int $arrived = null): void
     {
         if (isset(self::$writers[$topic])) {
-            self::$writers[$topic]->write([\hrtime(true), SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR))]);
+            self::$writers[$topic]->write([$arrived ?? \hrtime(true), SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR))]);
         }
+    }
+
+    /** Whether this process has a subscription on the topic. */
+    public static function has(string $topic): bool
+    {
+        return isset(self::$counts[$topic]);
     }
 
     /**

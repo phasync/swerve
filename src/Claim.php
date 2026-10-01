@@ -3,6 +3,7 @@
 namespace Swerve;
 
 use phasync;
+use Swerve\Util\System;
 
 /**
  * A handle on a name that one holder at a time can hold across the whole server, from
@@ -12,8 +13,9 @@ use phasync;
  *         ...
  *     }                                     // released when $claim goes out of scope
  *
- * A claim is a file in a temporary directory that the master creates before it forks the workers:
- * a hard link to a file with the pid of the holder in it. Linking is atomic and fails while the
+ * A claim is a file in a temporary directory (below $SWERVE_TMPDIR, by default the system's)
+ * that the master creates before it forks the workers: a hard link to a file with the pid of the
+ * holder in it. Linking is atomic and fails while the
  * name is held, so the first to try when the name is free wins, there is no queue, and a waiting
  * acquire() tries again every 20 ms. It is held until it is released, its handle is destroyed, or
  * its worker exits or dies (the master clears what a dead worker held). Draining does not release
@@ -28,7 +30,6 @@ final class Claim
     private const POLL = 0.02;
 
     private static ?string $directory = null;
-    private static int $creator       = 0;
     private static bool $removed      = false;
     /** The pid that pidFile() was written for. */
     private static int $written = 0;
@@ -45,30 +46,15 @@ final class Claim
     }
 
     /**
-     * The directory of the claims. The master creates it before it forks, so that the workers
-     * inherit it; without a master it is created here, at first use. It is removed, with what is in
-     * it, when the creating process exits; a forked worker never removes it.
+     * The directory of the claims, below $SWERVE_TMPDIR or the system's temporary directory, see
+     * System::tempDirectory(). The master creates it before it forks, so that the workers inherit
+     * it; without a master it is created here, at first use.
      *
      * @internal
      */
     public static function directory(): string
     {
-        if (null === self::$directory) {
-            self::$directory = \sys_get_temp_dir() . '/swerve-claims-' . \bin2hex(\random_bytes(8));
-            \mkdir(self::$directory, 0700);
-            self::$creator = \getmypid();
-            \register_shutdown_function(static function () {
-                if (\getmypid() === self::$creator) {
-                    foreach (\glob(self::$directory . '/*') as $file) {
-                        \unlink($file);
-                    }
-                    \rmdir(self::$directory);
-                    self::$removed = true;
-                }
-            });
-        }
-
-        return self::$directory;
+        return self::$directory ??= System::tempDirectory('swerve-claims', static function () { self::$removed = true; });
     }
 
     /**
