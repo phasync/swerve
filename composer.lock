@@ -4,26 +4,27 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "f35391b30b28ae8b6c49079e8ca24a96",
+    "content-hash": "aa65b50845779b1f6e005fd0e40a86c9",
     "packages": [
         {
             "name": "phasync/phasync",
-            "version": "2.0.0-alpha27",
+            "version": "2.0.0-beta3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "05bd0c399c6f264db1d105b033fcba59e266097f"
+                "reference": "b271b66f60488535dcacdc783c965374f7005fe2"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/05bd0c399c6f264db1d105b033fcba59e266097f",
-                "reference": "05bd0c399c6f264db1d105b033fcba59e266097f",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/b271b66f60488535dcacdc783c965374f7005fe2",
+                "reference": "b271b66f60488535dcacdc783c965374f7005fe2",
                 "shasum": ""
             },
             "require": {
                 "php": "^8.2",
                 "psr/http-factory": "^1.1",
-                "psr/http-message": "^1.0 || ^2.0"
+                "psr/http-message": "^1.0 || ^2.0",
+                "psr/log": "^1.0 || ^2.0 || ^3.0"
             },
             "provide": {
                 "psr/http-factory-implementation": "1.1"
@@ -67,9 +68,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0-alpha27"
+                "source": "https://github.com/phasync/phasync/tree/2.0.0-beta3"
             },
-            "time": "2026-09-30T08:33:17+00:00"
+            "time": "2026-10-01T13:39:56+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -6266,8 +6267,7 @@
     "aliases": [],
     "minimum-stability": "alpha",
     "stability-flags": {
-        "friendsofphp/php-cs-fixer": 20,
-        "phasync/phasync": 15
+        "friendsofphp/php-cs-fixer": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,
