@@ -1,4 +1,4 @@
-// Go's net/http: one process, GOMAXPROCS threads
+// Go's net/http serving a file from disk with http.ServeFile
 package main
 
 import (
@@ -10,8 +10,7 @@ import (
 
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("Hello, World!"))
+		http.ServeFile(w, r, os.Getenv("FILE"))
 	})
 	network, addr := "tcp", os.Args[1]
 	if strings.HasPrefix(addr, "unix:") {
