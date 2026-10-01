@@ -6,11 +6,6 @@
 
 use Swerve\Cache;
 
-function cache_call(string $addr, string $path): array
-{
-    return json_decode((string) probe($addr, $path), true);
-}
-
 test('what one worker stores, every worker reads; a delete is seen by all', function () {
     [$process, $addr, $log] = swerve_start(workers: 2);
     try {

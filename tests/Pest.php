@@ -730,6 +730,14 @@ function probe(string $addr, string $path, float $timeout = 1.0): ?string
 }
 
 /**
+ * A fixture route's JSON answer, from a GET on a fresh connection (null decoded when it failed).
+ */
+function cache_call(string $addr, string $path): array
+{
+    return json_decode((string) probe($addr, $path), true);
+}
+
+/**
  * The pids of $n different workers, asking /pid on fresh connections.
  *
  * @return int[]

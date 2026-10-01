@@ -451,6 +451,7 @@ return new class($version) implements RequestHandlerInterface {
             '/cache-set' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->set($query['k'], \json_decode($query['v'], true), isset($query['ttl']) ? (int) $query['ttl'] : null)])),
             '/cache-get' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->get($query['k'], 'missing')])),
             '/cache-del' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->delete($query['k'])])),
+            '/cache-clear' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->clear()])),
             // Swerve::claim(): ?n= name, ?timeout= seconds to wait; answers [pid, acquired, elapsed].
             // A handle that acquired is kept, so that it outlives its request; /drop lets it go
             '/claim'   => (function () use ($query) {
@@ -476,6 +477,105 @@ return new class($version) implements RequestHandlerInterface {
                 unset($this->claims[$query['n']]); // the destructor releases
 
                 return new Response(200, [], \json_encode([\getmypid(), true]));
+            })(),
+            // A critical section guarded by claim ?n=, for the mutual exclusion tests: waits ?timeout=
+            // seconds, appends "enter <seq> <pid>", sleeps ?ms=, appends "leave <seq>" to
+            // $SWERVE_TEST_DIR/crit.log, one write each, and releases (?drop=1: by letting the handle go).
+            // Answers [pid, 'done' or 'timeout', seq].
+            '/crit' => (static function () use ($query) {
+                $section = static function () use ($query): string {
+                    $claim = Swerve::claim($query['n']);
+                    if (null === $claim->acquire((float) $query['timeout'])) {
+                        return 'timeout';
+                    }
+                    $log = \fopen(\getenv('SWERVE_TEST_DIR') . '/crit.log', 'a');
+                    \fwrite($log, "enter {$query['seq']} " . \getmypid() . "\n");
+                    phasync::sleep((float) $query['ms'] / 1000);
+                    \fwrite($log, "leave {$query['seq']}\n");
+                    \fclose($log);
+                    if (!isset($query['drop'])) {
+                        $claim->release();
+                    }
+
+                    return 'done';
+                };
+
+                return new Response(200, [], \json_encode([\getmypid(), $section(), (int) $query['seq']]));
+            })(),
+            // Acquires ?n=, then fails: the exception unwinds past the handle
+            '/claim-throw' => (static function () use ($query) {
+                $claim = Swerve::claim($query['n']);
+                $claim->acquire();
+                throw new RuntimeException('claim-boom');
+            })(),
+            // Acquires ?n= in a coroutine that is cancelled: ?mode=hold once it holds the claim and
+            // sleeps, ?mode=call at once, while the master may be taking the claim yet
+            '/claim-cancel' => (static function () use ($query) {
+                $co = phasync::go(static function () use ($query) {
+                    $claim = Swerve::claim($query['n']);
+                    $claim->acquire();
+                    phasync::sleep(30);
+                });
+                phasync::sleep('hold' === $query['mode'] ? 0.1 : 0);
+                phasync::cancel($co);
+
+                return new Response(200, [], \json_encode([\getmypid(), true]));
+            })(),
+            // Acquires ?n=, holds it ?ms= milliseconds inside this request, releases by the handle going
+            '/claim-hold' => (static function () use ($query) {
+                $claim = Swerve::claim($query['n']);
+                $got   = null !== $claim->acquire();
+                phasync::sleep((float) $query['ms'] / 1000);
+
+                return new Response(200, [], \json_encode([\getmypid(), $got]));
+            })(),
+            // ?count= acquire / held / available / drop cycles in 10 coroutines of this one worker,
+            // fire-and-forget releases among the calls; ?id= tells the requests apart; answers [pid, number of answers that were wrong]
+            '/claim-mix' => (static function () use ($query) {
+                $bad   = 0;
+                $pid   = \getmypid();
+                $cycle = static function (string $name) use (&$bad) {
+                    $claim = Swerve::claim($name);
+                    $bad  += null === $claim->acquire() ? 1 : 0;
+                    $bad  += $claim->held() ? 0 : 1;
+                    $bad  += Swerve::claim($name)->available() ? 1 : 0;
+                    $claim = null; // the release has no reply; the next question is answered after it
+                    $bad  += Swerve::claim($name)->available() ? 0 : 1;
+                };
+                $coroutines = [];
+                foreach (\range(1, 10) as $c) {
+                    $coroutines[] = phasync::go(static function () use ($cycle, $c, $pid, $query) {
+                        for ($i = 0; $i < (int) $query['count'] / 10; ++$i) {
+                            $cycle("mix-$pid-{$query['id']}-$c-$i");
+                        }
+                    });
+                }
+                \array_map(phasync::await(...), $coroutines);
+
+                return new Response(200, [], \json_encode([$pid, $bad]));
+            })(),
+            // The claim named by the request body, for names that do not fit a query: ?op= claim|available|release
+            '/claim-raw' => (function () use ($request, $query) {
+                $name = (string) $request->getBody();
+                $pid  = \getmypid();
+                if ('available' === $query['op']) {
+                    return new Response(200, [], \json_encode([$pid, Swerve::claim($name)->available()]));
+                }
+                if ('release' === $query['op']) {
+                    $claim = $this->claims[$name] ?? null;
+                    $claim?->release();
+                    unset($this->claims[$name]);
+
+                    return new Response(200, [], \json_encode([$pid, null !== $claim]));
+                }
+                $claim = Swerve::claim($name);
+                if (null !== $claim->acquire()) {
+                    $this->claims[$name] = $claim;
+
+                    return new Response(200, [], \json_encode([$pid, true]));
+                }
+
+                return new Response(200, [], \json_encode([$pid, false]));
             })(),
             // Many lookups at once from one request's coroutines: each gets its own answer
             '/cache-many' => new Response(200, [], \json_encode((static function () {

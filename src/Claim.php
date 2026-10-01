@@ -49,14 +49,18 @@ final class Claim
     public function acquire(float $timeout = 0.0): ?static
     {
         $deadline = \hrtime(true) / 1e9 + $timeout;
+        // From here on the master may take the name: a coroutine cancelled while the call is in flight
+        // never learns it did, so the destructor must release (harmless when it did not)
+        $this->acquired = true;
         while (!Cache::instance()->call(['claim', $this->name, $this->token])) {
             $left = $deadline - \hrtime(true) / 1e9;
             if ($left <= 0) {
+                $this->acquired = false;
+
                 return null;
             }
             phasync::sleep(\min(self::POLL, $left));
         }
-        $this->acquired = true;
 
         return $this;
     }
