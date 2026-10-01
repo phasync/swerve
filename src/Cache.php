@@ -142,8 +142,10 @@ final class Cache implements CacheInterface
      *
      * @param \Closure(?list<string> $keys): void $forget
      * @param int                                  $owner  the worker's inbox, which holds the claims it makes
+     *
+     * @return string|null the reply; null for request id 0, which asks for none, see send()
      */
-    public static function serve(LruCache $store, Claims $claims, int $owner, string $message, \Closure $forget): string
+    public static function serve(LruCache $store, Claims $claims, int $owner, string $message, \Closure $forget): ?string
     {
         $call = \unserialize(\substr($message, 4), ['allowed_classes' => false]);
         if ('set' === $call[0] || 'delete' === $call[0]) {
@@ -152,7 +154,9 @@ final class Cache implements CacheInterface
             $forget(null);
         }
 
-        return \substr($message, 0, 4) . \serialize(self::apply($store, $claims, $owner, $call));
+        $result = self::apply($store, $claims, $owner, $call);
+
+        return "\0\0\0\0" === \substr($message, 0, 4) ? null : \substr($message, 0, 4) . \serialize($result);
     }
 
     /**
@@ -257,6 +261,23 @@ final class Cache implements CacheInterface
     }
 
     /**
+     * Carry out a request without waiting for the reply, so that it never suspends: for a
+     * destructor, which may run during garbage collection, fiber teardown or shutdown. The master
+     * is sent request id 0, for which it sends no reply.
+     *
+     * @internal
+     */
+    public function send(array $call): void
+    {
+        if (null === Topics::$toMaster) {
+            self::apply($this->layer, $this->claims ??= new Claims(), 0, $call);
+
+            return;
+        }
+        (Topics::$toMaster)(self::TOPIC, \pack('N', 0) . \serialize($call));
+    }
+
+    /**
      * A request on $store. Entries are the value serialized, after 8 bytes of its expiry on the
      * monotonic clock in nanoseconds (0: none).
      */
@@ -292,9 +313,9 @@ final class Cache implements CacheInterface
 
                 return true;
             case 'claim':
-            case 'renew':
             case 'release':
             case 'check':
+            case 'held':
                 return $claims->apply($call, $owner);
         }
         throw new \UnexpectedValueException("Unknown cache request '$call[0]'");

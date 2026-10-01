@@ -384,23 +384,29 @@ $cache->set("user:$id", $user, 60);
 
 ### Claims
 
-`Swerve::claim()` gives one worker at a time a name, decided by the master: a job that must
-not run twice, a leader.
+`Swerve::claim($name)` gives a handle on a name that one worker at a time can hold, decided by
+the master: a job that must not run twice, a leader. The handle claims nothing yet.
 
 ```php
-if ($claim = Swerve::claim('nightly-report', ttl: 10)) {
-    while (work()) { $claim->renew() or break; }
-    $claim->release();
-}
+function nightlyReport(): void
+{
+    if ($claim = Swerve::claim('nightly-report')->acquire()) {
+        work();
+    }
+}   // $claim goes out of scope: released
 ```
 
-- It returns `null` when another worker holds the name; `Swerve::claim($name, $ttl, timeout: 5)`
-  waits up to that many seconds for it to come free, trying every 20 ms (no fairness: whoever
-  tries first gets it). A claim lasts `ttl` seconds unless renewed; `renew()` returns `false`
-  once it is lost. `Swerve::claimed($name)` tells whether anyone holds the name, claiming nothing.
-- A claim ends at once when its worker drains or dies, not after the TTL. Names are apart from
-  the cache's keys, and a claim is never evicted. Without the master, claims are the
-  process's own.
+- `available()` tells whether nobody holds the name, claiming nothing. `acquire($timeout)` takes
+  it and returns the handle, or `null`; with a `$timeout` it polls every 20 ms for the name to
+  come free (no fairness: whoever tries first gets it). On a handle that holds the name already,
+  it returns the handle. `held()` asks the master whether this handle holds it: a claim is
+  freed at once when its worker drains, so a handle can lose it. `release()` gives it up.
+- A claim has no TTL: it is held until released, destroyed, or its worker drains or dies (the
+  watchdog kills a stalled worker). Names are apart from the cache's keys, and a claim is never
+  evicted. Without the master, claims are the process's own.
+- A destroyed handle releases without waiting for the master. A release message that is lost
+  still falls back to the worker's exit. A handle kept in a static or in a reference cycle is
+  destroyed late, and releases late.
 
 ## Code written for PHP-FPM
 

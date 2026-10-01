@@ -354,7 +354,9 @@ final class Cluster
                     $reply = Cache::serve($this->cache, $this->claims, $w->inbox, $message, function (?array $keys) {
                         $this->forgetAll(Topics::frame(Cache::FORGET, \serialize($keys)));
                     });
-                    $this->send($w, Topics::frame(Cache::TOPIC, $reply));
+                    if (null !== $reply) {
+                        $this->send($w, Topics::frame(Cache::TOPIC, $reply));
+                    }
                 } elseif (Inboxes::TOPIC === $topic) {
                     $reply = $this->inboxes->serve($w->inbox, $message, fn (string $topic) => $this->forgetAll(Topics::frame(Inboxes::FORGET, $topic)));
                     if (null !== $reply) {

@@ -399,7 +399,7 @@ test('serve() carries out a request on the store and has the workers forget the 
     };
     $ask = static fn (array $call): array => (static function (string $reply) {
         return [substr($reply, 0, 4), unserialize(substr($reply, 4))];
-    })(Cache::serve($store, pack('N', 7) . serialize($call), $forget));
+    })(Cache::serve($store, new Swerve\Util\Claims(), 0, pack('N', 7) . serialize($call), $forget));
 
     [$id, $stored] = $ask(['set', ['a' => serialize(1), 'b' => serialize(2)], null]);
     expect([unpack('N', $id)[1], $stored, $forgot])->toBe([7, true, [['a', 'b']]]);
@@ -418,12 +418,12 @@ test('serve() expires an entry with a TTL on the monotonic clock, and refuses an
     $store = new LruCache(maxBytes: 1 << 20);
     $none  = static function (?array $keys): void {
     };
-    Cache::serve($store, pack('N', 1) . serialize(['set', ['t' => serialize('v')], 0.15]), $none);
-    $get = static fn () => unserialize(substr(Cache::serve($store, pack('N', 2) . serialize(['get', ['t']]), $none), 4));
+    Cache::serve($store, new Swerve\Util\Claims(), 0, pack('N', 1) . serialize(['set', ['t' => serialize('v')], 0.15]), $none);
+    $get = static fn () => unserialize(substr(Cache::serve($store, new Swerve\Util\Claims(), 0, pack('N', 2) . serialize(['get', ['t']]), $none), 4));
     expect(array_keys($get()))->toBe(['t']);
     usleep(250_000);
     expect($get())->toBe([]);
-    expect(fn () => Cache::serve($store, pack('N', 3) . serialize(['nonsense']), $none))->toThrow(UnexpectedValueException::class);
+    expect(fn () => Cache::serve($store, new Swerve\Util\Claims(), 0, pack('N', 3) . serialize(['nonsense']), $none))->toThrow(UnexpectedValueException::class);
 });
 
 test('a worker keeps what it read in its local layer, and forget() drops it', function () {
@@ -435,7 +435,7 @@ test('a worker keeps what it read in its local layer, and forget() drops it', fu
     // A fake master: it serves each request at once, and the reply reaches the worker as the pipe's reader would call reply()
     Topics::$toMaster = static function (string $topic, string $message) use (&$calls, $store): void {
         $calls[] = unserialize(substr($message, 4))[0];
-        $reply   = Cache::serve($store, $message, static function (?array $keys): void {
+        $reply   = Cache::serve($store, new Swerve\Util\Claims(), 0, $message, static function (?array $keys): void {
         });
         phasync::go(static fn () => Cache::reply($reply));
     };

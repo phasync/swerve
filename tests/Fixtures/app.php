@@ -451,25 +451,31 @@ return new class($version) implements RequestHandlerInterface {
             '/cache-set' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->set($query['k'], \json_decode($query['v'], true), isset($query['ttl']) ? (int) $query['ttl'] : null)])),
             '/cache-get' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->get($query['k'], 'missing')])),
             '/cache-del' => new Response(200, [], \json_encode([\getmypid(), Swerve::cache()->delete($query['k'])])),
-            // Swerve::claim(): ?n= name, ?ttl= seconds, ?timeout= seconds to wait; answers [pid, claimed, elapsed].
-            // The Claim is kept, not released when the request ends
+            // Swerve::claim(): ?n= name, ?timeout= seconds to wait; answers [pid, acquired, elapsed].
+            // A handle that acquired is kept, so that it outlives its request; /drop lets it go
             '/claim'   => (function () use ($query) {
-                $start = \microtime(true);
-                $claim = Swerve::claim($query['n'], (float) $query['ttl'], (float) ($query['timeout'] ?? 0));
-                if (null !== $claim) {
+                $start    = \microtime(true);
+                $claim    = Swerve::claim($query['n']);
+                $acquired = null !== $claim->acquire((float) ($query['timeout'] ?? 0));
+                if ($acquired) {
                     $this->claims[$query['n']] = $claim;
                 }
 
-                return new Response(200, [], \json_encode([\getmypid(), null !== $claim, \microtime(true) - $start]));
+                return new Response(200, [], \json_encode([\getmypid(), $acquired, \microtime(true) - $start]));
             })(),
-            '/claimed' => new Response(200, [], \json_encode([\getmypid(), Swerve::claimed($query['n'])])),
-            '/renew'   => new Response(200, [], \json_encode([\getmypid(), isset($this->claims[$query['n']]) && $this->claims[$query['n']]->renew()])),
-            '/release' => (function () use ($query) {
+            '/available' => new Response(200, [], \json_encode([\getmypid(), Swerve::claim($query['n'])->available()])),
+            '/held'      => new Response(200, [], \json_encode([\getmypid(), isset($this->claims[$query['n']]) && $this->claims[$query['n']]->held()])),
+            '/release'   => (function () use ($query) {
                 $claim = $this->claims[$query['n']] ?? null;
                 $claim?->release();
                 unset($this->claims[$query['n']]);
 
                 return new Response(200, [], \json_encode([\getmypid(), null !== $claim]));
+            })(),
+            '/drop'      => (function () use ($query) {
+                unset($this->claims[$query['n']]); // the destructor releases
+
+                return new Response(200, [], \json_encode([\getmypid(), true]));
             })(),
             // Many lookups at once from one request's coroutines: each gets its own answer
             '/cache-many' => new Response(200, [], \json_encode((static function () {

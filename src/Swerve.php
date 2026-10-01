@@ -95,20 +95,12 @@ final class Swerve
     }
 
     /**
-     * Claim $name for $ttl seconds, atomically: null when another worker holds it, after waiting
-     * up to $timeout seconds for it to come free. See Claim.
+     * A handle on the name $name, one holder at a time across the workers; claims nothing until
+     * acquire() is called: `Swerve::claim('name')->acquire()` is null, or the held handle. See Claim.
      */
-    public static function claim(string $name, float $ttl, float $timeout = 0.0): ?Claim
+    public static function claim(string $name): Claim
     {
-        return Claim::acquire($name, $ttl, $timeout);
-    }
-
-    /**
-     * Whether any worker holds $name now; one trip to the master, nothing is claimed.
-     */
-    public static function claimed(string $name): bool
-    {
-        return Claim::held($name);
+        return new Claim($name);
     }
 
     /**

@@ -5,67 +5,80 @@ namespace Swerve;
 use phasync;
 
 /**
- * A claim on a name, from Swerve::claim(): held by one worker at a time, across the whole server.
+ * A handle on a name that one worker at a time can hold across the whole server, from
+ * Swerve::claim(). The handle claims nothing until acquire().
  *
- *     if ($claim = Swerve::claim('nightly-report', ttl: 10)) {
- *         while (...) { $claim->renew() or break; ... }
- *         $claim->release();
- *     }
+ *     if ($claim = Swerve::claim('nightly-report')->acquire()) {
+ *         ...
+ *     }                                     // released when $claim goes out of scope
  *
- * The master decides, so two workers never hold the same name. The claim lasts $ttl seconds
- * unless renewed, and ends at once when its worker drains or dies: whoever claims next takes
- * over without waiting for the TTL. A worker that stalls past the TTL loses the claim to
- * another; renew() tells it by returning false. Names are a namespace of their own, apart from
- * the cache's keys. claim() can wait up to a timeout for a name to come free, by trying every
- * 20 ms: whoever tries first when it frees gets it, in no order. Without a master (served by
- * something else than swerve's workers) a name is claimed once at a time in the process.
+ * The master decides, so two workers never hold the same name. A claim is held until it is
+ * released, its handle is destroyed, or its worker drains or dies (a stalled worker is killed by
+ * the watchdog): whoever acquires next takes over at once. Each handle has a token of its own, so
+ * a stale handle can neither hold nor release what another holds. Names are a namespace of their
+ * own, apart from the cache's keys. Without a master (served by something else than swerve's
+ * workers) a name is held once at a time in the process.
  */
 final class Claim
 {
-    /** Seconds between a waiting claim's attempts. */
+    /** Seconds between a waiting acquire()'s attempts. */
     private const POLL = 0.02;
 
-    private function __construct(
-        public readonly string $name,
-        private readonly string $token,
-        private readonly float $ttl,
-    ) {
+    private readonly string $token;
+    private bool $acquired = false;
+
+    public function __construct(public readonly string $name)
+    {
+        if ('' === $name) {
+            throw new \InvalidArgumentException('A claim needs a name');
+        }
+        $this->token = \bin2hex(\random_bytes(8));
     }
 
-    /** @internal see Swerve::claim() */
-    public static function acquire(string $name, float $ttl, float $timeout): ?self
+    /** Whether nobody holds the name now; one trip to the master, nothing is claimed. */
+    public function available(): bool
     {
-        if ('' === $name || $ttl <= 0) {
-            throw new \InvalidArgumentException('A claim needs a name and a TTL above 0');
-        }
-        $token    = \bin2hex(\random_bytes(8));
+        return !Cache::instance()->call(['check', $this->name]);
+    }
+
+    /**
+     * Take the name, trying every 20 ms for up to $timeout seconds when another holds it:
+     * whoever tries first when it frees gets it, in no order. Returns this handle when it holds
+     * the name, also if it did already; null when it could not.
+     */
+    public function acquire(float $timeout = 0.0): ?static
+    {
         $deadline = \hrtime(true) / 1e9 + $timeout;
-        while (!Cache::instance()->call(['claim', $name, $token, $ttl])) {
+        while (!Cache::instance()->call(['claim', $this->name, $this->token])) {
             $left = $deadline - \hrtime(true) / 1e9;
             if ($left <= 0) {
                 return null;
             }
             phasync::sleep(\min(self::POLL, $left));
         }
+        $this->acquired = true;
 
-        return new self($name, $token, $ttl);
+        return $this;
     }
 
-    /** @internal see Swerve::claimed() */
-    public static function held(string $name): bool
+    /** Whether this handle holds the name right now, as the master says: not released, and its worker not drained. */
+    public function held(): bool
     {
-        return Cache::instance()->call(['check', $name]);
-    }
-
-    /** Hold the claim for another TTL from now; false when it is lost: expired and taken, released, or its worker drained. */
-    public function renew(): bool
-    {
-        return Cache::instance()->call(['renew', $this->name, $this->token, $this->ttl]);
+        return Cache::instance()->call(['held', $this->name, $this->token]);
     }
 
     /** Give the claim up, so that another can take it. */
     public function release(): void
     {
         Cache::instance()->call(['release', $this->name, $this->token]);
+        $this->acquired = false;
+    }
+
+    /** Releases without waiting for the master's reply: a destructor must not suspend. */
+    public function __destruct()
+    {
+        if ($this->acquired) {
+            Cache::instance()->send(['release', $this->name, $this->token]);
+        }
     }
 }
