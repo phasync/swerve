@@ -66,7 +66,8 @@ return $app;
 
 The file is loaded once in each worker process, when the worker starts: code outside the
 handler (creating the app, reading configuration, connecting to a database) runs once per
-worker, not once per request.
+worker, not once per request. It is the application's bootstrap: it may also start background
+coroutines and servers of your own, see [swerve.php as bootstrap](bootstrap.md).
 
 ## Run it
 

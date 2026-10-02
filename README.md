@@ -122,7 +122,8 @@ Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets`
    composer require phasync/swerve
    ```
 
-2. Create `swerve.php` in your project root, returning a PSR-15 `RequestHandlerInterface`. A
+2. Create `swerve.php` in your project root, returning a PSR-15 `RequestHandlerInterface`
+   (the file is also your [bootstrap](docs/bootstrap.md): each worker runs it once at start). A
    Slim app is one (`composer require slim/slim slim/psr7`):
 
    ```php
@@ -390,7 +391,8 @@ $cache->set("user:$id", $user, 60);
 - The master evicts the least recently used entries past `--cache-size` (64 MiB). It keeps
   values serialized and never loads your classes. A rolling reload keeps the contents; a
   restart empties them.
-- Available once the worker serves, not while `swerve.php` loads. Without the master (swerve
+- Available once the worker serves: not while `swerve.php` loads, but in a coroutine it starts
+  after the coroutine's first wait ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
   embedded in your own process), the cache is the process's own.
 
 ### Claims

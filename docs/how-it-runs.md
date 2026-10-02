@@ -7,9 +7,10 @@ core by default (`--workers`). The master never loads your application; it super
 it restarts a worker that dies, replaces a stuck one (the watchdog) or one that uses too
 much memory (recycling), and does rolling reloads.
 
-Every worker loads your application file once, inside its event loop, so the file may start
-coroutines that run for the worker's whole life (a subscriber, a periodic job). Then it
-serves HTTP on the same address as the
+Every worker loads your application file once, inside its event loop. The file is the
+application's bootstrap: it sets things up, may start coroutines that run for the worker's
+whole life (a subscriber, a periodic job) and servers of its own, and returns the request
+handler ([details](bootstrap.md)). Then the worker serves HTTP on the same address as the
 others (`SO_REUSEPORT`): the kernel hands each new connection to one of them. A connection
 stays with its worker until it closes.
 
@@ -132,4 +133,4 @@ The functions an application uses most (all static on `phasync`):
 
 `phasync\TimeoutException` is thrown when a wait takes longer than its timeout.
 
-Next: [Requests and responses](requests-and-responses.md).
+Next: [The application file](bootstrap.md), then [Requests and responses](requests-and-responses.md).
