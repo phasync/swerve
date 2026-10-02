@@ -217,7 +217,7 @@ final class Swerve
     }
 
     /**
-     * The installed version, as Composer knows it: `0.1.0-alpha3`, or `dev-main` in a checkout.
+     * The installed version, as Composer knows it: `0.1.0-beta1`, or `dev-main` in a checkout.
      *
      * @return string the version, or 'unknown' when Composer has none for `phasync/swerve`
      */

@@ -77,7 +77,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         exit(0);
     }
     if (!$args->quiet && \stream_isatty(\STDOUT)) {
-        $term->write('<!bold>swerve '.Swerve::getVersion()."<!> <!yellow>(alpha: expect changes until 1.0)<!>\n");
+        $term->write('<!bold>swerve '.Swerve::getVersion()."<!> <!yellow>(beta: expect changes until 1.0)<!>\n");
     }
 
     /**

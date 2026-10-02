@@ -2,11 +2,11 @@
 
 ## Install
 
-Swerve and phasync, the coroutine library it runs on, are alpha, so your project must allow
-alpha packages:
+Swerve and phasync, the coroutine library it runs on, are beta, so your project must allow
+beta packages:
 
 ```bash
-composer config minimum-stability alpha
+composer config minimum-stability beta
 composer config prefer-stable true
 composer require phasync/swerve
 ```
@@ -16,7 +16,7 @@ when it is installed. See [Production](production.md#phasync-ext) for what it ch
 
 ```bash
 composer require phasync/phasync-ext
-vendor/bin/swerve --version   # swerve 0.1.0-alpha6 (PHP 8.5.11, phasync 2.0.0-alpha5, phasync-ext 0.4.0-alpha17)
+vendor/bin/swerve --version   # swerve 0.1.0-beta1 (PHP 8.5.11, phasync 2.0.0-beta4, phasync-ext 0.5.0-beta1)
 ```
 
 ## A first application

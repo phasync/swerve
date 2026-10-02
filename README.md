@@ -26,7 +26,7 @@ Swerve is a PHP application server, built on [phasync](https://github.com/phasyn
 coroutines. Your application stays loaded between requests, every worker serves many requests
 and connections at once, and request and response bodies stream.
 
-> Alpha: APIs and options may change until 1.0.
+> Beta: APIs and options may still change until 1.0.
 
 **[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
 [WebSockets](examples/websocket-chat) and over [Server-Sent Events](examples/sse-chat).
@@ -114,10 +114,10 @@ it needs phasync-ext, which waits with epoll.
 
 Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions.
 
-1. Install swerve. While it is alpha, your project must allow alpha packages:
+1. Install swerve. While it is beta, your project must allow beta packages:
 
    ```bash
-   composer config minimum-stability alpha
+   composer config minimum-stability beta
    composer config prefer-stable true
    composer require phasync/swerve
    ```
@@ -422,7 +422,7 @@ function nightlyReport(): void
 
 ## Code written for PHP-FPM
 
-With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-alpha15 or later),
+With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta1 or later),
 `Swerve\Http\Virtual::run()` runs code that echoes and calls `header()` as a request of its own:
 its output, status, headers, cookies and session become the PSR-7 response, streamed, and
 `exit()` ends the request, not the worker.

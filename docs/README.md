@@ -23,5 +23,5 @@ Read in this order when you build an application on swerve:
 The examples in [`examples/`](../examples) run as they are, and swerve's test suite runs
 them: [`sse-chat`](../examples/sse-chat) and [`websocket-chat`](../examples/websocket-chat).
 
-Swerve is alpha: options and APIs may change until 1.0. It runs on Linux, with PHP 8.2 or
+Swerve is beta: options and APIs may change until 1.0. It runs on Linux, with PHP 8.2 or
 later and the `pcntl`, `posix` and `sockets` extensions.
