@@ -367,7 +367,8 @@ final class Cluster
                     throw new \UnexpectedValueException('A worker sent a frame for an unknown topic');
                 }
             });
-            $this->onlyHeartbeats = $this->onlyHeartbeats && !$requested && '' === \trim($bytes, '.');
+            // A partial frame in $w->in means more is on its way: the next round must not sleep
+            $this->onlyHeartbeats = $this->onlyHeartbeats && !$requested && '' === $w->in && '' === \trim($bytes, '.');
             if (\str_contains($bytes, 'R') && WorkerProcess::STARTING === $w->state) {
                 $this->onReady($w);
             }
