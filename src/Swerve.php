@@ -10,8 +10,8 @@ use Swerve\Util\Topics;
  * What swerve gives the application: its log, the cache and the messages shared by every worker, and the state of the worker.
  *
  * Every method is static. Workers share no memory: the cache and the messages go through the
- * master process, and work once the worker serves. That is not while `swerve.php` loads, but it
- * is in a coroutine that `swerve.php` starts, after the coroutine's first wait (see docs/bootstrap.md).
+ * master process. A coroutine that `swerve.php` starts waits for the worker to serve before its
+ * first call goes through; directly in `swerve.php` the cache and publishing throw (see docs/bootstrap.md).
  *
  * ```php
  * use Swerve\Swerve;
@@ -99,7 +99,7 @@ final class Swerve
      * @param mixed  $message anything `json_encode()` takes except null; at most 128 KiB encoded
      *
      * @throws \InvalidArgumentException for a topic or message outside those sizes, a topic starting with "\0", or null (which a heartbeat subscription yields for "nothing came")
-     * @throws \LogicException           while `swerve.php` loads, and in a coroutine it started there before the coroutine's first wait: the worker serves after that
+     * @throws \LogicException           directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      * @throws \JsonException            for a value JSON can't express
      *
      * @see Swerve::subscribe       receives the messages

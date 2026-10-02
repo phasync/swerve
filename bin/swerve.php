@@ -10,6 +10,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
+use Swerve\Cache;
 use Swerve\CLI\Address;
 use Swerve\CLI\Args;
 use Swerve\Dispatcher;
@@ -217,7 +218,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $files = '' !== $args->public ? new StaticFiles($args->public) : null;
     phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $fastcgi, $files) {
         try {
-            $app = require $swerveFile;
+            Cache::$loader = phasync::getFiber();
+            $app           = require $swerveFile;
+            Cache::$loader = null;
         } catch (\Throwable $e) {
             $logger->critical('Loading {file} failed: {exception}', ['file' => $swerveFile, 'exception' => $e]);
             exit(Worker::EXIT_BAD_APP);

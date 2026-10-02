@@ -381,7 +381,7 @@ final class Worker
     private function awaitMaster(): void
     {
         $buffer            = '';
-        Cache::$listening = true;
+        Cache::markListening();
         while (true) {
             $bytes = (string) \fread(phasync::readable($this->pipe, \PHP_FLOAT_MAX), 65536);
             if ('' === $bytes && \feof($this->pipe)) {

@@ -134,7 +134,7 @@ final class OrderedLog
             throw new \InvalidArgumentException('A topic is 1 to ' . Topics::MAX_TOPIC . ' bytes, not ' . \strlen($topic));
         }
         if (null !== Topics::$toMaster && !Cache::$listening) {
-            throw new \LogicException('OrderedChannel::subscribe() is there once the worker serves, not while swerve.php loads');
+            Cache::awaitListening('OrderedChannel::subscribe()');
         }
         $id           = \hash('sha256', $topic);
         $subscription = new Subscription(self::MESSAGES . $id, $maxLag, $heartbeat);

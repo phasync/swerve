@@ -31,8 +31,8 @@ use Swerve\Util\Topics;
  * the master: a rolling reload keeps them, a restart empties them. Without a master (the
  * application served by something other than swerve's workers), the cache is the process's own.
  *
- * It needs the master, so a read that has to ask it, and every write, throw a `LogicException`
- * while `swerve.php` loads: the worker serves after that. A key is a non-empty string without
+ * It needs the master: in a coroutine that `swerve.php` starts, a call that has to ask it waits
+ * for the worker to serve, and directly in `swerve.php` it throws a `LogicException`. A key is a non-empty string without
  * `{}()/\@:`, else a {@see CacheKeyException} is thrown.
  *
  * @see Swerve::cache
@@ -62,6 +62,9 @@ final class Cache implements CacheInterface
 
     /** Set once the worker reads its pipe: before that no reply could arrive. */
     public static bool $listening = false;
+
+    /** The coroutine that requires swerve.php, while it does: it can't wait for the worker to serve. */
+    public static ?\Fiber $loader = null;
 
     private int $next = 0;
 
@@ -155,7 +158,7 @@ final class Cache implements CacheInterface
      * @return bool false when the value is larger than the cache holds
      *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   while the application loads: the worker serves after that
+     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      *
      * @see Cache::get
      * @see Cache::delete
@@ -174,7 +177,7 @@ final class Cache implements CacheInterface
      * @return bool false when a value is larger than the cache holds
      *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   while the application loads: the worker serves after that
+     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      */
     public function setMultiple(iterable $values, null|int|\DateInterval $ttl = null): bool
     {
@@ -198,7 +201,7 @@ final class Cache implements CacheInterface
      * @return bool true, also when there was nothing to remove
      *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   while the application loads: the worker serves after that
+     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      */
     public function delete(string $key): bool
     {
@@ -211,7 +214,7 @@ final class Cache implements CacheInterface
      * @param iterable<string> $keys
      *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   while the application loads: the worker serves after that
+     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      */
     public function deleteMultiple(iterable $keys): bool
     {
@@ -221,7 +224,7 @@ final class Cache implements CacheInterface
     /**
      * Remove everything from the cache of every worker.
      *
-     * @throws \LogicException while the application loads: the worker serves after that
+     * @throws \LogicException directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      */
     public function clear(): bool
     {
@@ -328,6 +331,35 @@ final class Cache implements CacheInterface
     }
 
     /**
+     * Wait until the worker reads its pipe, which it does from the first turn of its event loop
+     * after swerve.php returned.
+     *
+     * @internal
+     *
+     * @throws \LogicException directly in swerve.php: the worker serves after it returns, so waiting would never end
+     */
+    public static function awaitListening(string $caller): void
+    {
+        if (phasync::getFiber() === self::$loader) {
+            throw new \LogicException("$caller cannot be used directly in swerve.php, which the worker serves after: use it in a coroutine (phasync::go()), or in a request");
+        }
+        while (!self::$listening) {
+            phasync::awaitFlag(self::instance()); // raised by markListening()
+        }
+    }
+
+    /**
+     * The worker reads its pipe from now on: wakes what waits in awaitListening().
+     *
+     * @internal
+     */
+    public static function markListening(): void
+    {
+        self::$listening = true;
+        phasync::raiseFlag(self::instance());
+    }
+
+    /**
      * Carry out a request: on this process's layer without a master, else by the master.
      *
      * @param list<string>|null $fetching keys a get fetches, for the local layer
@@ -338,7 +370,7 @@ final class Cache implements CacheInterface
             return self::apply($this->layer, $call);
         }
         if (!self::$listening) {
-            throw new \LogicException('Swerve::cache() is there once the worker serves, not while swerve.php loads');
+            self::awaitListening('Swerve::cache()');
         }
         $id                 = ++$this->next;
         $waiter             = new \stdClass();

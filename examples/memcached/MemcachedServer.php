@@ -15,7 +15,7 @@ use Swerve\Swerve;
  * cas, incr, decr, append and prepend atomic across the workers.
  *
  * ```php
- * (new MemcachedServer(11211))->start();   // in swerve.php, before it returns its handler
+ * (new MemcachedServer(11211))->start();   // in swerve.php
  * ```
  */
 final class MemcachedServer
@@ -42,10 +42,10 @@ final class MemcachedServer
     /**
      * Listen on the port and accept connections in a coroutine of its own.
      *
-     * Call it as the last thing swerve.php does before it returns: the coroutine starts at the
-     * first wait, which ends the loading, and the cache works once the worker serves. When the
-     * worker drains it stops accepting, closes the connections that are waiting for a command,
-     * and the others close after the command in progress.
+     * Call it from swerve.php, anywhere: the coroutine starts when the loading ends, and a command
+     * that needs the cache waits until the worker serves. When the worker drains it stops accepting,
+     * closes the connections that are waiting for a command, and the others close after the
+     * command in progress.
      *
      * @throws \RuntimeException when the port can't be listened on
      */

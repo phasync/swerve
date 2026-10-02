@@ -391,8 +391,8 @@ $cache->set("user:$id", $user, 60);
 - The master evicts the least recently used entries past `--cache-size` (64 MiB). It keeps
   values serialized and never loads your classes. A rolling reload keeps the contents; a
   restart empties them.
-- Available once the worker serves: not while `swerve.php` loads, but in a coroutine it starts
-  after the coroutine's first wait ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
+- A coroutine that `swerve.php` starts may use it at once: the call waits until the worker serves. Directly in
+  `swerve.php` it throws ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
   embedded in your own process), the cache is the process's own.
 
 ### Claims

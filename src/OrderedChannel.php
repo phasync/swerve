@@ -54,7 +54,7 @@ final class OrderedChannel implements \IteratorAggregate
      * @param mixed $message anything `json_encode()` takes except null; at most 128 KiB encoded
      *
      * @throws \InvalidArgumentException as Swerve::publish() does, and for a name starting with "\0"
-     * @throws \LogicException           while the application loads: the worker serves after that
+     * @throws \LogicException           directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      * @throws \JsonException            for a value JSON can't express
      *
      * @see OrderedChannel::subscribe
@@ -80,7 +80,7 @@ final class OrderedChannel implements \IteratorAggregate
      * @param float|null $heartbeat seconds without a message after which the loop yields null; null for never
      *
      * @throws \InvalidArgumentException for a name of 0 or over 255 bytes, or starting with "\0"
-     * @throws \LogicException           while the application loads: the worker serves after that
+     * @throws \LogicException           directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      *
      * @see OrderedChannel::write
      */

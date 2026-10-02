@@ -128,12 +128,12 @@ final class Topics
 
     /**
      * The master's bitmap of the workers with a subscription on the topic, kept until the master
-     * says to forget it: '' for none. Needs a master, and a worker that serves.
+     * says to forget it: '' for none. Needs a master, and waits for a worker that serves.
      */
     public static function bitmap(string $caller, string $topic): string
     {
         if (!Cache::$listening) {
-            throw new \LogicException("$caller() is there once the worker serves, not while swerve.php loads");
+            Cache::awaitListening("$caller()");
         }
 
         return self::$bitmaps->get($topic) ?? self::fetch($topic);

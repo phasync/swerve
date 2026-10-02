@@ -18,7 +18,7 @@ that answers.
 
 ## 1. Listen in every worker
 
-`swerve.php` creates the server and starts it before it returns the handler. Each worker listens
+`swerve.php` creates the server and starts it. Each worker listens
 on the same port with `SO_REUSEPORT`; the kernel gives every new connection to one of them.
 
 ```php
@@ -28,8 +28,9 @@ stream_set_blocking($listener, false);
 phasync::go($this->accept(...));
 ```
 
-The accept loop is a coroutine. It starts running when `swerve.php` has returned, which is also
-when the cache starts to work: see [what works where](../../docs/bootstrap.md#what-works-where).
+The accept loop is a coroutine. It starts running when `swerve.php` has returned; a command that
+needs the cache waits until the worker serves, see
+[what works where](../../docs/bootstrap.md#what-works-where).
 
 ## 2. A coroutine per connection
 

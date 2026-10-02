@@ -85,9 +85,8 @@ $subscription = $ledger->subscribe(maxLag: 30.0, heartbeat: null);
   next look, at most a second later. The one way left for an inversion is a publisher that stalls
   for more than a second between reading the clock and appending; its message may then be missed
   by readers that have moved on.
-- Topics starting with `"\0"` are swerve's own: `publish()`, `subscribe()` and the channel refuse them. Available once
-  the worker serves, see [what works where](bootstrap.md#what-works-where). Without the master, it works in the process,
-  in publishing order.
+- Topics starting with `"\0"` are swerve's own: `publish()`, `subscribe()` and the channel refuse them. Without the
+  master, it works in the process, in publishing order.
 
 ## Publishing
 
@@ -140,8 +139,7 @@ A worker's inbox holds about 200 KB. A worker that stops reading it (its event l
 blocking code) does not hold up the publishers: after 0.1 s they drop what they could not
 deliver to it and log a warning, and it gets what is published after it reads again.
 
-`Swerve::publish()` works once the worker serves; before that, while `swerve.php` loads, it
-throws `LogicException`. A coroutine started there may publish after its first wait: see
-[what works where](bootstrap.md#what-works-where).
+A coroutine that `swerve.php` starts may publish at once: the call waits until the worker serves.
+Directly in `swerve.php` it throws `LogicException`, see [what works where](bootstrap.md#what-works-where).
 
 Next: [Command line](command-line.md).

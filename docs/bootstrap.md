@@ -35,7 +35,7 @@ phasync::go(function () use ($app) {                          // one worker at a
     $claim->release();
 });
 
-(new MemcachedServer(11211))->start();                        // a server of your own, last
+(new MemcachedServer(11211))->start();                        // a server of your own
 
 return $app;                                                  // the PSR-15 handler that serves HTTP
 ```
@@ -44,22 +44,21 @@ return $app;                                                  // the PSR-15 hand
 
 ## What works where
 
-`Swerve::cache()` and `Swerve::publish()` need the worker to serve, which it does from the first
-turn of its event loop after `swerve.php` returns. `Swerve::claim()` and `Swerve::subscribe()`
-work at any time.
+`Swerve::cache()` and `Swerve::publish()` go through the master, and the worker reads its
+answers from the first turn of its event loop after `swerve.php` returns. A coroutine that
+needs them before that waits for it, and carries on once the worker serves. `Swerve::claim()` and
+`Swerve::subscribe()` work at any time.
 
 | Your code runs | `cache()`, `publish()` | `claim()`, `subscribe()` |
 |---|---|---|
 | directly in `swerve.php`, while it loads | throw `LogicException` | work |
-| in a coroutine, before its first wait | throw `LogicException` | work |
-| in a coroutine, after its first wait (`phasync::sleep()`, a stream, a message) | work | work |
+| in a coroutine started there (`phasync::go()`, `phasync::service()`) | wait for the worker to serve, then work | work |
 | in a request, or in a connection of your own server | work | work |
 
-This is the same with and without phasync-ext. A wait inside `swerve.php` lets the coroutines
-started before it run, before the worker serves. `phasync::sleep()` waits, and with phasync-ext
-so do the blocking calls it makes cooperative (`usleep()`, MySQL, curl). So put the coroutines
-and servers last in the file, and let a coroutine that needs the cache wait first. A subscription
-made while loading receives what any worker publishes afterwards.
+Directly in `swerve.php` waiting could never end: the worker serves after the file returns, so
+that is the one place with an immediate error. Move the call into a coroutine. This is the same
+with and without phasync-ext. A subscription made while loading receives what any worker
+publishes afterwards.
 
 ## One copy per worker
 
