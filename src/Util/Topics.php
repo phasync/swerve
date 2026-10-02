@@ -4,6 +4,7 @@ namespace Swerve\Util;
 
 use Closure;
 use phasync;
+use phasync\ChannelException;
 use phasync\SubscriberInterface;
 use phasync\SubscribersInterface;
 use phasync\TimeoutException;
@@ -174,11 +175,19 @@ final class Topics
      * all of them. They share the value (an array is copied only if one changes it; an object
      * is a SealedObject, which nobody can change). Each message carries when it arrived (now,
      * unless $arrived says), for Subscription's lag check.
+     *
+     * The write suspends until the topic's publisher has taken the message. If the last
+     * subscriber leaves meanwhile (leave()), or the process drains, the publisher is closed and
+     * the write throws: nobody is left to deliver to, which is the outcome, not a failure.
      */
     public static function deliver(string $topic, string $message, ?int $arrived = null): void
     {
         if (isset(self::$writers[$topic])) {
-            self::$writers[$topic]->write([$arrived ?? \hrtime(true), SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR))]);
+            try {
+                self::$writers[$topic]->write([$arrived ?? \hrtime(true), SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR))]);
+            } catch (ChannelException) {
+                // Closed while the write was suspended: the topic has no subscribers left
+            }
         }
     }
 
