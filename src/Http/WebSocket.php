@@ -314,7 +314,7 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
     {
         if (!$this->closed) {
             $this->note($code, $reason);
-            $this->frame(8, \pack('n', $code) . $reason);
+            $this->frame(8, \pack('n', $code) . $reason, false); // a goodbye never waits: end() runs in a finally, also when the fiber is force-closed
             $this->closed = true;
             parent::end();
         }
@@ -460,13 +460,14 @@ class WebSocket extends ProtocolUpgrade implements \IteratorAggregate
         }, context: new \stdClass());
     }
 
-    private function frame(int $opcode, string $payload): void
+    private function frame(int $opcode, string $payload, bool $wait = true): void
     {
         if ($this->closed) {
             return;
         }
         $n = \strlen($payload);
-        if (!$this->write(\chr(0x80 | $opcode) . ($n < 126 ? \chr($n) : ($n < 65536 ? \chr(126) . \pack('n', $n) : \chr(127) . \pack('J', $n))) . $payload)) {
+        $bytes = \chr(0x80 | $opcode) . ($n < 126 ? \chr($n) : ($n < 65536 ? \chr(126) . \pack('n', $n) : \chr(127) . \pack('J', $n))) . $payload;
+        if (!($wait ? $this->write($bytes) : $this->writeNow($bytes))) {
             $this->closed = true; // the client stopped reading, and was given up
         }
     }
