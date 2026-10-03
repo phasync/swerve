@@ -10,8 +10,10 @@ use phasync;
  *
  * Without the extension, output buffers belong to the process, not the request: one request's
  * echo would be delivered to whichever request flushes next. So an application served by swerve
- * returns its output in the response, and output outside it is a fatal error with a message on
- * stderr (not through output buffering) that says what was echoed, in which request and where.
+ * returns its output in the response, and output while a request is being handled that is not in
+ * the response is a fatal error with a message on stderr (not through output buffering) that says
+ * what was echoed, in which request and where. Output while no request is being handled (the
+ * application loading, a banner, debugging) passes through to the worker's standard output.
  * Buffers an application starts on top of the guard keep working: it sees only what falls
  * through them. It can't be removed by ob_end_clean() and the like (see docs/stray-output.md).
  *
@@ -19,6 +21,9 @@ use phasync;
  */
 final class StrayOutput
 {
+    /** Requests being handled (see Dispatcher::dispatch()): the guard only acts while there is one. */
+    public static int $inFlight = 0;
+
     /** Bytes of the output the message quotes. */
     private const QUOTE = 200;
 
@@ -35,14 +40,14 @@ final class StrayOutput
      */
     public static function guard(string $buffer): string
     {
-        if ('' === $buffer) {
-            return ''; // a flush or the exit of the process
+        if (0 === self::$inFlight || '' === $buffer) {
+            return $buffer; // no request to harm, or a flush or the exit of the process
         }
         $context = \Fiber::getCurrent() ? phasync::getContext() : null;
         if (!$context instanceof LoggingContext) {
             $request = 'unknown (a coroutine with a context of its own)';
         } elseif (null === $context->request) {
-            $request = 'none (not in a request: loading swerve.php, or a background coroutine)';
+            $request = 'none (a background coroutine)';
         } else {
             $request = $context->request->getMethod() . ' ' . $context->request->getRequestTarget();
         }

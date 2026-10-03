@@ -7,6 +7,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
 use Swerve\Util\RequestContextFactory;
+use Swerve\Util\StrayOutput;
 
 /**
  * Where a request meets the application, whatever protocol it came in.
@@ -57,6 +58,11 @@ final class Dispatcher
      */
     public function dispatch(ServerRequestInterface $request, ResponderInterface $responder): mixed
     {
-        return phasync::withContext(fn () => $responder->respond($request, $this->handler->handle($request)), new RequestContextFactory($this->logger, $request));
+        ++StrayOutput::$inFlight; // the stray output guard acts only while a request is handled
+        try {
+            return phasync::withContext(fn () => $responder->respond($request, $this->handler->handle($request)), new RequestContextFactory($this->logger, $request));
+        } finally {
+            --StrayOutput::$inFlight;
+        }
     }
 }

@@ -15,6 +15,13 @@ if (\getenv('SWERVE_TEST_ECHO_ON_LOAD')) {
     echo "echoed while loading\n"; // STRAY-LOAD
 }
 
+if ($later = (int) \getenv('SWERVE_TEST_ECHO_LATER')) { // a coroutine of the worker, not of a request
+    \phasync::go(static function () use ($later) {
+        \phasync::sleep($later / 1000);
+        echo "echoed later\n"; // STRAY-BACKGROUND
+    });
+}
+
 return new class implements RequestHandlerInterface {
     public function handle(ServerRequestInterface $request): ResponseInterface
     {

@@ -14,19 +14,20 @@ use Swerve\Http\Virtual;
  *
  * @param bool $ext whether the extension is loaded
  *
- * @return array{0: resource, 1: string, 2: string, 3: string} the process, its address, the log, the stderr file
+ * @return array{0: resource, 1: string, 2: string, 3: string, 4: string} the process, its address, the log, the stderr file, the stdout file
  */
 function stray_start(array $env = [], bool $ext = false, bool $wait = true): array
 {
     $addr = free_address();
     $log  = temp_path();
     $err  = temp_path();
+    $out  = temp_path();
     if ($ext && !Virtual::available()) {
         $dir = temp_path(dir: true);
         file_put_contents("$dir/phasync.ini", 'extension=' . getenv('PHASYNC_EXT'));
         $env['PHP_INI_SCAN_DIR'] = ":$dir";
     }
-    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '-vv', '--grace=3', '--watchdog=3'], 'stray.php', [], $env, [2 => ['file', $err, 'w']]);
+    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '-vv', '--grace=3', '--watchdog=3'], 'stray.php', [], $env, [1 => ['file', $out, 'w'], 2 => ['file', $err, 'w']]);
     $deadline = microtime(true) + 10;
     while ($wait && null === probe($addr, '/hello')) {
         if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
@@ -35,7 +36,7 @@ function stray_start(array $env = [], bool $ext = false, bool $wait = true): arr
         usleep(20000);
     }
 
-    return [$process, $addr, $log, $err];
+    return [$process, $addr, $log, $err, $out];
 }
 
 /** The line of tests/Fixtures/stray.php that carries $marker in a comment. */
@@ -104,15 +105,44 @@ test('Stray output: echoing during a request ends the worker with the message on
     }
 })->skip($withoutExt, 'runs without phasync-ext');
 
-test('Stray output: echoing while loading swerve.php ends the worker, and the application fails to start', function () {
-    [$process, , $log, $err] = stray_start(['SWERVE_TEST_ECHO_ON_LOAD' => '1'], wait: false);
-    [$code] = swerve_wait($process, 10);
-    $text   = file_get_contents($err);
-    expect($text)->toStartWith('Stray output is not compatible with swerve.');
-    expect($text)->toContain('"echoed while loading\n"')->toContain('stray.php:' . stray_line('STRAY-LOAD'));
-    expect($text)->toContain('Request: none');
-    expect($code)->not->toBe(0);
-    expect(log_count($log, '/failed to start/'))->toBeGreaterThan(0, file_get_contents($log));
+test('Stray output: echoing while loading swerve.php is not an error; it goes to the worker\'s standard output', function () {
+    [$process, $addr, $log, $err, $out] = stray_start(['SWERVE_TEST_ECHO_ON_LOAD' => '1']);
+    try {
+        expect(probe($addr, '/hello'))->toBe('Hello');
+        expect(file_get_contents($out))->toBe("echoed while loading\n");
+        expect(file_get_contents($err))->toBe('');
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/failed to start/'))->toBe(0, file_get_contents($log));
+})->skip($withoutExt, 'runs without phasync-ext');
+
+test('Stray output: output while no request is in flight passes through, also from a background coroutine', function () {
+    [$process, $addr, , $err, $out] = stray_start(['SWERVE_TEST_ECHO_LATER' => '300']);
+    try {
+        $pid = (int) probe($addr, '/pid');
+        $deadline = microtime(true) + 5;
+        while ('' === file_get_contents($out) && microtime(true) < $deadline) {
+            usleep(20000);
+        }
+        expect(file_get_contents($out))->toBe("echoed later\n");
+        expect(file_get_contents($err))->toBe('');
+        expect((int) probe($addr, '/pid'))->toBe($pid);
+    } finally {
+        native_stop($process);
+    }
+})->skip($withoutExt, 'runs without phasync-ext');
+
+test('Stray output: output from a background coroutine while a request is in flight ends the worker', function () {
+    [$process, $addr, , $err] = stray_start(['SWERVE_TEST_ECHO_LATER' => '300']);
+    try {
+        $conn = native_connect($addr);
+        fwrite($conn, "GET /sleep?ms=1500 HTTP/1.1\r\nHost: t\r\n\r\n");
+        $text = stray_message($err);
+        expect($text)->toContain('"echoed later\n"')->toContain('Request: none')->toContain('stray.php:' . stray_line('STRAY-BACKGROUND'));
+    } finally {
+        native_stop($process);
+    }
 })->skip($withoutExt, 'runs without phasync-ext');
 
 test('Stray output: with overlapping requests the message names the one that echoed', function () {
