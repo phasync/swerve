@@ -33,7 +33,7 @@ final class HttpServer implements ServerInterface
     private const RESERVED_FDS = 64;
 
     /** The native stream_select() fails outright for a file descriptor at or above this. */
-    private const FD_SETSIZE = 1024;
+    private const FD_SETSIZE = \PHP_FD_SETSIZE;
 
     /**
      * Connections being served, oldest first.
