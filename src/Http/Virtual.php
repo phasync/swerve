@@ -30,6 +30,9 @@ use phasync\Psr\Response;
  * The superglobals and $_SESSION are swapped per request: the request runs in a switch-aware
  * phasync context (Superglobals), so each request sees its own while its coroutines run.
  *
+ * As under PHP-FPM, the response is committed at the first output. A caller that makes the response
+ * itself (a framework adapter) hands it over instead: see run()'s $handOver.
+ *
  * Needs phasync-ext 0.5.0-alpha15 or later: see available().
  *
  * @internal
@@ -48,22 +51,28 @@ final class Virtual
      * The response of $code, returned once its headers are sent (at its first output, or when it
      * ends); its body streams on while $code runs.
      *
-     * @param \Closure(): mixed $code
+     * With $handOver the response is the one that $code gives to the $respond closure it is
+     * called with, whenever it does: run() returns it then, and $code goes on running. Whatever
+     * $code outputs or sends is discarded.
      *
-     * @throws \LogicException without phasync-ext's virtualize()
+     * @param \Closure(): mixed|\Closure(\Closure(ResponseInterface): void): mixed $code
+     *
+     * @throws \LogicException without phasync-ext's virtualize(); when $code, with $handOver,
+     *                         ends without handing a response over, or hands over twice
      */
-    public static function run(ServerRequestInterface $request, \Closure $code): ResponseInterface
+    public static function run(ServerRequestInterface $request, \Closure $code, bool $handOver = false): ResponseInterface
     {
         if (!self::available()) {
             throw new \LogicException('Virtual::run() needs phasync-ext 0.5.0-alpha15 or later');
         }
-        $sapi = new class($request) {
+        $sapi = new class($request, $handOver) {
             public UpgradeStream $body;
             /** @var array{0: int, 1: ?string, 2: list<string>}|null */
-            public ?array $head   = null;
-            public bool $aborted  = false;
+            public ?array $head               = null;
+            public bool $aborted              = false;
+            public ?ResponseInterface $handed = null;
 
-            public function __construct(private readonly ServerRequestInterface $request)
+            public function __construct(private readonly ServerRequestInterface $request, private readonly bool $handOver)
             {
                 $this->body = new UpgradeStream();
             }
@@ -72,6 +81,9 @@ final class Virtual
             {
                 if ($this->aborted) {
                     return false;
+                }
+                if ($this->handOver) {
+                    return true;
                 }
                 try {
                     $this->body->append($data, Virtual::WRITE_TIMEOUT);
@@ -86,8 +98,10 @@ final class Virtual
 
             public function send_headers(int $status, ?string $statusLine, array $headers): void
             {
-                $this->head = [$status, $statusLine, $headers];
-                phasync::raiseFlag($this);
+                if (!$this->handOver) {
+                    $this->head = [$status, $statusLine, $headers];
+                    phasync::raiseFlag($this);
+                }
             }
 
             public function read_post(int $length): string
@@ -141,7 +155,18 @@ final class Virtual
             }
         };
         $outer = Superglobals::current(); // the worker's, restored while other requests run
-        $run   = phasync::go(static function () use ($code, $sapi, $outer) {
+        if ($handOver) {
+            $inner   = $code;
+            $respond = static function (ResponseInterface $response) use ($sapi): void {
+                if (null !== $sapi->handed) {
+                    throw new \LogicException('The response was already handed over');
+                }
+                $sapi->handed = $response;
+                phasync::raiseFlag($sapi);
+            };
+            $code = static fn () => $inner($respond);
+        }
+        $run = phasync::go(static function () use ($code, $sapi, $outer) {
             try {
                 // The request runs in a context that swaps its superglobals in and out; PHP builds
                 // them as virtualize() starts the request
@@ -151,11 +176,15 @@ final class Virtual
                 phasync::raiseFlag($sapi); // in case it ended by throwing, before any headers
             }
         });
-        while (null === $sapi->head && !$run->isTerminated()) {
+        while (null === $sapi->head && null === $sapi->handed && !$run->isTerminated()) {
             phasync::awaitFlag($sapi);
+        }
+        if (null !== $sapi->handed) {
+            return $sapi->handed;
         }
         if (null === $sapi->head) {
             phasync::await($run); // it threw before sending anything: the handler's exception
+            throw new \LogicException('The code ended without handing over a response');
         }
         [$status, $statusLine, $lines] = $sapi->head;
         $headers = [];

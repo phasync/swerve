@@ -102,3 +102,37 @@ test('Virtual: concurrent requests each have their own $_GET, $_COOKIE, $_SERVER
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
 })->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Virtual: with a hand-over the code gives the response when it has one, whatever it outputs before, and goes on running', function () {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        foreach (['/virtual-handover?after=300', '/virtual-handover?echo=1&ms=200&after=300'] as $path) {
+            $conn = native_connect($addr);
+            fwrite($conn, "GET $path HTTP/1.1\r\nHost: t\r\n\r\n");
+            $response = native_read_response($conn);
+            expect([$response['status'], $response['headers']['x-handed'] ?? null, $response['body']])->toBe([201, 'yes', 'handed over']);
+        }
+        expect(probe($addr, '/handover-done'))->toBe('0'); // still working after the response
+        usleep(500_000);
+        expect(probe($addr, '/handover-done'))->toBe('2');
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Virtual: with a hand-over, code that ends without a response, or hands over twice, is a 500 and a logged error', function (string $query, string $message) {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        $conn = native_connect($addr);
+        fwrite($conn, "GET /virtual-handover?$query HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+        expect(native_read_response($conn)['status'])->toBe($query === 'twice=1' ? 201 : 500);
+        usleep(100_000);
+        expect(file_get_contents($log))->toContain($message);
+    } finally {
+        native_stop($process);
+    }
+})->with([
+    'none'  => ['none=1', 'without handing over a response'],
+    'twice' => ['twice=1', 'already handed over'],
+])->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');

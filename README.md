@@ -436,6 +436,18 @@ return Virtual::run($request, static function () {
 });
 ```
 
+As under PHP-FPM, the first output commits the status and headers. Code that makes a PSR-7 response
+itself (a framework adapter) passes `handOver: true`: `run()` then calls it with a `$respond`
+closure and returns the response given to it, whatever the code outputs before; the code goes on
+running afterwards, and ending without a response is a `LogicException`.
+
+```php
+return Virtual::run($request, function (Closure $respond) use ($app) {
+    $respond($app->handle($request));
+    $app->terminate();
+}, handOver: true);
+```
+
 `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `$_SERVER` and `$_SESSION` are the request's own, as
 under PHP-FPM, also with many requests at once in a worker. Other global variables and static
 properties are shared by the worker's requests; code that keeps request state there keeps its own

@@ -355,6 +355,9 @@ return new class($version) implements RequestHandlerInterface {
     /** @var \Swerve\Claim[] what /claim keeps, by name, so that a claim outlives its request */
     private array $claims = [];
 
+    /** Code of /virtual-handover that ran to its end after handing its response over, see /handover-done. */
+    private int $handedOver = 0;
+
     /** /sse-beat producers still running. */
     private int $sseLive = 0;
 
@@ -432,6 +435,20 @@ return new class($version) implements RequestHandlerInterface {
                 \phasync::sleep((int) ($_GET['ms'] ?? 0) / 1000);
                 echo $before, ' ', $read();
             }),
+            // Virtual::run() with a hand-over: ?echo=1 outputs first, ?ms= wait before the response, ?none=1 ends
+            // without one, ?twice=1 hands over twice; ?after= ms of work follow, counted in /handover-done
+            '/virtual-handover' => Virtual::run($request, function (Closure $respond) use ($query) {
+                isset($query['echo']) && print 'stray output';
+                \phasync::sleep((int) ($query['ms'] ?? 0) / 1000);
+                if (isset($query['none'])) {
+                    return;
+                }
+                $respond(new Response(201, ['X-Handed' => 'yes'], 'handed over'));
+                isset($query['twice']) && $respond(new Response(202));
+                \phasync::sleep((int) ($query['after'] ?? 0) / 1000);
+                ++$this->handedOver;
+            }, handOver: true),
+            '/handover-done' => new Response(200, [], (string) $this->handedOver),
             // A WebSocket that only sends: what is published to 'news' goes to the browser
             '/websocket-news' => WebSocket::from($request, function (WebSocket $ws) {
                 ++$this->newsLive;
