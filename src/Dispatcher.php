@@ -14,7 +14,9 @@ use Swerve\Util\RequestContextFactory;
  * The application's handler runs, and its response is sent, inside a phasync context of the
  * request's own, which the coroutines the request starts share: request-scoped state can hang
  * on `phasync::getContext()` (mini's does). The context is created when the request's code first
- * asks for one, so a request that never does costs none.
+ * asks for one, so a request that never does costs none. The context knows its request (see
+ * {@see LoggingContext::$request}), which is how a report from deep inside, such as the stray
+ * output guard's, can say which request it is about.
  *
  * The response is sent inside the context too, so phasync::finally() in the handler runs once
  * all of it is sent (as after fastcgi_finish_request()). dispatch() returns once the coroutines
@@ -33,17 +35,14 @@ use Swerve\Util\RequestContextFactory;
  */
 final class Dispatcher
 {
-    private readonly RequestContextFactory $contextFactory;
-
     /**
      * Make a dispatcher for the application's handler.
      *
      * @param RequestHandlerInterface $handler the application
      * @param LoggerInterface         $logger  receives what a request's coroutines throw when nobody awaits them
      */
-    public function __construct(private readonly RequestHandlerInterface $handler, LoggerInterface $logger)
+    public function __construct(private readonly RequestHandlerInterface $handler, private readonly LoggerInterface $logger)
     {
-        $this->contextFactory = new RequestContextFactory($logger);
     }
 
     /**
@@ -58,6 +57,6 @@ final class Dispatcher
      */
     public function dispatch(ServerRequestInterface $request, ResponderInterface $responder): mixed
     {
-        return phasync::withContext(fn () => $responder->respond($request, $this->handler->handle($request)), $this->contextFactory);
+        return phasync::withContext(fn () => $responder->respond($request, $this->handler->handle($request)), new RequestContextFactory($this->logger, $request));
     }
 }

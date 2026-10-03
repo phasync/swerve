@@ -16,11 +16,13 @@ use Swerve\CLI\Args;
 use Swerve\Dispatcher;
 use Swerve\FastCGI\FastCGIServer;
 use Swerve\Http\HttpServer;
+use Swerve\Http\Virtual;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
 use Swerve\Util\Cluster;
 use Swerve\Util\Logger;
 use Swerve\Util\LoggingContext;
+use Swerve\Util\StrayOutput;
 use Swerve\Util\System;
 use Swerve\Util\Worker;
 
@@ -212,6 +214,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $logger = $worker->logger;
     Swerve::setLog($logger);
     Worker::refreshAutoloader();
+    // Without phasync-ext, output buffers are the process's and not the request's: output outside
+    // the response is a fatal error (docs/stray-output.md). Before the application loads
+    Virtual::available() || StrayOutput::install();
     // Loaded in the worker's event loop: the application may start coroutines as it loads,
     // such as a subscriber that runs for the worker's whole life
     // Before the application loads, which may change the working directory
