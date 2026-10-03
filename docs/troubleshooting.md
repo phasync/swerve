@@ -29,7 +29,8 @@ from the coroutine you start. See [WebSockets](realtime.md#websockets).
 
 **A reload takes the full grace period.** A long response that is not fed by a subscription
 (long polling, a slow stream of your own) runs until the drain deadline. End it when
-`Swerve::draining()` turns true, or lower `--grace`.
+`Swerve::draining()` turns true, or lower `--grace`. A recycled worker, on the other hand, keeps
+upgraded connections for up to `--linger`; see [Production](production.md#sizing).
 
 ## Seeing more
 

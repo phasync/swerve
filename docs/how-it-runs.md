@@ -77,8 +77,10 @@ Everything in PHP memory belongs to one worker, and lives from the worker's star
   its own. To reach every worker, use [publish and subscribe](publish-subscribe.md); for
   state all workers need to read, use storage outside PHP (a database, Redis, a file).
 - **A worker restarts** after a crash, a reload, or recycling (memory, `--max-requests`): its
-  memory starts empty. Clients connected to it are disconnected and must reconnect (a
-  browser's `EventSource` does; for WebSockets, reconnect in your client code).
+  memory starts empty. Clients connected to it are disconnected by a crash or a reload and must
+  reconnect (a browser's `EventSource` does; for WebSockets, reconnect in your client code); a
+  recycled worker keeps its WebSockets for up to `--linger` seconds, so they usually leave on
+  their own.
 
 ### Shared state with SQLite
 
@@ -116,7 +118,7 @@ unless phasync-ext is loaded and the database is MySQL: then they wait as a coro
   logged with their trace; the worker goes on.
 - **Memory leaks accumulate** over the worker's life. `--max-memory` (80 % of
   `memory_limit` by default) recycles a worker that grows too large: a new one starts, then
-  the old one finishes its requests and exits.
+  the old one finishes its requests, and exits when its WebSockets are gone.
 
 ## phasync in one page
 

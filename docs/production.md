@@ -59,9 +59,17 @@ connections (WebSockets) and ones whose request is still being handled are never
 make room.
 
 **Memory.** `--max-memory` (80 % of `memory_limit` by default) recycles a worker whose memory
-grows past it: a new worker starts, then the old one finishes its requests and exits. With
-`memory_limit=-1` this is off; give a size such as `--max-memory=512M`. `--max-requests`
-recycles after about so many requests.
+grows past it: a new worker starts, then the old one finishes its plain requests and stops
+accepting. With `memory_limit=-1` this is off; give a size such as `--max-memory=512M`.
+`--max-requests` recycles after about so many requests.
+
+A recycled worker lingers: it keeps its upgraded connections (WebSockets, SSE) instead of
+dropping them, until the last client has left or `--linger` seconds (1800) have passed, then
+closes what is left (WebSockets get 1001) and exits. Its subscriptions, cache and claims go on
+working meanwhile. Budget for them: a slot may have up to three lingering workers besides its
+serving one, each with its memory (a recycle that would be the fourth waits until one exits, and
+is logged once). `--linger=0` drops the connections of a recycled worker at once, as a reload
+does. A reload or shutdown does not linger: it ends the lingering too, within `--grace`.
 
 ## systemd
 
@@ -149,7 +157,8 @@ requests over one connection. HTTP mode is simpler and supports WebSockets; pref
   (shutdown). A worker gets `--grace` seconds (30); what is still open a second before that is
   dropped.
 - WebSocket connections see their request body end at once, so they can say goodbye (see
-  [Realtime](realtime.md)); subscriptions end, so SSE responses fed by them end too. Other
+  [Realtime](realtime.md)); subscriptions end, so SSE responses fed by them end too. A recycle
+  is gentler: see Memory above. Other
   long responses are requests in flight: they run until the deadline, unless they check
   `Swerve::draining()`. Clients must reconnect: `EventSource` does by itself; write
   reconnecting into WebSocket clients.

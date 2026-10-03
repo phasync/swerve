@@ -79,7 +79,8 @@ private function events(): ResponseInterface
 - An SSE event is `data: <one line>\n\n`; JSON-encode messages so they stay on one line.
   `id:` and `event:` fields work as the SSE standard says; swerve has no message history to
   resume from after a `Last-Event-ID`, so a reconnecting client catches up from your storage.
-- **On a reload or shutdown**, the worker drains: every subscription's loop ends, so a
+- **On a reload or shutdown** (and at the end of the lingering of a recycled worker, see
+  [Production](production.md)), the worker drains: every subscription's loop ends, so a
   producer like the one above ends its response at once, and the browser reconnects to another
   worker. A long response that is not fed by a subscription (long polling, a slow download)
   runs until the drain deadline, a second before `--grace` (30 s); check `Swerve::draining()`
@@ -120,6 +121,17 @@ $reason)` closes the connection early; returning does the same with 1000. `onClo
 `($code, $reason)` once when the connection has ended, whichever side ended it: the client's code
 (1005 when it sent none), the one given to `end()`, 1011 after an exception, or 1006 when the
 connection ended without a close frame.
+
+**Closing on shutdown.** When the worker drains for a shutdown or a reload, the connection's
+request body ends at once, so the `onMessage` reader and the `foreach ($ws as ...)` loop stop,
+and the connection closes with 1001. To say more first, or from code that holds no `$ws`, use
+`Swerve::onShutdown(fn () => $ws->end(1001, 'restarting'))`: the callback runs in a coroutine
+of its own when the worker closes its connections, and never runs for a request that has ended
+(phasync frees such callbacks with their request, about half a second after it). A worker
+replaced by a recycle (`--max-memory`, `--max-requests`) keeps its WebSockets instead, for up to
+`--linger` seconds (1800), and calls the callbacks at the end of that time; `Swerve::draining()`
+turns true when the recycle begins. `Swerve::awaitShutdown($timeout)` waits for the same moment
+in sequential code. Write your clients to reconnect either way.
 
 Make the callback `static` when you write it in a controller method: a plain closure keeps
 `$this`, and with it the controller and often the whole application, alive for as long as the

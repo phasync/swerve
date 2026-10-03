@@ -193,7 +193,8 @@ Logging (to the terminal, or with --log to a file):
 Limits:
   --max-body=<bytes>      HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
   --buffer-responses      HTTP: send each response body whole (up to 8 MiB) with a Content-Length, instead of streaming it
-  --grace=<seconds>       Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL (default: 30)
+  --grace=<seconds>       Seconds workers get to finish their requests on shutdown and reload before SIGKILL (default: 30)
+  --linger=<seconds>      Seconds a recycled worker keeps its upgraded connections (WebSockets, SSE) before closing them; 0 = close them at once (default: 1800)
   --watchdog=<seconds>    Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
   --max-memory=<size|P%>  Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
   --max-requests=<n>      Recycle a worker after about n requests; 0 = off (default: 0)
@@ -301,7 +302,7 @@ protocols of your own.
   reading waits. Give it a body whose `read()` waits: `new UnbufferedStream(65536,
   PHP_FLOAT_MAX)` (the default 60 s deadlock timeout would end an idle connection with an
   error).
-- **Shutdown, reload and recycle.** An upgraded connection's request body reaches EOF at once,
+- **Shutdown and reload** (and the end of a recycled worker's lingering, below). An upgraded connection's request body reaches EOF at once,
   also within the upgrade request's own framed body (even a read of it that began before the
   101), however much more the client sends. End the response then, for example with a
   WebSocket close frame: it reaches the client, since the connection closes lingering. Past the drain deadline
@@ -309,6 +310,20 @@ protocols of your own.
   closed to make room at the connection limit. Without the phasync extension that limit is 512
   connections per worker, whatever `ulimit -n` says: add workers or install the extension for
   many of them.
+- **Recycle: lingering.** A worker replaced by a recycle (`--max-memory`, `--max-requests`)
+  keeps its upgraded connections, WebSockets and the like, instead of draining them: it stops
+  accepting, finishes its plain requests and stays until the last client has left, or
+  `--linger` seconds (1800) have passed, which then ends it like a drain (request bodies reach
+  EOF, 1001). Subscriptions, the cache and claims keep working meanwhile. A slot has at most
+  three lingering workers; a recycle that would make a fourth waits until one exits. A reload
+  or shutdown ends the lingering with `--grace`. `--linger=0` drains a recycled worker at once.
+- **Saying goodbye.** `Swerve::onShutdown($callback)` runs the callback in a coroutine when the
+  worker closes its connections (for a recycle, at the end of the lingering; `Swerve::draining()`
+  turns true when it begins), for example to send a protocol-level goodbye from a place that
+  holds no request body. Callbacks are held weakly by the registering coroutine's context: one
+  whose request has ended is dropped (it relies on phasync's garbage collection, about half a
+  second after a coroutine ends) and never runs. An exception in a callback is logged and
+  stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
 - **Server-Sent Events** are an ordinary streamed 200 with an `UnbufferedStream` body: every
   read goes out as a chunk at once. When the client leaves, swerve stops reading the body, and
   that is all a producer can learn of it: give the stream a small buffer and a finite deadlock
@@ -514,7 +529,8 @@ is doing: its requests in flight, and where its code runs.
 - **Memory leaks.** After each request, and every tick, a worker compares
   `memory_get_usage(true)` with `--max-memory` (by default 80 % of `memory_limit`, and off when
   `memory_limit` is -1 unless the option is given). Above it, after a garbage collection, the
-  master starts a replacement and the leaking worker drains. `--max-requests` recycles after
+  master starts a replacement and the leaking worker finishes its plain requests and lingers
+  (see Recycle: lingering above), up to `--linger` seconds. `--max-requests` recycles after
   about so many requests. The limits get some jitter, so workers don't recycle together. A
   `--max-memory` not below `memory_limit` could never be reached first: it is logged as a
   warning, and recycling is off. A
@@ -547,7 +563,8 @@ Operating notes:
   `stop_grace_period: 35s` or systemd `TimeoutStopSec=35` for the default 30 seconds. During a
   handover a slot briefly has two workers, so budget for one worker's memory more.
 - Long responses such as Server-Sent Events or long polling are cut at the end of the grace
-  period.
+  period, on a reload or shutdown; a recycled worker keeps them up to `--linger` seconds. A slot
+  may then have up to three lingering workers beside the serving one: budget their memory too.
 - Without `-v` the log has notices and up: reloads, recycles, every worker exit, the pid of
   each worker started after the first ones, and shutdown. `-v` adds the first starts and each
   worker's readiness, `-vv` debug lines. What a client sent, such as a request target in an

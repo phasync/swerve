@@ -41,8 +41,8 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
   unsubscribe to forget.
 - Iterating waits for messages. With `heartbeat: 15`, it also yields `null` after 15 s without
   one: for a producer that sends keep-alives while it waits.
-- The loop ends when the worker drains (a shutdown, reload or recycle), so that responses
-  fed by it end too; a subscription made while draining ends at once. `Swerve::draining()`
+- The loop ends when the worker drains (a shutdown or reload, or the end of the lingering of a
+  recycled worker, which keeps receiving until then), so that responses fed by it end too; a subscription made while draining ends at once. `Swerve::draining()`
   says whether the worker drains.
 - A message is kept once per worker, however many subscribe, until the slowest subscriber read
   it. A subscriber that falls more than `$maxLag` seconds behind gets a
