@@ -15,10 +15,10 @@ is not loaded.
 
 With it:
 
-- A worker waits on its sockets with epoll, and is not limited to about 1,000 open connections
-  (PHP's own `stream_select()` fails for file descriptors of 1024 and up; see sizing below).
+- A worker waits on its sockets with epoll, and is not limited to 512 connections
+  (PHP's own `stream_select()` fails for file descriptors of 1024 and up, so without it a worker keeps to half that; see sizing below).
   At 50,000 connections a hello-world server served 2 to 4 times as many requests as without it,
-  depending on the number of workers. Below about 1,000 connections per worker, PHP's own
+  depending on the number of workers. Up to 512 connections per worker, PHP's own
   `stream_select()` is as fast or a little faster.
 - Code that is not written for phasync cooperates: inside a coroutine, sockets and TLS, MySQL through
   mysqli or PDO, `curl_exec()` and Guzzle, pipes, file and DNS functions, `sleep()` and `usleep()` let other
@@ -42,13 +42,14 @@ each worker's CPUs.
 
 **Connections per worker.**
 
-- *Without phasync-ext*, a worker holds at most about **960 connections** (1024 file descriptors,
-  less 64 kept for your application's files and database connections). Long-lived
+- *Without phasync-ext*, a worker holds at most **512 connections**: half of PHP's `stream_select()`
+  limit of 1024 descriptors, because your application opens files and connections of its own,
+  about one per client on average. Long-lived
   connections (SSE, WebSockets, long polling) use one each for as long as they are open. For
   many of them, run more workers than cores: **`--workers` of four times the cores** is a good
-  start (4 cores: 16 workers, about 15,000 connections). Idle connections cost almost no CPU,
+  start (4 cores: 16 workers, about 8,000 connections). Idle connections cost almost no CPU,
   so the extra workers don't compete much; they cost memory, one application each.
-- *With phasync-ext*, the limit is the open-file limit (`ulimit -n`; `LimitNOFILE` under
+- *With phasync-ext*, the limit is the open-file limit less 64 (`ulimit -n`; `LimitNOFILE` under
   systemd). Past a few hundred **busy** connections per worker, waiting on them gets
   expensive; more workers help here too.
 

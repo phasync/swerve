@@ -161,7 +161,7 @@ How the two streams behave, for writing a protocol directly on them:
   coroutine you start, as the example does. Middleware that parses request bodies must leave
   upgrade requests alone for the same reason.
 - **Many clients**: every open WebSocket is a connection of one worker. Without phasync-ext a
-  worker holds about 960 connections; see [Production](production.md#sizing).
+  worker holds 512 connections; see [Production](production.md#sizing).
 
 ## Choosing
 

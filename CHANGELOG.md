@@ -14,6 +14,9 @@
 
 ### Changed
 
+- Without phasync-ext a worker serves at most 512 connections (half of `PHP_FD_SETSIZE`), down from
+  960, because the application opens descriptors of its own, about one per client. With
+  phasync-ext the limit is unchanged: the open-file limit less 64.
 - Without phasync-ext, output outside a response (`echo`, `var_dump()`, ...) while a request is
   handled ends the worker with a message on standard error that names the output, the request, and
   the file and line, and the master starts a new worker. Before, it went to the terminal unnoticed.

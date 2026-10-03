@@ -90,7 +90,7 @@ HTTP/1.1 keep-alive and pipelining are supported; a kept-alive connection may be
 | body | `--max-body`, 8 MiB (413) |
 | each wait while reading a body or writing a response | 60 s |
 
-A worker serves at most about 960 connections at once without phasync-ext (see
+A worker serves at most 512 connections at once without phasync-ext (see
 [Production](production.md#sizing)); past that, new connections wait in the kernel's queue
 while connections that sit idle are closed to make room.
 

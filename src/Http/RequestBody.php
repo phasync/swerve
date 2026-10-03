@@ -70,7 +70,7 @@ use Psr\Http\Message\StreamInterface;
  *    response then. Its goodbye reaches the client: the connection closes lingering, reading
  *    what the client still sends for up to 2 s. Past the drain deadline the worker exits and
  *    drops the connection, which is logged. Upgraded connections are never closed to make room
- *    at the connection limit, which without the phasync extension is 960 per worker, whatever
+ *    at the connection limit, which without the phasync extension is 512 per worker, whatever
  *    `ulimit -n` says: add workers, or install the extension, for many of them.
  *
  * A client that goes away mid-body makes read() throw a RuntimeException, as PSR-7 says.

@@ -25,7 +25,7 @@ from the coroutine you start. See [WebSockets](realtime.md#websockets).
 **An SSE stream arrives all at once, at the end.** A proxy buffers it (nginx:
 `proxy_buffering off`), or swerve runs with `--buffer-responses`.
 
-**`At the limit of 960 connections`.** A worker is full; see [Sizing](production.md#sizing).
+**`At the limit of 512 connections`.** A worker is full; see [Sizing](production.md#sizing).
 
 **A reload takes the full grace period.** A long response that is not fed by a subscription
 (long polling, a slow stream of your own) runs until the drain deadline. End it when

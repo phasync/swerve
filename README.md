@@ -92,7 +92,7 @@ per worker at a time gives about 780.
   <img alt="JSON route, 8 workers. Laravel: FrankenPHP 21.5k, Swoole 21.1k, RoadRunner 19.2k (all Octane), swerve 18.5k, swerve + phasync-ext 18.4k. CodeIgniter: swerve 20.6k, swerve + phasync-ext 20.2k, FrankenPHP 17.6k. Spiral: RoadRunner 21.4k, swerve + phasync-ext 19.8k, swerve 19.8k" src="benchmarks/charts/frameworks-full-light.svg">
 </picture>
 
-Below about 1,000 connections per worker swerve runs on PHP's own `stream_select()`; above that
+Up to 512 connections per worker swerve runs on PHP's own `stream_select()`; above that
 it needs phasync-ext, which waits with epoll.
 
 ### Coming from PHP-FPM
@@ -306,7 +306,7 @@ protocols of your own.
   101), however much more the client sends. End the response then, for example with a
   WebSocket close frame: it reaches the client, since the connection closes lingering. Past the drain deadline
   the worker exits and drops the connection, which is logged. Upgraded connections are never
-  closed to make room at the connection limit. Without the phasync extension that limit is 960
+  closed to make room at the connection limit. Without the phasync extension that limit is 512
   connections per worker, whatever `ulimit -n` says: add workers or install the extension for
   many of them.
 - **Server-Sent Events** are an ordinary streamed 200 with an `UnbufferedStream` body: every
@@ -559,7 +559,7 @@ Operating notes:
   block the server; with `--log` they go to a file, which never blocks. A line that can't be
   written (a full disk, a log reader gone) is dropped without a PHP warning, which an
   application's error handler could turn into an exception.
-- A worker at its limit of connections (its open-file limit less 64, at most 960) logs a
+- A worker at its limit of connections (its open-file limit less 64, and without phasync-ext at most 512) logs a
   warning, at most once a minute.
 - Options go before the swerve file: anything after it is refused.
 - The listeners and the workers' pipes to the master are close-on-exec (this needs the

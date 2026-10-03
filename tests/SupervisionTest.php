@@ -667,17 +667,33 @@ test('a worker at its connection limit without the phasync extension does not ad
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(20_000);
     }
-    // Upgraded connections, which are never closed to make room: one more than the limit
+    // Upgraded connections, which are never closed to make room: one more than the limit,
+    // half of PHP_FD_SETSIZE, which leaves the other half for the application's own descriptors
     $conns = [];
-    for ($i = 0; $i < 961; ++$i) {
+    for ($i = 0; $i < 513; ++$i) {
         $conns[$i] = native_connect($addr);
         fwrite($conns[$i], "GET /upgrade-echo HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\n");
     }
-    [[$line]] = log_wait($log, '/warning +At the limit of 960 connections[^\n]*/', 5);
+    [[$line]] = log_wait($log, '/warning +At the limit of 512 connections[^\n]*/', 5);
     expect($line)->not->toContain('ulimit')->toContain('phasync extension');
     foreach ($conns as $conn) {
         fclose($conn);
     }
+    native_stop($process);
+});
+
+test('a worker serves at most half of PHP_FD_SETSIZE connections without the phasync extension, the open-file limit less 64 with it', function () {
+    $addr    = free_address();
+    $log     = temp_path();
+    $process = proc_open(
+        ['setsid', 'sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh', PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', '-v', "--log=$log", '--grace=2', __DIR__ . '/Fixtures/app.php'],
+        [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
+        $pipes,
+    );
+    $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
+    $max                        = extension_loaded('phasync') ? 4096 - 64 : PHP_FD_SETSIZE / 2;
+    [[$line]] = log_wait($log, '/at most \d+ connections/', 5);
+    expect($line)->toContain("at most $max connections");
     native_stop($process);
 });
 

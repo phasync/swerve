@@ -28,7 +28,8 @@ final class HttpServer implements ServerInterface
 {
     /**
      * File descriptors left for the listener, logs and the application's own files and
-     * connections, below the connection limit.
+     * connections, below the connection limit. (Without phasync-ext the limit is half of
+     * FD_SETSIZE, which leaves far more.)
      */
     private const RESERVED_FDS = 64;
 
@@ -91,6 +92,11 @@ final class HttpServer implements ServerInterface
      * take numbers too. So the worker's open-file limit is lowered to FD_SETSIZE: no descriptor
      * ever gets such a number, and running out fails only the one accept (retried when
      * descriptors are free again) or the one application call that opens something.
+     *
+     * The application opens descriptors of its own while serving, about one per client on
+     * average, so without the extension a worker serves at most half of FD_SETSIZE connections,
+     * leaving the other half for those and for the listener, logs and pipes. With the extension
+     * the limit is the open-file limit less RESERVED_FDS.
      */
     public function listen(): void
     {
@@ -105,6 +111,9 @@ final class HttpServer implements ServerInterface
             $this->remedy = 'add workers, or install the phasync extension: without it a worker serves no more, whatever the open-file limit';
         }
         $this->max = $limit - self::RESERVED_FDS;
+        if (!\extension_loaded('phasync')) {
+            $this->max = \min($this->max, \intdiv(self::FD_SETSIZE, 2));
+        }
         \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
 
         // Not phasync\Net\listen(): its accept loop retries at once, forever, when accepting
