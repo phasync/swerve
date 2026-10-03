@@ -2,12 +2,15 @@
 
 /*
  * Swerve\Http\Virtual: code written for PHP-FPM, run as requests of their own with phasync-ext's
- * virtualize(). Needs the extension: PHASYNC_EXT=/path/to/phasync.so vendor/bin/pest
+ * virtualize(). Needs the extension: PHASYNC_EXT=/path/to/phasync.so vendor/bin/pest,
+ * or run the suite with the extension loaded (PHP_INI_SCAN_DIR).
  */
+
+use Swerve\Http\Virtual;
 
 function virtual_start(): array
 {
-    return swerve_start(workers: 1, php: ['-d', 'extension=' . getenv('PHASYNC_EXT')]);
+    return swerve_start(workers: 1, php: Virtual::available() ? [] : ['-d', 'extension=' . getenv('PHASYNC_EXT')]);
 }
 
 test('Virtual: echo, status, headers, cookies, the session and php://input become the response', function () {
@@ -29,7 +32,7 @@ test('Virtual: echo, status, headers, cookies, the session and php://input becom
         native_stop($process);
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
-})->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
 
 test('Virtual: concurrent requests in one worker keep their own session, and exit() ends only its request', function () {
     [$process, $addr, $log] = virtual_start();
@@ -53,7 +56,7 @@ test('Virtual: concurrent requests in one worker keep their own session, and exi
         native_stop($process);
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
-})->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
 
 test('Virtual: concurrent requests each have their own $_SESSION while they wait, and each session saves its own', function () {
     [$process, $addr, $log] = virtual_start();
@@ -78,7 +81,7 @@ test('Virtual: concurrent requests each have their own $_SESSION while they wait
         native_stop($process);
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
-})->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
 
 test('Virtual: concurrent requests each have their own $_GET, $_COOKIE, $_SERVER and $_POST, also after waiting', function () {
     [$process, $addr, $log] = virtual_start();
@@ -98,4 +101,4 @@ test('Virtual: concurrent requests each have their own $_GET, $_COOKIE, $_SERVER
         native_stop($process);
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
-})->skip(fn () => !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
