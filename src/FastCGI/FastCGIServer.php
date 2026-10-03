@@ -106,9 +106,14 @@ final class FastCGIServer implements ServerInterface
      * SO_REUSEPORT group also where a process the application started still holds it, and
      * wakes run(). A connection whose handshake completes in between is reset; a front server
      * retries it on another worker, as nginx does with `fastcgi_next_upstream error`.
+     *
+     * FastCGI has no upgraded connections to keep, so `$linger` changes nothing.
      */
-    public function drain(): void
+    public function drain(bool $linger = false): void
     {
+        if ($this->draining) {
+            return;
+        }
         if ($this->shared) {
             $this->draining = true;
             if ($this->waiting) {

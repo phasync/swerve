@@ -17,8 +17,8 @@ use Swerve\Claim;
  * Each worker has a socket pair to the master. The worker writes '.' as a heartbeat four
  * times a second, from its event loop, 'R' once it listens, 'Q' when its first request starts,
  * 'C' to ask to be recycled, and 'D' when it drains; the end of the pair tells the master the
- * worker is gone. The master writes 'T' to make a worker drain and 'L' to make it reopen the
- * log file: not signals, which would cut short the blocking calls of the requests in flight.
+ * worker is gone. The master writes 'T' to make a worker drain, 'G' to make it drain but linger
+ * (see below) and 'L' to make it reopen the log file: not signals, which would cut short the blocking calls of the requests in flight.
  * Among these bytes go framed requests (see Topics::frame()): the cache's, and the subscriptions'
  * (see Inboxes), which the master answers; published messages don't pass the master. A worker
  * that stays silent longer than the watchdog timeout is stuck (a busy loop or a blocking call
@@ -31,7 +31,14 @@ use Swerve\Claim;
  * rolling reload): the new worker listens (SO_REUSEPORT) before the old one drains, so there is
  * always a listener. SIGUSR1 only reopens the log file. SIGQUIT, SIGUSR1 and SIGUSR2 mean what
  * they mean to php-fpm, whose deploy and logrotate scripts send them. A worker that asks to be
- * recycled is replaced the same way as in a reload. One replacement is in flight at a time.
+ * recycled is replaced the same way as in a reload, one replacement in flight at a time, but
+ * the old worker lingers: it stops accepting and finishes its plain requests, and keeps its
+ * upgraded connections until the last one closes, then exits, or until `--linger`
+ * seconds passed, when it is told to close them and has the grace period for that. A slot has
+ * at most 3 lingering workers: a recycle that would make a fourth waits for one to exit. A
+ * shutdown or a reload ends the lingering, with the grace period. A lingering worker is
+ * supervised like any other (heartbeat, watchdog), and keeps its inbox, so that its
+ * subscriptions go on receiving.
  *
  * A worker that dies is restarted in its slot. One that dies before it was ready, or soon
  * after without having served a request, is a failed start, and its slot backs off
@@ -50,7 +57,7 @@ use Swerve\Claim;
  *
  * Times are from the monotonic clock, which a change of the system time doesn't move.
  *
- * A slot can briefly hold several processes (one starting, one serving, several draining);
+ * A slot can hold several processes (one starting, one serving, several draining or lingering);
  * slot-keyed resources must tolerate the overlap.
  *
  * @internal
@@ -75,6 +82,8 @@ final class Cluster
     private Inboxes $inboxes;
     /** No inbox was free to start a worker: logged once, until one starts. */
     private bool $noInbox = false;
+    /** @var array<int, true> slots whose recycle waits for a lingering worker to exit: logged once each */
+    private array $recycleWaits = [];
     /** Application load and listen: a worker not ready by then is killed as a failed start. */
     public const READY_TIMEOUT = 60.0;
     /** Ready this long, or having served: not part of a crash loop, and resets the slot's failures. */
@@ -98,6 +107,8 @@ final class Cluster
      * run (the process group stopped and continued, a suspended VM): see deadlines().
      */
     public const PAUSED = 1.0;
+    /** Lingering workers a slot may have: a recycle that would make one more waits. */
+    public const MAX_LINGERING = 3;
 
     /** @var array<int, WorkerProcess> by pid */
     private array $workers = [];
@@ -128,6 +139,7 @@ final class Cluster
 
     /**
      * @param float       $grace      seconds a draining worker gets before SIGKILL
+     * @param float       $linger     seconds a recycled worker may keep its upgraded connections; 0 = not at all
      * @param float       $watchdog   seconds of silence after which a worker is killed; 0 = off
      * @param string|null $monitorDir reload when a PHP file below it changes
      * @param string      $serving    what is served where, logged once the first worker is ready
@@ -136,14 +148,15 @@ final class Cluster
         private readonly int $numWorkers,
         private readonly LoggerInterface $logger,
         private readonly float $grace,
+        private readonly float $linger,
         private readonly float $watchdog,
         private readonly ?string $monitorDir,
         private readonly string $serving,
         int $cacheBytes = 64 << 20,
     ) {
         $this->cache = new LruCache(maxBytes: $cacheBytes);
-        // Twice the slots: a replacement starts while the worker it replaces drains
-        $this->inboxes = new Inboxes(2 * $numWorkers);
+        // A serving worker, its replacement starting, and up to MAX_LINGERING lingering ones per slot
+        $this->inboxes = new Inboxes((1 + self::MAX_LINGERING) * $numWorkers);
         $this->masterPid = \posix_getpid();
         Claim::directory(); // before the first fork: the workers inherit it, see Claim
         OrderedLog::directory();
@@ -248,7 +261,7 @@ final class Cluster
     {
         $inbox = $this->inboxes->take();
         if (null === $inbox) {
-            // Draining workers hold them until they exit, within the grace period
+            // Draining workers hold them until they exit, within the grace period; lingering ones, within the linger time
             if (!$this->noInbox) {
                 $this->noInbox = true;
                 $this->logger->notice('Slot {slot}: waiting for a draining worker to exit before starting another', ['slot' => $slot]);
@@ -276,7 +289,7 @@ final class Cluster
 
             [$read, $peers] = $this->inboxes->adopt($inbox);
 
-            return new Worker($slot, $child, $this->masterPid, $this->grace, $this->watchdog, $logger, $inbox, $read, $peers);
+            return new Worker($slot, $child, $this->masterPid, $this->grace, $this->linger, $this->watchdog, $logger, $inbox, $read, $peers);
         }
         \pcntl_sigprocmask(\SIG_UNBLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
         $now = self::now();
@@ -403,9 +416,11 @@ final class Cluster
         }
         $old = null !== $w->replaces ? ($this->workers[$w->replaces] ?? null) : null;
         if ($old && WorkerProcess::SERVING === $old->state) {
-            $this->drain($old);
-            $this->logger->notice('Slot {slot}: worker {new} took over, draining {old} ({why})', [
-                'slot' => $w->slot, 'new' => $w->pid, 'old' => $old->pid, 'why' => $old->recycle ? 'recycle' : 'reload',
+            // A reload wins over a recycle: its code is outdated, and must not linger
+            $linger = $old->recycle && $old->generation === $this->generation && $this->linger > 0;
+            $this->drain($old, $linger);
+            $this->logger->notice('Slot {slot}: worker {new} took over, draining {old} ({why})' . ($linger ? '; its upgraded connections may stay up to {linger} s' : ''), [
+                'slot' => $w->slot, 'new' => $w->pid, 'old' => $old->pid, 'why' => $old->recycle ? 'recycle' : 'reload', 'linger' => self::seconds($this->linger),
             ]);
         }
         if (null !== $this->reloadStarted) {
@@ -535,8 +550,8 @@ final class Cluster
                 $stuck[] = [$w, $silent];
                 \posix_kill($w->pid, \SIGQUIT);
                 $this->logger->error('Worker {pid} (slot {slot}) sent no heartbeat for {s} s: killing it (busy loop or blocking call)', ['pid' => $w->pid, 'slot' => $w->slot, 's' => $silent]);
-            } elseif (WorkerProcess::DRAINING === $w->state && $now - $w->drainingSince > $this->grace) {
-                $this->kill($w, 'grace expired', 'warning');
+            } elseif (WorkerProcess::DRAINING === $w->state && $now - $w->drainingSince > $this->grace + ($w->lingering ? $this->linger : 0)) {
+                $this->kill($w, $w->lingering ? 'linger time and grace expired' : 'grace expired', 'warning');
             }
             // Only a worker started since the failures proves the slot starts again: not the one
             // a failing replacement was to take over from, which serves on
@@ -625,6 +640,11 @@ final class Cluster
         if (\function_exists('opcache_reset')) {
             \opcache_reset();
         }
+        foreach ($this->workers as $w) {
+            if ($w->lingering) {
+                $this->endLinger($w);
+            }
+        }
         $this->logger->notice('Reload requested ({why}): replacing {n} workers one at a time', ['why' => $why, 'n' => $this->numWorkers]);
     }
 
@@ -642,11 +662,29 @@ final class Cluster
         }
     }
 
-    /** Ask a worker to drain: by a byte, see the class's docblock. */
-    private function drain(WorkerProcess $w): void
+    /**
+     * Ask a worker to drain: by a byte, see the class's docblock. A lingering one ('G') stops
+     * accepting, but keeps its upgraded connections and its inbox, until endLinger().
+     */
+    private function drain(WorkerProcess $w, bool $linger = false): void
+    {
+        $this->send($w, $linger ? 'G' : 'T');
+        $w->state         = WorkerProcess::DRAINING;
+        $w->drainingSince = self::now();
+        $w->lingering     = $linger;
+        if (!$linger) {
+            $this->leaveInbox($w);
+        }
+    }
+
+    /**
+     * A shutdown or a reload: a lingering worker closes its connections now, and has the grace
+     * period for it.
+     */
+    private function endLinger(WorkerProcess $w): void
     {
         $this->send($w, 'T');
-        $w->state         = WorkerProcess::DRAINING;
+        $w->lingering     = false;
         $w->drainingSince = self::now();
         $this->leaveInbox($w);
     }
@@ -666,13 +704,31 @@ final class Cluster
                 return null;
             }
         }
-        $order = fn (WorkerProcess $w) => [-$this->failures[$w->slot], $w->slot];
-        $next  = null;
+        $order     = fn (WorkerProcess $w) => [-$this->failures[$w->slot], $w->slot];
+        $lingering = [];
         foreach ($this->workers as $w) {
-            if (WorkerProcess::SERVING === $w->state && ($w->recycle || $w->generation < $this->generation)
-                && (null === $next || $order($w) < $order($next))) {
+            $lingering[$w->slot] = ($lingering[$w->slot] ?? 0) + (int) $w->lingering;
+        }
+        $next = null;
+        foreach ($this->workers as $w) {
+            if (WorkerProcess::SERVING !== $w->state || !($w->recycle || $w->generation < $this->generation)) {
+                continue;
+            }
+            // A recycle that would make a lingering worker too many waits; a reload's replacement doesn't linger
+            if ($w->recycle && $w->generation === $this->generation && $this->linger > 0 && ($lingering[$w->slot] ?? 0) >= self::MAX_LINGERING) {
+                if (!isset($this->recycleWaits[$w->slot])) {
+                    $this->recycleWaits[$w->slot] = true;
+                    $this->logger->notice('Slot {slot}: recycle waits for a lingering worker to exit ({n} linger)', ['slot' => $w->slot, 'n' => $lingering[$w->slot]]);
+                }
+                continue;
+            }
+            if (null === $next || $order($w) < $order($next)) {
                 $next = $w;
             }
+        }
+
+        if ($next) {
+            unset($this->recycleWaits[$next->slot]);
         }
 
         return $next && self::now() >= $this->nextStart[$next->slot] ? $this->spawn($next->slot, $next->pid) : null;
@@ -687,7 +743,9 @@ final class Cluster
         $start = self::now();
         $this->logger->notice('Shutting down: draining {n} workers (grace {g} s)', ['n' => \count($this->workers), 'g' => self::seconds($this->grace)]);
         foreach ($this->workers as $w) {
-            if (WorkerProcess::DRAINING !== $w->state) {
+            if ($w->lingering) {
+                $this->endLinger($w);
+            } elseif (WorkerProcess::DRAINING !== $w->state) {
                 $this->drain($w);
             }
         }

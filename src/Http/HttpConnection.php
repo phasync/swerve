@@ -361,10 +361,16 @@ final class HttpConnection implements ResponderInterface
      * application reads after the response is left to it, as a request in flight is: the
      * worker's drain deadline bounds both.
      *
-     * Returns whether the connection is upgraded (101).
+     * Returns whether the connection is upgraded (101). With `$linger` (a recycled worker
+     * keeps its upgraded connections), an upgraded connection is left as it is, and drain()
+     * without `$linger` ends it later. A request in flight that upgrades after this is ended
+     * as by a drain: its client reconnects, to the worker that replaced this one.
      */
-    public function drain(): bool
+    public function drain(bool $linger = false): bool
     {
+        if ($linger && $this->upgraded) {
+            return true;
+        }
         $this->draining = true;
         if ($this->upgraded) {
             // The application's protocol can only be ended by the application: its input ends,

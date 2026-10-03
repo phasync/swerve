@@ -1567,7 +1567,7 @@ test('shutdown under concurrent load fails no request in flight', function () {
 
 test('-d is gone from --help and is refused', function () {
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' --help', $help, $code);
-    expect(implode("\n", $help))->toContain('--grace')->toContain('--watchdog')->toContain('--max-memory')->toContain('--max-requests')->not->toMatch('/^\s*-d\b/m');
+    expect(implode("\n", $help))->toContain('--grace')->toContain('--linger')->toContain('--watchdog')->toContain('--max-memory')->toContain('--max-requests')->not->toMatch('/^\s*-d\b/m');
 
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' -d 2>&1', $out, $code);
     expect($code)->toBe(2);

@@ -103,6 +103,12 @@ return (function () {
         placeholder: 'seconds',
         validator: $seconds,
     ));
+    $args->add('linger', new Option(
+        '', 'linger', 'Seconds a recycled worker may keep serving its WebSockets and other upgraded connections after its replacement took over; 0 = not at all',
+        default: '1800',
+        placeholder: 'seconds',
+        validator: $seconds,
+    ));
     $args->add('watchdog', new Option(
         '', 'watchdog', 'Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off',
         default: '30',

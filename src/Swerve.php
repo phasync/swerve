@@ -202,7 +202,7 @@ final class Swerve
      * Whether this worker drains: it is shutting down, reloading or being recycled, and finishes the requests in flight.
      *
      * An early hint: it turns true when the drain begins, also for a recycled worker, which then
-     * keeps its upgraded connections (WebSocket, SSE) for up to `--linger` seconds. What tells
+     * keeps its upgraded connections (and long SSE responses) for up to `--linger` seconds. What tells
      * that connections must close now is {@see Swerve::onShutdown()}. Long responses should end
      * soon: see docs/realtime.md. A {@see Subscription} ends its loop at that moment, not before.
      *
@@ -222,8 +222,8 @@ final class Swerve
     }
 
     /**
-     * Run `$callback` when this worker must now close its connections: for a WebSocket, to send
-     * the close frame (1001) and end it.
+     * Run `$callback` when this worker must now close its connections: for an upgraded connection, to say
+     * goodbye in its protocol and end it.
      *
      * That is when a shutdown or a reload begins to drain the worker, and, for a worker replaced
      * by a recycle (which keeps its upgraded connections for up to `--linger` seconds), at the end
@@ -237,10 +237,10 @@ final class Swerve
      * freed shortly after.
      *
      * ```php
-     * WebSocket::from($request, function (WebSocket $ws) {
-     *     Swerve::onShutdown(fn () => $ws->end(1001, 'restarting'));
-     *     foreach ($ws as $message) {
-     *         $ws->send(handle($message));
+     * YourProtocol::from($request, function (YourProtocol $conn) {
+     *     Swerve::onShutdown(fn () => $conn->end('restarting'));
+     *     foreach ($conn as $message) {
+     *         $conn->send(handle($message));
      *     }
      * });
      * ```

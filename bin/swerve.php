@@ -191,6 +191,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         $workerCount,
         $logger,
         (float) $args->grace,
+        (float) $args->linger,
         (float) $args->watchdog,
         $args->watch ? \dirname($swerveFile) : null,
         \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(), $args->swervefile,

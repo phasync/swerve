@@ -11,7 +11,9 @@ use Swerve\Cache;
 /**
  * A worker process's side of the supervision, see Cluster: tells the master it is alive
  * and ready, asks to be recycled when it leaks, and drains its servers when the master asks
- * ('T' over the socket pair), on SIGTERM from outside, or when the master died.
+ * ('T' over the socket pair), on SIGTERM from outside, or when the master died. After a
+ * recycle the master sends 'G' instead: the worker then lingers, draining but keeping its
+ * upgraded connections until they are gone, or until `--linger` seconds passed, see stopLingering().
  *
  * SIGINT and SIGHUP are ignored: Ctrl+C and a closing terminal signal the whole process
  * group, and only the master decides what happens to the workers. SIGQUIT logs what the
@@ -39,6 +41,8 @@ final class Worker
     private bool $stopRequested = false;
     private bool $draining = false;
     private float $drainStarted = 0.0;
+    /** When a lingering worker closes its connections; null when it does not linger. */
+    private ?float $lingerEnd = null;
     /** When a drain that has not finished drops its connections, see tick(). */
     private float $deadline = \PHP_FLOAT_MAX;
 
@@ -47,7 +51,7 @@ final class Worker
     private int $requests = 0;
     /** Servers whose run() has not returned yet. */
     private int $running = 0;
-    /** @var Closure[] each server's drain() */
+    /** @var Closure(bool): void[] each server's drain(), see ServerInterface::drain() */
     private array $drains = [];
     private bool $ticking = false;
     /**
@@ -82,6 +86,7 @@ final class Worker
         private $pipe,
         private readonly int $masterPid,
         private readonly float $grace,
+        private readonly float $linger,
         float $watchdog,
         public readonly LoggerInterface $logger,
         int $inboxId,
@@ -225,7 +230,7 @@ final class Worker
 
     /**
      * Run a server in a coroutine: $run serves until drained and returns, $drain makes it stop
-     * accepting and finish. The worker exits once every server returned. A server that fails,
+     * accepting and finish ($drain(true): but keep the upgraded connections). The worker exits once every server returned. A server that fails,
      * or returns without being drained, ends the worker, so that the master starts another.
      */
     public function serve(Closure $run, Closure $drain): void
@@ -344,6 +349,13 @@ final class Worker
             if (!$this->draining && \posix_getppid() !== $this->masterPid) {
                 $this->logger->critical('Master process died; draining');
                 $this->drain('the master died');
+            } elseif (null !== $this->lingerEnd) {
+                if (\posix_getppid() !== $this->masterPid) {
+                    $this->logger->critical('Master process died; closing the lingering connections');
+                    $this->stopLingering('the master died');
+                } elseif ($now >= $this->lingerEnd) {
+                    $this->stopLingering('the linger time is over');
+                }
             }
             if ($now >= $this->deadline) {
                 $this->logger->warning('Drain deadline reached after {s} s; dropping open connections and the coroutines requests started', [
@@ -375,7 +387,7 @@ final class Worker
     }
 
     /**
-     * Act on what the master sends: 'T' to drain, 'L' to reopen the log file after log
+     * Act on what the master sends: 'T' to drain, 'G' to drain but linger, 'L' to reopen the log file after log
      * rotation, and the replies to its requests, see Cache and Topics. Bytes, not signals: a signal cuts short the
      * blocking calls (sleep(), stream_select()) of the requests in flight, which a drain is there
      * to let finish. Ends at the end of the pipe, when the master died; tick() acts on that.
@@ -399,8 +411,11 @@ final class Worker
             if (\str_contains($status, 'L') && $this->logger instanceof Logger) {
                 $this->logger->reopen();
             }
-            if (\str_contains($status, 'T') && !$this->draining) {
-                $this->drain('the master asked');
+            if (\str_contains($status, 'G') && !$this->draining) {
+                $this->drain('the master asked', true);
+            }
+            if (\str_contains($status, 'T')) {
+                $this->draining ? $this->stopLingering('the master asked') : $this->drain('the master asked');
             }
         }
     }
@@ -463,29 +478,51 @@ final class Worker
      */
     private function awaitTerm(): void
     {
-        while (!$this->draining) {
+        while (!$this->draining || null !== $this->lingerEnd) {
             phasync::readable($this->wake, \PHP_FLOAT_MAX);
             \fread($this->wake, 1024);
-            if ($this->stopRequested && !$this->draining) {
-                $this->drain('SIGTERM');
+            if ($this->stopRequested) {
+                $this->draining ? $this->stopLingering('SIGTERM') : $this->drain('SIGTERM');
             }
         }
     }
 
     /**
      * Each server's run() returns once drained, and the last one exits, see serve().
+     *
+     * With $linger (a recycle), the upgraded connections stay until they close, or
+     * stopLingering() at the end of the linger time; everything else is as in a drain.
      */
-    private function drain(string $why): void
+    private function drain(string $why, bool $linger = false): void
     {
         $this->draining     = true;
         $this->drainStarted = \microtime(true);
-        $this->deadline     = $this->drainStarted + \max($this->grace - 1.0, $this->grace / 2);
+        $this->lingerEnd    = $linger ? $this->drainStarted + $this->linger : null;
+        $this->deadline     = $linger ? \PHP_FLOAT_MAX : $this->drainStarted + \max($this->grace - 1.0, $this->grace / 2);
         // Asked by the master, the master logs it once for all; anything else is news
-        $this->logger->log('the master asked' === $why ? 'info' : 'notice', 'Draining ({why})', ['why' => $why]);
+        $this->logger->log('the master asked' === $why ? 'info' : 'notice', $linger ? 'Draining, keeping upgraded connections for up to {s} s ({why})' : 'Draining ({why})', ['why' => $why, 's' => \round($this->linger)]);
         $this->send('D'); // the master may not know: a SIGTERM from someone else, or its death
-        Topics::drain(); // ends the long responses fed by subscriptions
+        $linger ? Topics::linger() : Topics::drain(); // drain() ends the long responses fed by subscriptions
         foreach ($this->drains as $drain) {
-            $drain();
+            $drain($linger);
+        }
+    }
+
+    /**
+     * A lingering worker closes its connections: at the end of the linger time, on a shutdown
+     * or a reload ('T'), or when the master died. The Swerve::onShutdown() callbacks run, the
+     * subscriptions end, the upgraded connections get their input's end, and the grace period
+     * starts.
+     */
+    private function stopLingering(string $why): void
+    {
+        $this->lingerEnd    = null;
+        $this->drainStarted = \microtime(true);
+        $this->deadline     = $this->drainStarted + \max($this->grace - 1.0, $this->grace / 2);
+        $this->logger->notice('Closing the lingering connections ({why})', ['why' => $why]);
+        Topics::drain();
+        foreach ($this->drains as $drain) {
+            $drain(false);
         }
     }
 }

@@ -205,10 +205,17 @@ final class HttpServer implements ServerInterface
      * so the other workers get every new connection, and wakes run(). With
      * net.ipv4.tcp_migrate_req=0, a handshake that completes in the microseconds between the
      * two is reset; with 1, the kernel moves it to another worker's listener.
+     *
+     * With `$linger` (a recycle), the upgraded connections are left alone: they go on until
+     * they close, and run() returns after the last. Calling drain() again, without `$linger`,
+     * ends them as above.
      */
-    public function drain(): void
+    public function drain(bool $linger = false): void
     {
-        if ($this->shared) {
+        $first = !$this->draining;
+        if (!$first) {
+            // Only the connections: the listener is closed
+        } elseif ($this->shared) {
             $this->draining = true;
             if ($this->waiting) {
                 phasync::cancel($this->waiting, $this->wake = new \RuntimeException('drain'));
@@ -224,10 +231,10 @@ final class HttpServer implements ServerInterface
         }
         $upgraded = 0;
         foreach ($this->connections as $connection) {
-            $upgraded += (int) $connection->drain();
+            $upgraded += (int) $connection->drain($linger);
         }
         phasync::raiseFlag($this); // run() may wait for a free place
-        $this->logger->info('Draining HTTP at {address}: {n} connections open, {upgraded} upgraded', ['address' => $this->address, 'n' => \count($this->connections), 'upgraded' => $upgraded]);
+        $this->logger->info($first ? 'Draining HTTP at {address}: {n} connections open, {upgraded} upgraded' : 'Closing HTTP at {address}: {n} connections open, {upgraded} upgraded', ['address' => $this->address, 'n' => \count($this->connections), 'upgraded' => $upgraded]);
     }
 
     /**

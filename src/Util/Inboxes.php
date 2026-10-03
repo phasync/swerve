@@ -9,8 +9,9 @@ namespace Swerve\Util;
  * that holds the inbox reads one end; every other worker holds the other end and writes to it,
  * so a published message goes from the publisher straight to the workers with subscribers, never
  * through the master. A worker process gets a free inbox when it is forked, and the master takes
- * it back when the process is gone; a replacement started during a reload has an inbox of its own
- * while the old process drains, so there are twice as many inboxes as slots.
+ * it back when the process is gone; a replacement started during a reload or a recycle has an
+ * inbox of its own while the old process drains or lingers, so there are four times as many
+ * inboxes as slots (see Cluster::MAX_LINGERING).
  *
  * The master alone knows which inboxes have subscribers on a topic, as a bitmap: bit N is set
  * while the process in inbox N has a subscription. A worker asks for a topic's bitmap before it

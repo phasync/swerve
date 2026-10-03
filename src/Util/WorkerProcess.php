@@ -24,6 +24,8 @@ final class WorkerProcess
     public bool $served = false;
     /** Sent 'C': asks to be replaced, see Cluster::handover(). */
     public bool $recycle = false;
+    /** Draining, but serving its upgraded connections until they close or the linger time is over: sent 'G', see Cluster::drain(). */
+    public bool $lingering = false;
     /** Sent 'F': a PHP fatal error ends it. */
     public bool $fatal = false;
 
