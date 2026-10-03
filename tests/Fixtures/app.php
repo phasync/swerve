@@ -364,6 +364,9 @@ return new class($version) implements RequestHandlerInterface {
     /** WebSocket callbacks of /websocket-news still running, see /news-live. */
     private int $newsLive = 0;
 
+    /** @var list<\WeakReference> the objects /shutdown-plain's callbacks hold, see /shutdown-probes */
+    private array $probes = [];
+
     /** @var list<array{int, string}> what the $onClose of /websocket-events saw, see /ws-closes */
     private array $wsCloses = [];
 
@@ -460,6 +463,35 @@ return new class($version) implements RequestHandlerInterface {
                     --$this->newsLive;
                 }
             }),
+            // A WebSocket that tells its worker's pid, echoes, and says goodbye (1001) when the worker shuts down; ?throw=1: a callback that throws is registered first
+            '/websocket-shutdown' => WebSocket::from($request, static function (WebSocket $ws) use ($query) {
+                isset($query['throw']) && Swerve::onShutdown(static fn () => throw new RuntimeException('the shutdown callback failed'));
+                Swerve::onShutdown(static function () use ($ws) {
+                    Swerve::log()->notice('onShutdown callback ran');
+                    $ws->end(1001);
+                });
+                $ws->send((string) \getmypid());
+                foreach ($ws as $message) {
+                    $ws->send($message);
+                }
+            }),
+            // A request that ends having registered a callback, which must then never run: it holds an object (see /shutdown-probes)
+            '/shutdown-plain' => (function () {
+                $probe          = new \stdClass();
+                $this->probes[] = \WeakReference::create($probe);
+                Swerve::onShutdown(static function () use ($probe) {
+                    Swerve::log()->notice('onShutdown callback of a request that ended ran');
+                });
+
+                return new Response(200, [], 'registered');
+            })(),
+            // How many of /shutdown-plain's objects are still alive, after a garbage collection
+            '/shutdown-probes' => (function () {
+                \phasync::sleep(0.6); // the event loop collects cycles half a second after a coroutine ends
+                \gc_collect_cycles();
+
+                return new Response(200, [], \json_encode(\count(\array_filter($this->probes, static fn (\WeakReference $r) => null !== $r->get()))));
+            })(),
             // A WebSocket that forwards 'feed' and closes itself on a message saying it ends
             '/websocket-feed' => WebSocket::from($request, function (WebSocket $ws) {
                 foreach (Swerve::subscribe('feed') as $message) {

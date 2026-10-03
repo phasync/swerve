@@ -4,6 +4,7 @@ namespace Swerve;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Swerve\Util\Shutdown;
 use Swerve\Util\Topics;
 
 /**
@@ -200,8 +201,10 @@ final class Swerve
     /**
      * Whether this worker drains: it is shutting down, reloading or being recycled, and finishes the requests in flight.
      *
-     * Long responses should end soon: see docs/realtime.md. A {@see Subscription} ends its loop
-     * when the worker drains.
+     * An early hint: it turns true when the drain begins, also for a recycled worker, which then
+     * keeps its upgraded connections (WebSocket, SSE) for up to `--linger` seconds. What tells
+     * that connections must close now is {@see Swerve::onShutdown()}. Long responses should end
+     * soon: see docs/realtime.md. A {@see Subscription} ends its loop at that moment, not before.
      *
      * ```php
      * while (!Swerve::draining()) {
@@ -210,11 +213,68 @@ final class Swerve
      * }
      * ```
      *
+     * @see Swerve::onShutdown
      * @see Swerve::subscribe
      */
     public static function draining(): bool
     {
         return Topics::$draining;
+    }
+
+    /**
+     * Run `$callback` when this worker must now close its connections: for a WebSocket, to send
+     * the close frame (1001) and end it.
+     *
+     * That is when a shutdown or a reload begins to drain the worker, and, for a worker replaced
+     * by a recycle (which keeps its upgraded connections for up to `--linger` seconds), at the end
+     * of that time. The callback runs in a coroutine of its own, so a slow one delays no other
+     * and one that throws, which is logged, stops none; it runs at once when that moment has
+     * passed already.
+     *
+     * The callback belongs to the request (or coroutine context) that registered it, and goes
+     * when that request ends, without running: swerve holds no reference to the request. phasync
+     * collects the cycles half a second after a coroutine ends, so what the callback holds is
+     * freed shortly after.
+     *
+     * ```php
+     * WebSocket::from($request, function (WebSocket $ws) {
+     *     Swerve::onShutdown(fn () => $ws->end(1001, 'restarting'));
+     *     foreach ($ws as $message) {
+     *         $ws->send(handle($message));
+     *     }
+     * });
+     * ```
+     *
+     * @param \Closure $callback called without arguments; its return value is ignored
+     *
+     * @throws \LogicException outside a coroutine
+     *
+     * @see Swerve::awaitShutdown    to wait for it in sequential code
+     * @see Swerve::draining
+     */
+    public static function onShutdown(\Closure $callback): void
+    {
+        Shutdown::listen($callback);
+    }
+
+    /**
+     * Wait until this worker must close its connections, see {@see Swerve::onShutdown()}.
+     *
+     * ```php
+     * if (Swerve::awaitShutdown(30)) {
+     *     $ws->end(1001);
+     * }
+     * ```
+     *
+     * @param float|null $timeout seconds to wait at most; null for as long as it takes
+     *
+     * @return bool true once it must (at once if it must already), false when `$timeout` passed first
+     *
+     * @throws \LogicException outside a coroutine
+     */
+    public static function awaitShutdown(?float $timeout = null): bool
+    {
+        return Shutdown::await($timeout);
     }
 
     /**

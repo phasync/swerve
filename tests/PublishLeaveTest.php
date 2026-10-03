@@ -44,7 +44,7 @@ test('a drain while publish() delivers does not make it throw', function () {
 
         return $result;
     });
-    \Swerve\Util\Topics::$draining = false;
+    \Swerve\Util\Topics::$draining = \Swerve\Util\Topics::$closed = false;
 
     expect($outcome)->toBe('published');
 });

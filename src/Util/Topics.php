@@ -49,8 +49,10 @@ final class Topics
      */
     public static ?Closure $toMaster = null;
 
-    /** The process drains: subscriptions have ended, see drain(). */
+    /** The process drains, see linger() and drain(): the early hint of Swerve::draining(). */
     public static bool $draining = false;
+    /** The process must now close its connections: subscriptions have ended, see drain(). */
+    public static bool $closed = false;
 
     /** @var array<string, SubscribersInterface> */
     private static array $subscribers = [];
@@ -394,17 +396,28 @@ final class Topics
     }
 
     /**
-     * The process drains (shutdown, reload, recycle): every subscription ends, so that the
-     * long responses fed by them (Server-Sent Events) end too, instead of holding the drain up
-     * to its deadline. Subscriptions made from now on end at once.
+     * The process drains, but keeps its upgraded connections for a while (a recycle): only
+     * the hint of Swerve::draining() changes; subscriptions go on until drain().
+     */
+    public static function linger(): void
+    {
+        self::$draining = true;
+    }
+
+    /**
+     * The process must close its connections (shutdown, reload, or the end of a recycle's
+     * linger): every subscription ends, so that the long responses fed by them
+     * (Server-Sent Events) end too, instead of holding the drain up to its deadline, and the
+     * Swerve::onShutdown() callbacks run. Subscriptions made from now on end at once.
      */
     public static function drain(): void
     {
-        self::$draining = true;
+        self::$draining = self::$closed = true;
         foreach (self::$writers as $writer) {
             $writer->close();
         }
         self::$subscribers = self::$writers = self::$counts = [];
+        Shutdown::fire();
     }
 
     /** @return string[] the topics with subscribers in this process */

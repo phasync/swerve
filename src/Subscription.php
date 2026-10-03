@@ -51,7 +51,7 @@ final class Subscription implements \IteratorAggregate
         public readonly float $maxLag = 30.0,
         public readonly ?float $heartbeat = null,
     ) {
-        if (!Topics::$draining) {
+        if (!Topics::$closed) {
             $this->subscriber = Topics::subscribe($topic);
         }
     }

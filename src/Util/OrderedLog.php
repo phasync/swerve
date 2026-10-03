@@ -138,7 +138,7 @@ final class OrderedLog
         }
         $id           = \hash('sha256', $topic);
         $subscription = new Subscription(self::MESSAGES . $id, $maxLag, $heartbeat);
-        if (null === Topics::$toMaster || Topics::$draining) {
+        if (null === Topics::$toMaster || Topics::$closed) {
             return $subscription;
         }
         if (!isset(self::$readers[$id])) {

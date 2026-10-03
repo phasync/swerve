@@ -344,7 +344,7 @@ test('a drain ends every subscription\'s loop, and one made while draining ends 
 
         return [$ended, Swerve::draining(), Topics::active()];
     });
-    Topics::$draining = false; // this test process goes on
+    Topics::$draining = Topics::$closed = false; // this test process goes on
 
     expect($got)->toBe([['a', 'b', 'new one ended'], true, []]);
 });
