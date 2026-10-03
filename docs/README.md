@@ -21,6 +21,7 @@ Read in this order when you build an application on swerve:
 8. [Production](production.md): sizing, phasync-ext, systemd, Docker, nginx and TLS,
    reloads, limits.
 9. [Troubleshooting and reporting bugs](troubleshooting.md).
+10. [Stray output](stray-output.md): why `echo` ends a worker without phasync-ext.
 
 The examples in [`examples/`](../examples) run as they are, and swerve's test suite runs
 them: [`sse-chat`](../examples/sse-chat), [`websocket-chat`](../examples/websocket-chat) and
