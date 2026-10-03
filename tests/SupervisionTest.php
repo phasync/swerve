@@ -651,7 +651,7 @@ test('a worker at its connection limit says so in the log', function () {
 });
 
 test('a worker at its connection limit without the phasync extension does not advise raising ulimit -n, which can\'t help', function () {
-    if (function_exists('phasync\ext\stream_select')) {
+    if (extension_loaded('phasync')) {
         $this->markTestSkipped('the phasync extension is loaded');
     }
     $addr    = free_address();

@@ -96,7 +96,7 @@ final class HttpServer implements ServerInterface
     {
         $rlimit = \posix_getrlimit();
         $limit  = (int) $rlimit['soft openfiles'];
-        if (!\function_exists('phasync\ext\stream_select') && $limit > self::FD_SETSIZE) {
+        if (!\extension_loaded('phasync') && $limit > self::FD_SETSIZE) {
             $hard = 'unlimited' === $rlimit['hard openfiles'] ? \POSIX_RLIM_INFINITY : (int) $rlimit['hard openfiles'];
             if (!\posix_setrlimit(\POSIX_RLIMIT_NOFILE, self::FD_SETSIZE, $hard)) {
                 throw new \RuntimeException('Could not lower the open-file limit to ' . self::FD_SETSIZE);
