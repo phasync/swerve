@@ -106,7 +106,7 @@ unless phasync-ext is loaded and the database is MySQL: then they wait as a coro
   Use the PSR-7 request: `getQueryParams()`, `getCookieParams()`, `getServerParams()`,
   `getBody()`.
 - **`header()`, `echo`, `setcookie()`, `http_response_code()` don't make the response.**
-  Return a PSR-7 response. Output ends the worker, unless phasync-ext is loaded:
+  Return a PSR-7 response. Output during a request ends the worker, unless phasync-ext is loaded:
   see [Stray output](stray-output.md).
 - **PHP's sessions (`session_start()`) don't work.** Use a PSR-7 session library, or your
   framework's.

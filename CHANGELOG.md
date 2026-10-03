@@ -14,7 +14,9 @@
 
 ### Changed
 
-- Without phasync-ext, output outside a response (`echo`, `var_dump()`, ...) ends the worker with a
-  message on standard error that names the output, the request, and the file and line, and the
-  master starts a new worker. Before, it went to the terminal unnoticed. With phasync-ext nothing
+- Without phasync-ext, output outside a response (`echo`, `var_dump()`, ...) while a request is
+  handled ends the worker with a message on standard error that names the output, the request, and
+  the file and line, and the master starts a new worker. Before, it went to the terminal unnoticed.
+  Output while no request is handled, such as `swerve.php` printing while it loads, is not an
+  error: it goes to the worker's standard output. With phasync-ext nothing
   changes. See `docs/stray-output.md`.

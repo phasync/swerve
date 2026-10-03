@@ -1,14 +1,17 @@
 # Stray output
 
 Output that is not part of a response (`echo`, `print`, `var_dump()`, `printf()`, template
-code that prints, a closing `?>` tag) has nowhere to go in a worker. Without
-[phasync-ext](production.md#phasync-ext), swerve ends the worker on the first byte of it,
-rather than let it be lost or sent to the wrong client.
+code that prints, a closing `?>` tag) has nowhere to go while a request is being handled.
+Without [phasync-ext](production.md#phasync-ext), swerve ends the worker on the first byte of
+it, rather than let it be sent to the wrong client.
 
 ## Without phasync-ext
 
-Each worker puts an output buffer under everything else, before your `swerve.php` loads. The
-first byte that reaches it makes the worker write this to standard error (not to `--log`) and
+Each worker puts an output buffer under everything else, before your `swerve.php` loads. It
+acts only while a request is being handled: output while `swerve.php` loads (a startup
+banner, debugging), or from a background coroutine while no request is in flight, goes to the
+worker's standard output as it would without it. The first byte that reaches it during a
+request makes the worker write this to standard error (not to `--log`) and
 exit with status 4:
 
 ```
@@ -20,12 +23,12 @@ Stray output is not compatible with swerve.
 ```
 
 - The output is escaped and cut at 200 bytes. `Request` is the request of the coroutine
-  that wrote it, also when two requests overlap; `none` when it happened while `swerve.php`
-  loaded or in a background coroutine. `At` is the file and line of the `echo`.
+  that wrote it, also when two requests overlap; `none` when it came from a background
+  coroutine while a request was in flight. `At` is the file and line of the `echo`.
+- PHP also writes the offending output to standard output as the worker exits; that cannot
+  be prevented from PHP code, so the message on standard error is the one to read.
 - The master starts a new worker. The request that printed gets no response; other requests
   in that worker are cut off, as with `exit()`.
-- If `swerve.php` itself prints while it loads, the worker never becomes ready and swerve
-  stops with `failed to start`.
 - The buffer cannot be removed: `ob_end_clean()` and `ob_end_flush()` fail on it. Your own
   `ob_start()` on top works: what it captures never reaches the guard, and only what it
   lets through does. A loop `while (ob_get_level()) ob_end_clean();` never ends (the
