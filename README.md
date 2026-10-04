@@ -439,7 +439,7 @@ function nightlyReport(): void
 
 ## Code written for PHP-FPM
 
-With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta3 or later),
+With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta4 or later),
 `Swerve::virtualize()` in `swerve.php` runs every request as under PHP-FPM, as a request of its
 own: `echo`, `header()`, `setcookie()`, `http_response_code()`, the session functions,
 `php://input` and `exit()` (which ends the request, not the worker) work, also with many requests

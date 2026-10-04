@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-beta4 (2026-10-04)
+
+### Changed
+
+- `Swerve::virtualize()` needs phasync-ext 0.5.0-beta4 or later: 0.5.0-beta3 did not build on PHP 8.2 and 8.3.
+
 ## 0.1.0-beta3 (2026-10-04)
 
 ### Added

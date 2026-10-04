@@ -51,7 +51,7 @@ final class Swerve
      * return $app;
      * ```
      *
-     * Needs phasync-ext 0.5.0-beta3 or later. The application's own global variables and static
+     * Needs phasync-ext 0.5.0-beta4 or later. The application's own global variables and static
      * properties are still shared by the requests of a worker.
      *
      * @throws \LogicException without phasync-ext's `virtualize()`
@@ -59,7 +59,7 @@ final class Swerve
     public static function virtualize(bool $on = true): void
     {
         if ($on && !Virtual::available()) {
-            throw new \LogicException('Swerve::virtualize() needs phasync-ext 0.5.0-beta3 or later');
+            throw new \LogicException('Swerve::virtualize() needs phasync-ext 0.5.0-beta4 or later');
         }
         if ($on) {
             require_once __DIR__ . '/Http/functions.php';
