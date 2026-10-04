@@ -49,7 +49,7 @@ final class Swerve
      * return $app;
      * ```
      *
-     * Needs phasync-ext 0.5.0-alpha15 or later. The application's own global variables and static
+     * Needs phasync-ext 0.5.0-beta2 or later. The application's own global variables and static
      * properties are still shared by the requests of a worker.
      *
      * @throws \LogicException without phasync-ext's `virtualize()`
@@ -57,7 +57,7 @@ final class Swerve
     public static function virtualize(bool $on = true): void
     {
         if ($on && !Virtual::available()) {
-            throw new \LogicException('Swerve::virtualize() needs phasync-ext 0.5.0-alpha15 or later');
+            throw new \LogicException('Swerve::virtualize() needs phasync-ext 0.5.0-beta2 or later');
         }
         self::$virtualize = $on;
     }
@@ -314,7 +314,7 @@ final class Swerve
     }
 
     /**
-     * The installed version, as Composer knows it: `0.1.0-beta1`, or `dev-main` in a checkout.
+     * The installed version, as Composer knows it: `0.1.0-beta2`, or `dev-main` in a checkout.
      *
      * @return string the version, or 'unknown' when Composer has none for `phasync/swerve`
      */
