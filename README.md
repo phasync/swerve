@@ -486,10 +486,11 @@ Where it differs from PHP-FPM, because the requests share one process:
   is one connection of the worker, used by every request in it, also when they run at once: two
   requests in one transaction on it corrupt each other. Open one connection per request, or use a
   pool.
-- **Settings.** Request state the extension does not swap is shared: `set_time_limit()`, `ini_set()`,
-  the default time zone, `setlocale()`, `mb_*` and intl settings, `libxml_use_internal_errors()`,
-  `mysqli_report()`, `bcscale()`, `error_get_last()` and the `mt_srand()` seed. Set them once at
-  start, not per request.
+- **Settings.** `ini_set()`, `set_time_limit()` (a per-request CPU budget: only the request that
+  exceeds it fails), `error_get_last()`, the default time zone, the `mt_srand()` seed and the
+  `mysqli_report()` mode are the request's own (phasync-ext 0.5.0-beta3 or later). Shared by the
+  worker's requests: `setlocale()`, `Locale::setDefault()`, `mb_*` settings, libxml errors and handlers,
+  `bcscale()`, `chdir()`, `umask()` and `putenv()`. Set these once at start, not per request.
 - **Memory.** `memory_limit` bounds all the requests in a worker together, and a fatal error ends the
   worker and every request in it (not only the one that caused it). Size it for the concurrency
   ([Sizing](docs/production.md#sizing)).
