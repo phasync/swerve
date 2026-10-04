@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `--ext` stops swerve with an error when the extension cannot be loaded; the start notice about a
+  missing extension is logged only when `composer.json` enables it, or does not mention it.
+
 ## 0.1.0-beta5 (2026-10-04)
 
 ### Added

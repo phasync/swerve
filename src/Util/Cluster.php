@@ -153,7 +153,7 @@ final class Cluster
         private readonly ?string $monitorDir,
         private readonly string $serving,
         int $cacheBytes = 64 << 20,
-        bool $extRequested = false,
+        bool $extInComposer = false,
     ) {
         $this->cache = new LruCache(maxBytes: $cacheBytes);
         // A serving worker, its replacement starting, and up to MAX_LINGERING lingering ones per slot
@@ -163,8 +163,8 @@ final class Cluster
         OrderedLog::directory();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
         if (!\extension_loaded('phasync')) {
-            $this->logger->notice($extRequested
-                ? 'phasync-ext was asked for but did not load: phasync ships no binary for this PHP build (or PHASYNC_EXT_SO is wrong); see https://github.com/phasync/phasync/issues'
+            $this->logger->notice($extInComposer
+                ? 'phasync-ext is enabled in composer.json but did not load: phasync ships no binary for this PHP build (or PHASYNC_EXT_SO is wrong); see https://github.com/phasync/phasync/issues'
                 : 'phasync-ext is not loaded: fine for development, but in production it lifts the limit of 512 connections per worker and speeds up waiting. It ships inside phasync: add "extra": {"phasync": {"ext": true}} to your composer.json, or start swerve with --ext');
         }
         if ('0' === \trim((string) @\file_get_contents('/proc/sys/net/ipv4/tcp_migrate_req'))) {

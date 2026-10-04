@@ -182,7 +182,7 @@ Serving:
   -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
 
 Extension:
-  --ext                   Load phasync-ext (bundled with phasync) even if composer.json does not enable it
+  --ext                   Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot
 
 Development:
   --watch                 Reload the workers, one at a time, when a PHP file of the application changes

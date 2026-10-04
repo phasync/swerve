@@ -13,7 +13,7 @@ with prebuilt binaries for PHP 8.2 to 8.5 on Linux. Swerve loads it when your pr
 ```
 
 ```bash
-vendor/bin/swerve --ext          # the same, without touching composer.json
+vendor/bin/swerve --ext          # the same, without touching composer.json; swerve stops if it cannot load
 vendor/bin/swerve --version      # ... phasync-ext 0.5.0-beta5
 ```
 

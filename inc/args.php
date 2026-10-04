@@ -74,7 +74,7 @@ return (function () {
 
     $args->section('Extension');
     $args->add('ext', new Flag(
-        '', 'ext', 'Load phasync-ext (bundled with phasync) even if composer.json does not enable it'
+        '', 'ext', 'Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot'
     ));
 
     $args->section('Development');

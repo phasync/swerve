@@ -31,9 +31,17 @@ use Swerve\Util\Worker;
 require $GLOBALS['_composer_autoload_path']
     ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
 
-// Load phasync-ext, which ships inside phasync, when composer.json opts in or --ext is given: may restart this process once
-$extRequested = \in_array('--ext', $argv, true) || phasync\ext_enabled();
-if ($extRequested) {
+// Load phasync-ext (it ships inside phasync): --ext must succeed or swerve stops; composer.json's setting only
+// logs a notice when the extension cannot load. Either may restart this process once.
+$extInComposer = phasync\ext_enabled();
+if (\in_array('--ext', $argv, true)) {
+    try {
+        phasync\ext\ensure_loaded();
+    } catch (\RuntimeException $e) {
+        \fwrite(\STDERR, 'swerve: --ext: '.$e->getMessage()."\n");
+        exit(1);
+    }
+} elseif ($extInComposer) {
     phasync\try_enable_ext();
 }
 
@@ -53,7 +61,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
 /**
  * Ensure we don't pollute the global namespace.
  */
-(function () use ($argv, $extRequested) {
+(function () use ($argv, $extInComposer) {
     /**
      * Colorful terminal.
      */
@@ -201,7 +209,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
             \implode(', ', \array_map(static fn ($a) => ($fastcgi ? 'fastcgi' : 'http') . (\str_starts_with($a, 'unix:') ? '+unix://' . \substr($a, 5) : "://$a"), $addresses)),
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
         (int) \ini_parse_quantity($args->cacheSize),
-        $extRequested,
+        $extInComposer,
     );
     $worker = $cluster->run();
     if (\is_int($worker)) {
