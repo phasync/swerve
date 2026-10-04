@@ -72,6 +72,11 @@ return (function () {
         placeholder: 'n'
     ));
 
+    $args->section('Extension');
+    $args->add('ext', new Flag(
+        '', 'ext', 'Load phasync-ext (bundled with phasync) even if composer.json does not enable it'
+    ));
+
     $args->section('Development');
     $args->add('watch', new Flag(
         '', 'watch', "Reload the workers, one at a time, when a PHP file of the application changes"

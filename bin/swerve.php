@@ -31,8 +31,11 @@ use Swerve\Util\Worker;
 require $GLOBALS['_composer_autoload_path']
     ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
 
-// With phasync/phasync-ext installed, load the extension: may restart this process once
-phasync\try_enable_ext();
+// Load phasync-ext, which ships inside phasync, when composer.json opts in or --ext is given: may restart this process once
+$extRequested = \in_array('--ext', $argv, true) || phasync\ext_enabled();
+if ($extRequested) {
+    phasync\try_enable_ext();
+}
 
 pcntl_async_signals(true);
 
@@ -50,7 +53,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
 /**
  * Ensure we don't pollute the global namespace.
  */
-(function () use ($argv) {
+(function () use ($argv, $extRequested) {
     /**
      * Colorful terminal.
      */
@@ -198,6 +201,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
             \implode(', ', \array_map(static fn ($a) => ($fastcgi ? 'fastcgi' : 'http') . (\str_starts_with($a, 'unix:') ? '+unix://' . \substr($a, 5) : "://$a"), $addresses)),
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
         (int) \ini_parse_quantity($args->cacheSize),
+        $extRequested,
     );
     $worker = $cluster->run();
     if (\is_int($worker)) {

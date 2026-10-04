@@ -105,7 +105,7 @@ it needs phasync-ext, which waits with epoll.
    [How swerve runs your application](docs/how-it-runs.md).
 3. **Return a PSR-15 request handler** from `swerve.php`: a Slim app, mini's dispatcher, or any
    other PSR-15 stack.
-4. **Load [phasync-ext](https://github.com/phasync/phasync-ext)** in production. Blocking calls in
+4. **Load phasync-ext** in production (it ships inside phasync: `--ext`, or `"extra": {"phasync": {"ext": true}}` in composer.json). Blocking calls in
    libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
    coroutine instead of stalling the worker, and a worker can hold far more than 1,024
    connections.
@@ -180,6 +180,9 @@ Serving:
   --fastcgi=<address>     Serve FastCGI here instead, behind nginx or the like; the same forms as --http
   --public=<dir>          HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
   -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
+
+Extension:
+  --ext                   Load phasync-ext (bundled with phasync) even if composer.json does not enable it
 
 Development:
   --watch                 Reload the workers, one at a time, when a PHP file of the application changes
@@ -439,7 +442,7 @@ function nightlyReport(): void
 
 ## Code written for PHP-FPM
 
-With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta4 or later),
+With phasync-ext (see [Production](docs/production.md#phasync-ext)),
 `Swerve::virtualize()` in `swerve.php` runs every request as under PHP-FPM, as a request of its
 own: `echo`, `header()`, `setcookie()`, `http_response_code()`, the session functions,
 `php://input` and `exit()` (which ends the request, not the worker) work, also with many requests

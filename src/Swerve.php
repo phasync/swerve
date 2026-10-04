@@ -59,7 +59,7 @@ final class Swerve
     public static function virtualize(bool $on = true): void
     {
         if ($on && !Virtual::available()) {
-            throw new \LogicException('Swerve::virtualize() needs phasync-ext 0.5.0-beta4 or later');
+            throw new \LogicException('Swerve::virtualize() needs phasync-ext (start swerve with --ext)');
         }
         if ($on) {
             require_once __DIR__ . '/Http/functions.php';
