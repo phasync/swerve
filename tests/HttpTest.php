@@ -1248,6 +1248,17 @@ test('on a unix: address every worker accepts from one socket, a reload keeps se
     expect(file_exists("$dir/s.sock"))->toBeFalse();
 })->with(['http', 'fastcgi']);
 
+test('on a unix: address the workers drain at once on a shutdown, not at the end of the grace period', function (string $mode) {
+    $dir = temp_path(true);
+    [$process] = swerve_start(['--grace=10'], 2, mode: $mode, addr: "unix:$dir/s.sock");
+
+    $start = microtime(true);
+    swerve_signal($process, SIGTERM);
+    [$code] = swerve_wait($process, 15);
+    expect($code)->toBe(0);
+    expect(microtime(true) - $start)->toBeLessThan(3.0);
+})->with(['http', 'fastcgi']);
+
 test('a unix: address replaces a stale socket file, and is refused where something listens or a file is in the way', function () {
     $dir  = temp_path(true);
     $path = "$dir/s.sock";

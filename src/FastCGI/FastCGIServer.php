@@ -117,7 +117,7 @@ final class FastCGIServer implements ServerInterface
         if ($this->shared) {
             $this->draining = true;
             if ($this->waiting) {
-                \phasync::cancel($this->waiting, $this->wake = new \RuntimeException('drain'));
+                \phasync::throw($this->waiting, $this->wake = new \RuntimeException('drain'));
             }
         } else {
             while ($socket = @\stream_socket_accept($this->listener, 0, $peerName)) {
@@ -135,7 +135,7 @@ final class FastCGIServer implements ServerInterface
 
     /**
      * Wait for a client. The listener of a unix: address is shared with the other workers, so
-     * drain() can't shut it down to wake this: its wait coroutine is cancelled instead.
+     * drain() can't shut it down to wake this: an exception is thrown into its wait coroutine instead.
      */
     private function waitForClient(): void
     {
@@ -144,8 +144,8 @@ final class FastCGIServer implements ServerInterface
 
             return;
         }
-        // A cancellation stays on a coroutine until it ends, and run() waits again after the
-        // loop: the wait is a coroutine of its own, which is the one drain() cancels
+        // run() waits in other places too, where drain()'s exception must not land:
+        // the wait is a coroutine of its own, which is the one drain() throws into
         $this->waiting = \phasync::go(fn () => \phasync::readable($this->listener, \PHP_FLOAT_MAX));
         try {
             \phasync::await($this->waiting);
