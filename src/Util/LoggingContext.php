@@ -16,9 +16,9 @@ use Psr\Log\LoggerInterface;
  *
  * @internal
  */
-final readonly class LoggingContext implements ExceptionHandlerInterface
+class LoggingContext implements ExceptionHandlerInterface
 {
-    public function __construct(private LoggerInterface $logger, public ?ServerRequestInterface $request = null)
+    public function __construct(private readonly LoggerInterface $logger, public readonly ?ServerRequestInterface $request = null)
     {
     }
 

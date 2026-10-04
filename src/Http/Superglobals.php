@@ -3,23 +3,28 @@
 namespace Swerve\Http;
 
 use phasync\Context\SwitchAwareInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Log\LoggerInterface;
+use Swerve\Util\LoggingContext;
 
 /**
- * The phasync context of a request run by Virtual::run(): its $_GET, $_POST, $_COOKIE, $_SERVER,
- * $_FILES, $_REQUEST and $_SESSION are swapped in while its coroutines run. $_SESSION is rebound, not copied: it must stay the
- * reference ext/session holds, which is what gets saved. The others are copied: some of PHP's own
- * code reads $_SERVER from the symbol table without following a reference.
+ * The phasync context of a request that runs virtualized (see Swerve::virtualize()): its $_GET,
+ * $_POST, $_COOKIE, $_SERVER, $_FILES, $_REQUEST and $_SESSION are swapped in while its coroutines
+ * run. $_SESSION is rebound, not copied: it must stay the reference ext/session holds, which is
+ * what gets saved. The others are copied: some of PHP's own code reads $_SERVER from the symbol
+ * table without following a reference.
  *
- * @internal Virtual::run()
+ * @internal
  */
-final class Superglobals implements SwitchAwareInterface
+final class Superglobals extends LoggingContext implements SwitchAwareInterface
 {
     /** The request's, while another request runs; null until its first suspend(). */
     private ?array $own = null;
 
     /** @param array $outer what the worker had, restored while other requests run */
-    public function __construct(private readonly array $outer)
+    public function __construct(LoggerInterface $logger, ServerRequestInterface $request, private readonly array $outer)
     {
+        parent::__construct($logger, $request);
     }
 
     public function resume(): void

@@ -14,8 +14,13 @@
   closes its connections (for a recycle, at the end of the lingering), so that a WebSocket can
   say goodbye. Callbacks are held weakly by the registering coroutine's context, so a request
   that ended is never kept alive and its callback never runs.
-- `Virtual::run($request, $code, handOver: true)`: the code gives the response to a `$respond`
-  closure, whenever it has one, instead of the first output committing it (#23).
+- `Swerve::virtualize()`: every request runs under phasync-ext's `virtualize()`, as under PHP-FPM:
+  what the application echoes streams to the client as it is made, after the head it set up
+  with `header()` and `http_response_code()`; a PSR-7 response the handler returns is sent as usual
+  when nothing was echoed. Swerve owns it: adapters and applications do not set up `virtualize()`.
+  The request's superglobals and `$_SESSION` are its own (#23).
+- `StreamingResponderInterface`, implemented by the HTTP/1.1 and FastCGI responders: the head and
+  the body are pushed as they are made.
 
 ### Fixed
 

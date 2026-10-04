@@ -11,6 +11,10 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
+if (\getenv('SWERVE_TEST_VIRTUALIZE')) {
+    \Swerve\Swerve::virtualize();
+}
+
 if (\getenv('SWERVE_TEST_ECHO_ON_LOAD')) {
     echo "echoed while loading\n"; // STRAY-LOAD
 }

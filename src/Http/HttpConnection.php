@@ -12,6 +12,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Swerve\Dispatcher;
 use Swerve\ResponderInterface;
+use Swerve\StreamingResponderInterface;
 
 /**
  * One HTTP/1.1 client connection in HTTP mode: reads a request, calls the application,
@@ -43,7 +44,7 @@ use Swerve\ResponderInterface;
  *
  * @internal
  */
-final class HttpConnection implements ResponderInterface
+final class HttpConnection implements StreamingResponderInterface
 {
     /** The request line and headers may not be larger than this (431). */
     public const MAX_HEAD = 65536;
@@ -167,6 +168,16 @@ final class HttpConnection implements ResponderInterface
 
     /** The current response's head was (or was being) written: an error can no longer be answered. */
     private bool $headSent = false;
+
+    /**
+     * How the body of a response streamed by the application is framed ('chunked', 'length', 'close';
+     * 'none' when it has no body); null until the head is streamed. See streamHead().
+     */
+    private ?string $streaming = null;
+
+    /** Bytes of the declared Content-Length still to stream, and whether the connection stays open after. */
+    private int $streamLeft = 0;
+    private bool $streamKeepAlive = false;
 
     /**
      * Before closing, stop writing and read what the client still sends. Closing with unread
@@ -756,6 +767,7 @@ final class HttpConnection implements ResponderInterface
     private function handleRequest(bool $first): bool
     {
         $this->headSent    = false;
+        $this->streaming   = null;
         $this->bodyState   = self::BODY_OPEN;
         $this->reclaimable = $first ? self::NEW : self::KEPT_ALIVE;
 
@@ -1081,7 +1093,12 @@ final class HttpConnection implements ResponderInterface
             throw $this->requestBody->error; // the application swallowed a malformed body: answer it and close
         }
 
-        $keepAlive = $this->writeResponse($response, $this->requestMethod, $this->requestVersion, $this->requestKeepAlive, $this->requestBody);
+        return $this->completed($this->writeResponse($response, $this->requestMethod, $this->requestVersion, $this->requestKeepAlive, $this->requestBody));
+    }
+
+    /** The response is sent: the connection closes unless it stays open for the next request. */
+    private function completed(bool $keepAlive): bool
+    {
         if (!$keepAlive) {
             // No next request: the client sees the response end now, also a body that ends at
             // the close, while the request's own work goes on in the context
@@ -1092,6 +1109,94 @@ final class HttpConnection implements ResponderInterface
         }
 
         return $keepAlive;
+    }
+
+    public function streamHead(int $status, string $reason, array $headers): void
+    {
+        if ($status < 200) {
+            throw new \UnexpectedValueException("A streamed response can't have status $status");
+        }
+        $request   = $this->requestBody;
+        $version   = $this->requestVersion;
+        $keepAlive = $this->requestKeepAlive;
+        $head      = $this->head($status, $reason, $headers, false, $keepAlive, $appLength, $connection);
+        if ($request->upgrade) {
+            $request->respond($status);
+        }
+        $method = $this->requestMethod;
+        if ('HEAD' === $method || 204 === $status || 205 === $status || 304 === $status) {
+            $this->streaming = 'none';
+            $n               = 204 === $status ? null : (205 === $status ? 0 : $appLength);
+            if (null !== $n) {
+                $head .= "Content-Length: $n\r\n";
+            }
+        } elseif (null !== $appLength) {
+            $this->streaming  = 'length';
+            $this->streamLeft = $appLength;
+            $head            .= "Content-Length: $appLength\r\n";
+        } elseif ('1.1' === $version) {
+            $this->streaming = 'chunked';
+            $head           .= "Transfer-Encoding: chunked\r\n";
+        } else {
+            $this->streaming = 'close';
+            $keepAlive       = false; // HTTP/1.0 and unknown size: the body ends at the close
+        }
+        [$head, $this->streamKeepAlive] = $this->finishHead($head, $keepAlive, $connection, $version, $request, false);
+        $this->headSent = true;
+        $this->write("$head\r\n");
+    }
+
+    public function stream(string $data): bool
+    {
+        if (null !== $this->ioError) {
+            return false;
+        }
+        if ('' === $data || 'none' === $this->streaming) {
+            return true;
+        }
+        try {
+            if ('chunked' === $this->streaming) {
+                $this->write(\dechex(\strlen($data)) . "\r\n$data\r\n");
+            } elseif ('length' === $this->streaming) {
+                $data              = \substr($data, 0, $this->streamLeft);
+                $this->streamLeft -= \strlen($data);
+                '' === $data || $this->write($data);
+            } else {
+                $this->write($data);
+            }
+        } catch (IOException|TimeoutException) {
+            return false; // recorded in $ioError
+        }
+
+        return true;
+    }
+
+    public function streamGone(): bool
+    {
+        return null !== $this->ioError;
+    }
+
+    public function streamEnd(): ?bool
+    {
+        if (null !== $this->ioError) {
+            return null;
+        }
+        if (null !== $this->requestBody->error) {
+            throw $this->requestBody->error;
+        }
+        $keepAlive = $this->streamKeepAlive;
+        try {
+            if ('chunked' === $this->streaming) {
+                $this->write("0\r\n\r\n");
+            } elseif ('length' === $this->streaming && $this->streamLeft > 0) {
+                $this->logger->warning('Response body ended {left} bytes before its declared size', ['left' => $this->streamLeft]);
+                $keepAlive = false;
+            }
+        } catch (IOException|TimeoutException) {
+            return null;
+        }
+
+        return $this->completed($keepAlive);
     }
 
     /**
@@ -1151,12 +1256,117 @@ final class HttpConnection implements ResponderInterface
             }
             $tunnel = true;
         }
-        $head       = "HTTP/1.1 $status " . $response->getReasonPhrase() . "\r\n";
+        $head = $this->head($status, $response->getReasonPhrase(), $response->getHeaders(), $tunnel, $keepAlive, $appLength, $connection);
+        if ($request->upgrade) {
+            // Before any read of the response body, which may be this request body
+            $request->respond($status);
+        }
+        if ($tunnel) {
+            return $this->tunnel($head, $response->getBody(), $request);
+        }
+
+        $body    = $response->getBody();
+        $chunked = false;
+        $first   = '';
+        $echo    = false; // the response body is the request's own: streaming it reads the request's rest
+        if ('HEAD' === $method || 204 === $status || 205 === $status || 304 === $status) {
+            // No body; the body stream is never read. Slim empties a HEAD response's body, so a
+            // size of 0 there says nothing. A 205 has none either (RFC 9110 15.3.6), but unlike
+            // 204 and 304 its status alone doesn't say so, so it says Content-Length: 0.
+            $n = 204 === $status ? null : (205 === $status ? 0 : ($appLength ?? ('HEAD' === $method ? ($body->getSize() ?: null) : null)));
+            if (null !== $n) {
+                $head .= "Content-Length: $n\r\n";
+            }
+            $size = 0;
+        } else {
+            $echo     = $body === $request;
+            $seekable = $body->isSeekable();
+            if ($seekable) {
+                $body->rewind();
+            }
+            // A size of 0 says nothing: PHP streams report it for pipes, sockets and /proc files.
+            // The size is the whole stream's, and a non-seekable one may have been read partly.
+            $size = $body->getSize();
+            if ($size && !$seekable) {
+                $size -= $body->tell();
+            }
+            $size = $size ?: $appLength;
+            if ($this->bufferResponses) {
+                $cap = \min($size ?? self::RESPONSE_BUFFER_LIMIT, self::RESPONSE_BUFFER_LIMIT);
+                while (\strlen($first) < $cap && '' !== ($piece = $this->readPiece($body, \min(self::READ_SIZE, $cap - \strlen($first)), $seekable))) {
+                    $first .= $piece;
+                }
+            } elseif (0 !== $size) {
+                $first = $body->read($n = null === $size ? self::READ_SIZE : \min($size, self::READ_SIZE));
+                if (\strlen($first) !== $n) {
+                    $first = $this->readPiece($body, $n, $seekable, $first);
+                }
+            }
+            if (null === $size && $body->eof()) {
+                $size = \strlen($first); // the whole body came in one piece: no chunked framing needed
+            }
+            if (null !== $size) {
+                $head .= "Content-Length: $size\r\n";
+            } elseif ('1.1' === $version) {
+                $head   .= "Transfer-Encoding: chunked\r\n";
+                $chunked = true;
+            } else {
+                $keepAlive = false; // HTTP/1.0 and unknown size: the body ends at the close
+            }
+        }
+        [$head, $keepAlive] = $this->finishHead($head, $keepAlive, $connection, $version, $request, $echo);
+        $this->headSent = true;
+        if ($chunked) {
+            // Each piece is framed in one interpolated string: copied once, not once per
+            // concatenation
+            $end = $body->eof() ? "0\r\n\r\n" : '';
+            $hex = \dechex(\strlen($first));
+            $this->write('' === $first ? "$head\r\n$end" : "$head\r\n$hex\r\n$first\r\n$end");
+            while ('' === $end) {
+                $chunk = $this->readPiece($body, self::READ_SIZE, $seekable);
+                $end   = '' === $chunk || $body->eof() ? "0\r\n\r\n" : '';
+                $hex   = \dechex(\strlen($chunk));
+                $this->write('' === $chunk ? $end : "$hex\r\n$chunk\r\n$end");
+            }
+
+            return $keepAlive;
+        }
+        $this->write($head . "\r\n" . $first);
+        if (null === $size) {
+            while ('' !== ($chunk = $this->readPiece($body, self::READ_SIZE, $seekable))) {
+                $this->write($chunk);
+            }
+
+            return false;
+        }
+        for ($left = $size - \strlen($first); $left > 0; $left -= \strlen($chunk)) {
+            $chunk = $this->readPiece($body, \min($left, self::READ_SIZE), $seekable);
+            if ('' === $chunk) {
+                $this->logger->warning('Response body ended {left} bytes before its declared size', ['left' => $left]);
+
+                return false;
+            }
+            $this->write($chunk);
+        }
+
+        return $keepAlive;
+    }
+
+    /**
+     * The head of a response up to its framing: the status line, the application's headers (checked
+     * for what could split the response) and Date. $keepAlive, $appLength (the application's
+     * Content-Length) and $connection (its Connection options) are what it decided on the way.
+     *
+     * @param array<string, list<string>> $headers
+     */
+    private function head(int $status, string $reason, array $headers, bool $tunnel, bool &$keepAlive, ?int &$appLength, ?string &$connection): string
+    {
+        $head       = "HTTP/1.1 $status $reason\r\n";
         $lines      = 1;
         $appLength  = null;
         $addDate    = true;
         $connection = ''; // the application's Connection options, each after ", "
-        foreach ($response->getHeaders() as $name => $values) {
+        foreach ($headers as $name => $values) {
             switch (\strtolower($name)) {
                 case 'content-length':
                     $v = (string) $values[0];
@@ -1217,63 +1427,18 @@ final class HttpConnection implements ResponderInterface
         if (\substr_count($head, "\n") !== $lines || \substr_count($head, "\r") !== $lines || \str_contains($head, "\0")) {
             throw new \UnexpectedValueException('CR, LF or NUL in a response header or reason phrase');
         }
-        if ($request->upgrade) {
-            // Before any read of the response body, which may be this request body
-            $request->respond($status);
-        }
-        if ($tunnel) {
-            return $this->tunnel($head, $response->getBody(), $request);
-        }
 
-        $body    = $response->getBody();
-        $chunked = false;
-        $first   = '';
-        $echo    = false; // the response body is the request's own: streaming it reads the request's rest
-        if ('HEAD' === $method || 204 === $status || 205 === $status || 304 === $status) {
-            // No body; the body stream is never read. Slim empties a HEAD response's body, so a
-            // size of 0 there says nothing. A 205 has none either (RFC 9110 15.3.6), but unlike
-            // 204 and 304 its status alone doesn't say so, so it says Content-Length: 0.
-            $n = 204 === $status ? null : (205 === $status ? 0 : ($appLength ?? ('HEAD' === $method ? ($body->getSize() ?: null) : null)));
-            if (null !== $n) {
-                $head .= "Content-Length: $n\r\n";
-            }
-            $size = 0;
-        } else {
-            $echo     = $body === $request;
-            $seekable = $body->isSeekable();
-            if ($seekable) {
-                $body->rewind();
-            }
-            // A size of 0 says nothing: PHP streams report it for pipes, sockets and /proc files.
-            // The size is the whole stream's, and a non-seekable one may have been read partly.
-            $size = $body->getSize();
-            if ($size && !$seekable) {
-                $size -= $body->tell();
-            }
-            $size = $size ?: $appLength;
-            if ($this->bufferResponses) {
-                $cap = \min($size ?? self::RESPONSE_BUFFER_LIMIT, self::RESPONSE_BUFFER_LIMIT);
-                while (\strlen($first) < $cap && '' !== ($piece = $this->readPiece($body, \min(self::READ_SIZE, $cap - \strlen($first)), $seekable))) {
-                    $first .= $piece;
-                }
-            } elseif (0 !== $size) {
-                $first = $body->read($n = null === $size ? self::READ_SIZE : \min($size, self::READ_SIZE));
-                if (\strlen($first) !== $n) {
-                    $first = $this->readPiece($body, $n, $seekable, $first);
-                }
-            }
-            if (null === $size && $body->eof()) {
-                $size = \strlen($first); // the whole body came in one piece: no chunked framing needed
-            }
-            if (null !== $size) {
-                $head .= "Content-Length: $size\r\n";
-            } elseif ('1.1' === $version) {
-                $head   .= "Transfer-Encoding: chunked\r\n";
-                $chunked = true;
-            } else {
-                $keepAlive = false; // HTTP/1.0 and unknown size: the body ends at the close
-            }
-        }
+        return $head;
+    }
+
+    /**
+     * Add the Connection header to a head whose framing is decided: the connection stays open only
+     * if the request's body is read to its end or may be skipped, and the server isn't draining.
+     *
+     * @return array{0: string, 1: bool} the head, and whether the connection can be kept alive
+     */
+    private function finishHead(string $head, bool $keepAlive, string $connection, string $version, RequestBody $request, bool $echo): array
+    {
         if (!$request->eof() && ($request->continuePending() || (!$echo && 0 === $request->tell() && !$request->discardable(self::DISCARD_LIMIT)))) {
             $keepAlive = false;
         }
@@ -1285,41 +1450,8 @@ final class HttpConnection implements ResponderInterface
             $head .= 'Connection: ' . \substr($connection, 2) . "\r\n";
         }
 
-        $this->headSent = true;
-        if ($chunked) {
-            // Each piece is framed in one interpolated string: copied once, not once per
-            // concatenation
-            $end = $body->eof() ? "0\r\n\r\n" : '';
-            $hex = \dechex(\strlen($first));
-            $this->write('' === $first ? "$head\r\n$end" : "$head\r\n$hex\r\n$first\r\n$end");
-            while ('' === $end) {
-                $chunk = $this->readPiece($body, self::READ_SIZE, $seekable);
-                $end   = '' === $chunk || $body->eof() ? "0\r\n\r\n" : '';
-                $hex   = \dechex(\strlen($chunk));
-                $this->write('' === $chunk ? $end : "$hex\r\n$chunk\r\n$end");
-            }
 
-            return $keepAlive;
-        }
-        $this->write($head . "\r\n" . $first);
-        if (null === $size) {
-            while ('' !== ($chunk = $this->readPiece($body, self::READ_SIZE, $seekable))) {
-                $this->write($chunk);
-            }
-
-            return false;
-        }
-        for ($left = $size - \strlen($first); $left > 0; $left -= \strlen($chunk)) {
-            $chunk = $this->readPiece($body, \min($left, self::READ_SIZE), $seekable);
-            if ('' === $chunk) {
-                $this->logger->warning('Response body ended {left} bytes before its declared size', ['left' => $left]);
-
-                return false;
-            }
-            $this->write($chunk);
-        }
-
-        return $keepAlive;
+        return [$head, $keepAlive];
     }
 
     /**

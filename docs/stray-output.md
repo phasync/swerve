@@ -2,10 +2,10 @@
 
 Output that is not part of a response (`echo`, `print`, `var_dump()`, `printf()`, template
 code that prints, a closing `?>` tag) has nowhere to go while a request is being handled.
-Without [phasync-ext](production.md#phasync-ext), swerve ends the worker on the first byte of
+Without [`Swerve::virtualize()`](production.md#phasync-ext) (which needs phasync-ext), swerve ends the worker on the first byte of
 it, rather than let it be sent to the wrong client.
 
-## Without phasync-ext
+## Without virtualize()
 
 Each worker puts an output buffer under everything else, before your `swerve.php` loads. It
 acts only while a request is being handled: output while `swerve.php` loads (a startup
@@ -19,7 +19,7 @@ Stray output is not compatible with swerve.
   Output:  "debug: 42\n" (10 bytes)
   Request: GET /orders
   At:      /app/src/OrderController.php:57
-  Remedy:  serve this application with php-fpm or similar, or install phasync-ext.
+  Remedy:  serve this application with php-fpm or similar, or use phasync-ext with Swerve::virtualize().
 ```
 
 - The output is escaped and cut at 200 bytes. `Request` is the request of the coroutine
@@ -37,8 +37,7 @@ Stray output is not compatible with swerve.
 - Responses written through PSR-7 streams, including Server-Sent Events and WebSockets
   through swerve's own classes, do not pass through output buffering.
 
-## With phasync-ext
+## With Swerve::virtualize()
 
-No guard is installed. A route that prints runs as a request of its own with
-[`Swerve\Http\Virtual`](../src/Http/Virtual.php): what it prints, and the headers it sets,
-become the response.
+With `Swerve::virtualize()` no guard is installed. A route that prints runs as a request of its
+own: what it prints, and the headers it sets, become the response, as under PHP-FPM.

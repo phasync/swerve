@@ -440,27 +440,26 @@ function nightlyReport(): void
 ## Code written for PHP-FPM
 
 With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta1 or later),
-`Swerve\Http\Virtual::run()` runs code that echoes and calls `header()` as a request of its own:
-its output, status, headers, cookies and session become the PSR-7 response, streamed, and
-`exit()` ends the request, not the worker.
+`Swerve::virtualize()` in `swerve.php` runs every request as under PHP-FPM, as a request of its
+own: `echo`, `header()`, `setcookie()`, `http_response_code()`, the session functions,
+`php://input` and `exit()` (which ends the request, not the worker) work, also with many requests
+at once in a worker. What the application echoes goes to the client as it is made, with the
+headers it set sent before the first byte (chunked, or with its own `Content-Length`). A PSR-7
+response that the handler returns is sent as usual when nothing was echoed. The handler runs in the
+connection's coroutine: no coroutine is started for the request.
 
 ```php
-return Virtual::run($request, static function () {
-    session_start();
-    echo 'Hello ', $_SESSION['name'] ?? 'stranger';
-});
-```
+Swerve::virtualize();
 
-As under PHP-FPM, the first output commits the status and headers. Code that makes a PSR-7 response
-itself (a framework adapter) passes `handOver: true`: `run()` then calls it with a `$respond`
-closure and returns the response given to it, whatever the code outputs before; the code goes on
-running afterwards, and ending without a response is a `LogicException`.
+return new class implements RequestHandlerInterface {
+    public function handle(ServerRequestInterface $request): ResponseInterface
+    {
+        session_start();
+        echo 'Hello ', $_SESSION['name'] ?? 'stranger';
 
-```php
-return Virtual::run($request, function (Closure $respond) use ($app) {
-    $respond($app->handle($request));
-    $app->terminate();
-}, handOver: true);
+        return new Response(200); // sent only when nothing was echoed
+    }
+};
 ```
 
 `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `$_SERVER` and `$_SESSION` are the request's own, as

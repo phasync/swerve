@@ -4,6 +4,7 @@ namespace Swerve;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Swerve\Http\Virtual;
 use Swerve\Util\Shutdown;
 use Swerve\Util\Topics;
 
@@ -30,6 +31,41 @@ final class Swerve
 {
     private function __construct()
     {
+    }
+
+    /** Whether requests run virtualized, see virtualize(). */
+    private static bool $virtualize = false;
+
+    /**
+     * Run every request as under PHP-FPM: `echo`, `header()`, `setcookie()`, `http_response_code()`,
+     * the session functions, `php://input`, `exit()` and the superglobals work as in a request of
+     * their own, also while other requests run in the same worker. What the application echoes
+     * goes to the client as it is made, with the headers it set sent before the first byte; a
+     * response the handler returns is sent as it is, when nothing was echoed. Call it in
+     * `swerve.php`, before the worker serves:
+     *
+     * ```php
+     * Swerve::virtualize();
+     * return $app;
+     * ```
+     *
+     * Needs phasync-ext 0.5.0-alpha15 or later. The application's own global variables and static
+     * properties are still shared by the requests of a worker.
+     *
+     * @throws \LogicException without phasync-ext's `virtualize()`
+     */
+    public static function virtualize(bool $on = true): void
+    {
+        if ($on && !Virtual::available()) {
+            throw new \LogicException('Swerve::virtualize() needs phasync-ext 0.5.0-alpha15 or later');
+        }
+        self::$virtualize = $on;
+    }
+
+    /** @internal whether virtualize() is on */
+    public static function virtualizing(): bool
+    {
+        return self::$virtualize;
     }
 
     /** The log of this process, see log(). */

@@ -3,9 +3,14 @@
 namespace Swerve;
 
 use phasync;
+use phasync\Psr\StreamFactory;
+use phasync\Psr\UploadedFile;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LoggerInterface;
+use Swerve\Http\Superglobals;
+use Swerve\Http\VirtualSapi;
 use Swerve\Util\RequestContextFactory;
 use Swerve\Util\StrayOutput;
 
@@ -60,9 +65,64 @@ final class Dispatcher
     {
         ++StrayOutput::$inFlight; // the stray output guard acts only while a request is handled
         try {
+            if (Swerve::virtualizing()) {
+                return $this->virtual($request, $responder);
+            }
+
             return phasync::withContext(fn () => $responder->respond($request, $this->handler->handle($request)), new RequestContextFactory($this->logger, $request));
         } finally {
             --StrayOutput::$inFlight;
         }
+    }
+
+    /**
+     * Swerve::virtualize(): the handler runs as a request of its own, in a context that swaps the
+     * superglobals (PHP builds them as the request starts, so the context exists before). What it
+     * echoes streams to the client; a response it returns without echoing is sent as usual.
+     */
+    private function virtual(ServerRequestInterface $request, StreamingResponderInterface $responder): mixed
+    {
+        $sapi = new VirtualSapi($request, $responder);
+
+        return phasync::withContext(function () use ($request, $responder, $sapi) {
+            $response = \phasync\ext\virtualize(function () use ($request, $sapi) {
+                if ($sapi->form()) {
+                    // PHP has read the body: the PSR request gets what PHP made of it
+                    $request = $request->withParsedBody($_POST)->withUploadedFiles(self::uploadedFiles($_FILES));
+                }
+
+                return $this->handler->handle($request);
+            }, $sapi);
+            if (!$sapi->started && $response instanceof ResponseInterface) {
+                return $responder->respond($request, $response);
+            }
+            $sapi->commit();
+
+            return $responder->streamEnd();
+        }, new Superglobals($this->logger, $request, Superglobals::current()));
+    }
+
+    /** PHP's $_FILES as PSR-7 uploaded files, nested as the field names are. */
+    private static function uploadedFiles(array $files): array
+    {
+        $tree = [];
+        foreach ($files as $field => $file) {
+            $tree[$field] = self::uploadedFile($file['name'], $file['type'], $file['tmp_name'], $file['error'], $file['size']);
+        }
+
+        return $tree;
+    }
+
+    private static function uploadedFile(mixed $name, mixed $type, mixed $path, mixed $error, mixed $size): mixed
+    {
+        if (!\is_array($name)) {
+            return new UploadedFile(\UPLOAD_ERR_OK === $error ? $path : StreamFactory::create(''), $name, $type, $size, $error);
+        }
+        $nested = [];
+        foreach ($name as $key => $_) {
+            $nested[$key] = self::uploadedFile($name[$key], $type[$key], $path[$key], $error[$key], $size[$key]);
+        }
+
+        return $nested;
     }
 }

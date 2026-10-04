@@ -1,9 +1,8 @@
 <?php
 
 /*
- * Output outside the response (docs/stray-output.md): without phasync-ext a guard at the bottom
- * of the worker's output buffers ends the worker with a message on stderr; with it, none is
- * installed. The ext tests load the extension through PHP_INI_SCAN_DIR, as the suite does when
+ * Output outside the response (docs/stray-output.md): without Swerve::virtualize() a guard at the bottom
+ * of the worker's output buffers ends the worker with a message on stderr; with it, the guard is inert. The ext tests load the extension through PHP_INI_SCAN_DIR, as the suite does when
  * it runs with the extension loaded; the others run only without it.
  */
 
@@ -202,13 +201,13 @@ test('Stray output: a handler of its own on top of the guard keeps working, and 
     expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
 })->skip($withoutExt, 'runs without phasync-ext');
 
-test('Stray output: with phasync-ext no guard is installed and the echoing application keeps working', function () {
-    [$process, $addr, $log, $err] = stray_start(ext: true);
+test('Stray output: with Swerve::virtualize() the echoing application keeps working: the echo is the response', function () {
+    [$process, $addr, $log, $err] = stray_start(['SWERVE_TEST_VIRTUALIZE' => '1'], ext: true);
     try {
         expect(probe($addr, '/level'))->toBe('0');
         $pid = (int) probe($addr, '/pid');
-        expect(probe($addr, '/echo'))->toBe('returned');
-        expect(probe($addr, '/strip'))->toBe('returned');
+        expect(probe($addr, '/echo'))->toBe('stray x');
+        expect(probe($addr, '/strip'))->toBe('after strip');
         expect((int) probe($addr, '/pid'))->toBe($pid);
         expect(file_get_contents($err))->toBe('');
     } finally {
@@ -217,8 +216,20 @@ test('Stray output: with phasync-ext no guard is installed and the echoing appli
     expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
 })->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs phasync-ext: PHASYNC_EXT=/path/to/phasync.so');
 
-test('Stray output: with phasync-ext, echoing while loading swerve.php is not an error', function () {
-    [$process, $addr, , $err] = stray_start(['SWERVE_TEST_ECHO_ON_LOAD' => '1'], ext: true);
+test('Stray output: with phasync-ext but without Swerve::virtualize() the guard stays', function () {
+    [$process, $addr, , $err] = stray_start(ext: true);
+    try {
+        expect(probe($addr, '/level'))->toBe('1');
+        $conn = native_connect($addr);
+        fwrite($conn, "GET /echo?m=y HTTP/1.1\r\nHost: t\r\n\r\n");
+        expect(stray_message($err))->toStartWith('Stray output is not compatible with swerve.');
+    } finally {
+        native_stop($process);
+    }
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs phasync-ext: PHASYNC_EXT=/path/to/phasync.so');
+
+test('Stray output: with Swerve::virtualize(), echoing while loading swerve.php is not an error', function () {
+    [$process, $addr, , $err] = stray_start(['SWERVE_TEST_ECHO_ON_LOAD' => '1', 'SWERVE_TEST_VIRTUALIZE' => '1'], ext: true);
     try {
         expect(probe($addr, '/hello'))->toBe('Hello');
         expect(file_get_contents($err))->toBe('');

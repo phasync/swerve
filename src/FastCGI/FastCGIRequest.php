@@ -6,7 +6,7 @@ use phasync\Util\StringBuffer;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
-use Swerve\ResponderInterface;
+use Swerve\StreamingResponderInterface;
 
 /**
  * One request on a FastCGI connection, from FCGI_BEGIN_REQUEST until its response is written:
@@ -14,7 +14,7 @@ use Swerve\ResponderInterface;
  *
  * @internal
  */
-final class FastCGIRequest implements ResponderInterface
+final class FastCGIRequest implements StreamingResponderInterface
 {
     /** The server params: everything but the HTTP_ ones, which are the request headers. */
     public array $params;
@@ -103,6 +103,38 @@ final class FastCGIRequest implements ResponderInterface
                 $this->write($chunk); // an empty FCGI_STDOUT record would end the stream
             }
         }
+    }
+
+    public function streamHead(int $status, string $reason, array $headers): void
+    {
+        $lines = [];
+        foreach ($headers as $name => $values) {
+            foreach ($values as $value) {
+                $lines[] = "$name: $value";
+            }
+        }
+        $this->sendHead($status, $reason, $lines);
+    }
+
+    public function stream(string $data): bool
+    {
+        if ('' !== $data) { // an empty FCGI_STDOUT record would end the stream
+            $this->write($data);
+        }
+
+        return true;
+    }
+
+    public function streamGone(): bool
+    {
+        return false;
+    }
+
+    public function streamEnd(): mixed
+    {
+        $this->end();
+
+        return null;
     }
 
     /**

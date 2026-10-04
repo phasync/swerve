@@ -10,7 +10,6 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\Virtual;
 use Swerve\Http\WebSocket;
 use Swerve\Swerve;
 
@@ -356,7 +355,6 @@ return new class($version) implements RequestHandlerInterface {
     private array $claims = [];
 
     /** Code of /virtual-handover that ran to its end after handing its response over, see /handover-done. */
-    private int $handedOver = 0;
 
     /** /sse-beat producers still running. */
     private int $sseLive = 0;
@@ -382,23 +380,6 @@ return new class($version) implements RequestHandlerInterface {
             '/hello'  => new Response(200, ['Content-Type' => 'text/plain'], 'Hello'),
             '/echo'   => new Response(200, ['Content-Type' => 'text/plain'], (string) $request->getBody()),
             '/big'    => new Response(200, ['Content-Type' => 'text/plain'], \str_repeat('x', (int) $query['n'])),
-            // Code written for PHP-FPM, run by Virtual (needs phasync-ext): a session counter, a header,
-            // a cookie, the request body, chunks ?ms= apart; ?exit=1 exits after the first chunk
-            '/virtual' => Virtual::run($request, static function () use ($query) {
-                \session_save_path(\sys_get_temp_dir());
-                \session_start();
-                $_SESSION['n'] = ($_SESSION['n'] ?? 0) + 1;
-                \http_response_code(201);
-                \header('X-Virtual: yes');
-                \setcookie('flavour', 'oat');
-                echo 'n=', $_SESSION['n'], ' body=', \file_get_contents('php://input'), ' sid=', \session_id(), "\n";
-                \flush();
-                if (!empty($query['exit'])) {
-                    exit(1);
-                }
-                \phasync::sleep((int) ($query['ms'] ?? 0) / 1000);
-                echo "last\n";
-            }),
             // A static kept per request, as an adapter keeps its framework's: the request runs in
             // a switch-aware context. ?v= set, read back after waiting ?ms=
             '/swap' => phasync::withContext(static function () use ($query) {
@@ -419,39 +400,6 @@ return new class($version) implements RequestHandlerInterface {
                     $this->own = SwapFixture::$value;
                 }
             }),
-            // The request's own $_SESSION: ?v= written, read back after waiting ?ms=; without ?v=,
-            // what the session holds
-            '/virtual-session' => Virtual::run($request, static function () {
-                \session_save_path(\sys_get_temp_dir());
-                \session_start();
-                if (isset($_GET['v'])) {
-                    $_SESSION['v'] = $_GET['v'];
-                    \phasync::sleep((int) ($_GET['ms'] ?? 0) / 1000);
-                    $_SESSION['after'] = $_GET['v'];
-                }
-                echo \session_id(), ' ', ($_SESSION['v'] ?? '-'), ' ', ($_SESSION['after'] ?? '-');
-            }),
-            // The request's own superglobals, read before and after waiting ?ms= (needs phasync-ext)
-            '/virtual-globals' => Virtual::run($request, static function () {
-                $read = static fn () => ($_GET['q'] ?? '-') . '|' . ($_COOKIE['c'] ?? '-') . '|' . ($_SERVER['HTTP_X_T'] ?? '-') . '|' . ($_POST['p'] ?? '-');
-                $before = $read();
-                \phasync::sleep((int) ($_GET['ms'] ?? 0) / 1000);
-                echo $before, ' ', $read();
-            }),
-            // Virtual::run() with a hand-over: ?echo=1 outputs first, ?ms= wait before the response, ?none=1 ends
-            // without one, ?twice=1 hands over twice; ?after= ms of work follow, counted in /handover-done
-            '/virtual-handover' => Virtual::run($request, function (Closure $respond) use ($query) {
-                isset($query['echo']) && print 'stray output';
-                \phasync::sleep((int) ($query['ms'] ?? 0) / 1000);
-                if (isset($query['none'])) {
-                    return;
-                }
-                $respond(new Response(201, ['X-Handed' => 'yes'], 'handed over'));
-                isset($query['twice']) && $respond(new Response(202));
-                \phasync::sleep((int) ($query['after'] ?? 0) / 1000);
-                ++$this->handedOver;
-            }, handOver: true),
-            '/handover-done' => new Response(200, [], (string) $this->handedOver),
             // A WebSocket that only sends: what is published to 'news' goes to the browser
             '/websocket-news' => WebSocket::from($request, function (WebSocket $ws) {
                 ++$this->newsLive;

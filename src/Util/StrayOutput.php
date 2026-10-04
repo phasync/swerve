@@ -3,12 +3,13 @@
 namespace Swerve\Util;
 
 use phasync;
+use Swerve\Swerve;
 
 /**
- * The output buffer at the bottom of a worker's stack, installed without phasync-ext: anything
- * that reaches it ends the worker.
+ * The output buffer at the bottom of a worker's stack, inert with Swerve::virtualize(): without it
+ * anything that reaches it while a request is handled ends the worker.
  *
- * Without the extension, output buffers belong to the process, not the request: one request's
+ * Without virtualize(), output buffers belong to the process, not the request: one request's
  * echo would be delivered to whichever request flushes next. So an application served by swerve
  * returns its output in the response, and output while a request is being handled that is not in
  * the response is a fatal error with a message on stderr (not through output buffering) that says
@@ -40,8 +41,8 @@ final class StrayOutput
      */
     public static function guard(string $buffer): string
     {
-        if (0 === self::$inFlight || '' === $buffer) {
-            return $buffer; // no request to harm, or a flush or the exit of the process
+        if (0 === self::$inFlight || '' === $buffer || Swerve::virtualizing()) {
+            return $buffer; // no request to harm, or a flush or the exit of the process, or requests with output buffers of their own
         }
         $context = \Fiber::getCurrent() ? phasync::getContext() : null;
         if (!$context instanceof LoggingContext) {
@@ -59,7 +60,7 @@ final class StrayOutput
             }
         }
         \fwrite(\STDERR, \sprintf(
-            "Stray output is not compatible with swerve.\n  Output:  \"%s\"%s (%d bytes)\n  Request: %s\n  At:      %s\n  Remedy:  serve this application with php-fpm or similar, or install phasync-ext.\n",
+            "Stray output is not compatible with swerve.\n  Output:  \"%s\"%s (%d bytes)\n  Request: %s\n  At:      %s\n  Remedy:  serve this application with php-fpm or similar, or use phasync-ext with Swerve::virtualize().\n",
             \addcslashes(\substr($buffer, 0, self::QUOTE), "\0..\37\"\\\177..\377"),
             \strlen($buffer) > self::QUOTE ? ' ...' : '',
             \strlen($buffer),
