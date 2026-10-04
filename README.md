@@ -439,7 +439,7 @@ function nightlyReport(): void
 
 ## Code written for PHP-FPM
 
-With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta2 or later),
+With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta3 or later),
 `Swerve::virtualize()` in `swerve.php` runs every request as under PHP-FPM, as a request of its
 own: `echo`, `header()`, `setcookie()`, `http_response_code()`, the session functions,
 `php://input` and `exit()` (which ends the request, not the worker) work, also with many requests
@@ -488,7 +488,7 @@ Where it differs from PHP-FPM, because the requests share one process:
   pool.
 - **Settings.** `ini_set()`, `set_time_limit()` (a per-request CPU budget: only the request that
   exceeds it fails), `error_get_last()`, the default time zone, the `mt_srand()` seed and the
-  `mysqli_report()` mode are the request's own (phasync-ext 0.5.0-beta3 or later). Shared by the
+  `mysqli_report()` mode are the request's own . Shared by the
   worker's requests: `setlocale()`, `Locale::setDefault()`, `mb_*` settings, libxml errors and handlers,
   `bcscale()`, `chdir()`, `umask()` and `putenv()`. Set these once at start, not per request.
 - **Memory.** `memory_limit` bounds all the requests in a worker together, and a fatal error ends the

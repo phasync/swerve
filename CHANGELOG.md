@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-beta3 (2026-10-04)
 
 ### Added
 
@@ -10,7 +10,7 @@
   `fastcgi_finish_request()`; `$_SERVER` has `SERVER_NAME`, `REQUEST_SCHEME`, `PHP_AUTH_USER`,
   `PHP_AUTH_PW`, `PHP_AUTH_DIGEST`, `AUTH_TYPE`, `SERVER_SOFTWARE`, `DOCUMENT_ROOT`, `SCRIPT_FILENAME`,
   `SCRIPT_NAME`, `PHP_SELF` and, over HTTP, `SERVER_ADDR` and `SERVER_PORT` (#28).
-- With phasync-ext 0.5.0-beta3: `ini_set()`, `set_time_limit()`, `error_get_last()`, the time zone, `mt_srand()` and `mysqli_report()` are per request.
+- With phasync-ext 0.5.0-beta3 (now required by `Swerve::virtualize()`) and phasync 2.0.0-beta6 (now required): `ini_set()`, `set_time_limit()`, `error_get_last()`, the time zone, `mt_srand()` and `mysqli_report()` are per request.
 - Documented where virtualized requests differ from PHP-FPM: persistent connections, request state
   that is shared, `memory_limit` bounding all requests of a worker, `PHP_SAPI`, fiber stack size.
 

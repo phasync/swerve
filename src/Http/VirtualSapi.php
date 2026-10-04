@@ -68,9 +68,7 @@ final class VirtualSapi
         foreach ($this->head[2] ?? [] as $name => $values) {
             $lower = \strtolower($name);
             if ('set-cookie' === $lower) {
-                foreach ($values as $value) {
-                    $response = $response->withAddedHeader($name, $value); // one at a time: phasync before beta6 fails on a list for an absent header
-                }
+                $response = $response->withAddedHeader($name, $values);
             } elseif (!$response->hasHeader($name) && 'content-length' !== $lower && 'transfer-encoding' !== $lower) {
                 $response = $response->withHeader($name, $values);
             }

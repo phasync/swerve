@@ -16,7 +16,7 @@ when it is installed. See [Production](production.md#phasync-ext) for what it ch
 
 ```bash
 composer require phasync/phasync-ext
-vendor/bin/swerve --version   # swerve 0.1.0-beta2 (PHP 8.5.11, phasync 2.0.0-beta5, phasync-ext 0.5.0-beta2)
+vendor/bin/swerve --version   # swerve 0.1.0-beta2 (PHP 8.5.11, phasync 2.0.0-beta6, phasync-ext 0.5.0-beta3)
 ```
 
 ## A first application
