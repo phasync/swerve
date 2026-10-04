@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `--trusted-proxy=<ip|cidr|unix>` (HTTP mode, repeatable): for requests from a trusted peer,
+  `REMOTE_ADDR`, `HTTPS`, `SERVER_PORT` and the host come from `X-Forwarded-For`, `-Proto` and `-Host`.
+- With `Swerve::virtualize()`: `getallheaders()`, `apache_request_headers()` and
+  `fastcgi_finish_request()`; `$_SERVER` has `SERVER_NAME`, `REQUEST_SCHEME`, `PHP_AUTH_USER`,
+  `PHP_AUTH_PW`, `PHP_AUTH_DIGEST`, `AUTH_TYPE`, `SERVER_SOFTWARE`, `DOCUMENT_ROOT`, `SCRIPT_FILENAME`,
+  `SCRIPT_NAME`, `PHP_SELF` and, over HTTP, `SERVER_ADDR` and `SERVER_PORT` (#28).
+- Documented where virtualized requests differ from PHP-FPM: persistent connections, request state
+  that is shared, `memory_limit` bounding all requests of a worker, `PHP_SAPI`, fiber stack size.
+
+### Changed
+
+- With `Swerve::virtualize()`, echoed output is sent in pieces of 8 KiB and at `flush()`, not one
+  chunk per `echo`.
+
+### Fixed
+
+- `header()`, `setcookie()` and the session cookie were dropped when the handler returned a PSR-7
+  response under `Swerve::virtualize()`; they are added to it (#27).
+- `REMOTE_ADDR` of an IPv6 client was bracketed (`[::1]`); it is the bare address.
+
 ## 0.1.0-beta2 (2026-10-04)
 
 ### Added

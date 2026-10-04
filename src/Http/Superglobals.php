@@ -21,8 +21,11 @@ final class Superglobals extends LoggingContext implements SwitchAwareInterface
     /** The request's, while another request runs; null until its first suspend(). */
     private ?array $own = null;
 
-    /** @param array $outer what the worker had, restored while other requests run */
-    public function __construct(LoggerInterface $logger, ServerRequestInterface $request, private readonly array $outer)
+    /**
+     * @param array       $outer what the worker had, restored while other requests run
+     * @param VirtualSapi $sapi  the request's, for fastcgi_finish_request()
+     */
+    public function __construct(LoggerInterface $logger, ServerRequestInterface $request, private readonly array $outer, public readonly VirtualSapi $sapi)
     {
         parent::__construct($logger, $request);
     }

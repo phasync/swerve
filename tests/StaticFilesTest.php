@@ -144,7 +144,7 @@ test('--public needs a directory, and HTTP', function () {
     expect([$code, $out[0]])->toBe([2, 'swerve: Illegal value for option: --public: /no/such/dir is not a directory']);
     $out = [];
     exec("$swerve --public=/tmp --fastcgi=9000 " . escapeshellarg(__DIR__ . '/Fixtures/app.php') . ' 2>&1', $out, $code);
-    expect([$code, $out[0]])->toBe([2, 'swerve: --buffer-responses, --max-body and --public only apply to --http']);
+    expect([$code, $out[0]])->toBe([2, 'swerve: --buffer-responses, --max-body, --public and --trusted-proxy only apply to --http']);
 });
 
 test('a PHP file in the public directory is passed to the application, never sent as source', function () {

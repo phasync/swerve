@@ -443,10 +443,14 @@ With [phasync-ext](https://github.com/phasync/phasync-ext) (0.5.0-beta2 or later
 `Swerve::virtualize()` in `swerve.php` runs every request as under PHP-FPM, as a request of its
 own: `echo`, `header()`, `setcookie()`, `http_response_code()`, the session functions,
 `php://input` and `exit()` (which ends the request, not the worker) work, also with many requests
-at once in a worker. What the application echoes goes to the client as it is made, with the
-headers it set sent before the first byte (chunked, or with its own `Content-Length`). A PSR-7
-response that the handler returns is sent as usual when nothing was echoed. The handler runs in the
-connection's coroutine: no coroutine is started for the request.
+at once in a worker. What the application echoes goes to the client in pieces of 8 KiB and at
+`flush()`, with the headers it set sent before the first byte (chunked, or with its own
+`Content-Length`). A PSR-7 response that the handler returns is sent when nothing was echoed, with
+the headers the application set (`header()`, `setcookie()`, the session cookie) added to it.
+`getallheaders()`, `apache_request_headers()` and `fastcgi_finish_request()` exist, `$_SERVER` has
+what PHP-FPM gives (`SERVER_NAME`, `REQUEST_SCHEME`, `PHP_AUTH_USER`/`PHP_AUTH_PW`, `DOCUMENT_ROOT`
+and `SCRIPT_FILENAME`), and the handler runs in the connection's coroutine: no coroutine is started
+for the request.
 
 ```php
 Swerve::virtualize();
@@ -475,6 +479,23 @@ return phasync::withContext(fn () => $app->handle($request), new class implement
     public function suspend(): void { $this->own = App::$current; }
 });
 ```
+
+Where it differs from PHP-FPM, because the requests share one process:
+
+- **Connections.** A persistent connection (`PDO::ATTR_PERSISTENT`, `mysqli` with `p:`, `pconnect()`)
+  is one connection of the worker, used by every request in it, also when they run at once: two
+  requests in one transaction on it corrupt each other. Open one connection per request, or use a
+  pool.
+- **Settings.** Request state the extension does not swap is shared: `set_time_limit()`, `ini_set()`,
+  the default time zone, `setlocale()`, `mb_*` and intl settings, `libxml_use_internal_errors()`,
+  `mysqli_report()`, `bcscale()`, `error_get_last()` and the `mt_srand()` seed. Set them once at
+  start, not per request.
+- **Memory.** `memory_limit` bounds all the requests in a worker together, and a fatal error ends the
+  worker and every request in it (not only the one that caused it). Size it for the concurrency
+  ([Sizing](docs/production.md#sizing)).
+- **Environment.** `PHP_SAPI` is `cli`, `zlib.output_compression` has no effect (compress in the proxy),
+  `auto_prepend_file` is not run, and a fiber's stack is `fiber.stack_size` (2 MB, not the 8 MB of
+  FPM's main stack): deep recursion that works under FPM can overflow it.
 
 ## Supervision
 

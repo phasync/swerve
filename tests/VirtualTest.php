@@ -211,3 +211,110 @@ test('Swerve::virtualize(): a form is read by PHP, and the PSR request has the s
     }
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
 })->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Swerve::virtualize(): the head header(), setcookie() and the session set up reaches a PSR response returned with nothing echoed', function () {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        $conn = native_connect($addr);
+        fwrite($conn, "GET /virtual-psr HTTP/1.1\r\nHost: t\r\n\r\n");
+        $response = native_read_response($conn);
+        expect($response['status'])->toBe(202); // the response the handler returned decides the status
+        expect($response['body'])->toBe('psr body');
+        expect($response['headers']['x-own'])->toBe('yes');
+        expect($response['headers']['x-called'])->toBe('yes');
+        expect($response['headers']['content-type'])->toBe('text/plain'); // the response's own wins
+        expect($response['cookies'])->toHaveCount(2);
+        expect(implode("\n", $response['cookies']))->toContain('flavour=oat')->toContain('PHPSESSID=');
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Swerve::virtualize(): $_SERVER has what PHP-FPM gives: the host, the port, basic authentication and the script', function () {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        $conn = native_connect($addr);
+        $auth = base64_encode('ann:s3cret:x');
+        fwrite($conn, "GET /virtual-server HTTP/1.1\r\nHost: example.test:8099\r\nAuthorization: Basic $auth\r\n\r\n");
+        $server = json_decode(native_read_response($conn)['body'], true);
+        expect($server['PHP_AUTH_USER'])->toBe('ann');
+        expect($server['PHP_AUTH_PW'])->toBe('s3cret:x');
+        expect($server['AUTH_TYPE'])->toBe('Basic');
+        expect($server['SERVER_NAME'])->toBe('example.test');
+        expect($server['SERVER_PORT'])->toBe(explode(':', $addr)[1]);
+        expect($server['SERVER_SOFTWARE'])->toStartWith('Swerve/');
+        expect($server['REQUEST_SCHEME'])->toBe('http');
+        expect($server)->not->toHaveKey('HTTPS');
+        expect($server['SCRIPT_FILENAME'])->toEndWith('tests/Fixtures/virtual.php');
+        expect($server['SCRIPT_NAME'])->toBe('/virtual.php');
+        expect($server['PHP_SELF'])->toBe('/virtual.php');
+        expect($server['DOCUMENT_ROOT'])->toEndWith('tests/Fixtures');
+        expect($server['REMOTE_ADDR'])->toBe('127.0.0.1');
+
+        // Without credentials, none of them
+        fwrite($conn, "GET /virtual-server HTTP/1.1\r\nHost: t\r\n\r\n");
+        $server = json_decode(native_read_response($conn)['body'], true);
+        expect($server)->not->toHaveKey('PHP_AUTH_USER')->not->toHaveKey('AUTH_TYPE');
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Swerve::virtualize(): getallheaders() and apache_request_headers() give the request headers as sent', function () {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        $conn = native_connect($addr);
+        fwrite($conn, "GET /virtual-headers HTTP/1.1\r\nHost: t\r\nX-Mixed-Case: Yes\r\naccept: */*\r\n\r\n");
+        [$headers, $same] = json_decode(native_read_response($conn)['body'], true);
+        expect($headers)->toBe(['Host' => 't', 'X-Mixed-Case' => 'Yes', 'Accept' => '*/*']);
+        expect($same)->toBeTrue();
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Swerve::virtualize(): many small echoes are sent in a few chunks, as PHP-FPM sends them', function () {
+    [$process, $addr, $log] = virtual_start();
+    try {
+        $conn = native_connect($addr);
+        fwrite($conn, "GET /virtual-small?n=3000 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+        $raw = '';
+        while (!feof($conn) && !str_ends_with($raw, "0\r\n\r\n")) {
+            $raw .= fread($conn, 65536);
+        }
+        [, $body] = explode("\r\n\r\n", $raw, 2);
+        preg_match_all('/^([0-9a-f]+)\r\n/m', $body, $sizes);
+        expect(array_sum(array_map('hexdec', $sizes[1])))->toBe(3000);
+        expect(count($sizes[1]))->toBeLessThan(6); // 3000 echoes of one byte were not 3000 chunks
+    } finally {
+        native_stop($process);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
+
+test('Swerve::virtualize(): fastcgi_finish_request() completes the response while the request goes on', function () {
+    [$process, $addr, $log] = virtual_start();
+    $marker = temp_path();
+    @unlink($marker);
+    try {
+        $conn  = native_connect($addr);
+        $start = microtime(true);
+        fwrite($conn, "GET /virtual-finish?ms=400&marker=" . urlencode($marker) . " HTTP/1.1\r\nHost: t\r\n\r\n");
+        $response = native_read_response($conn);
+        expect($response['body'])->toBe('done'); // what was echoed after is discarded
+        expect(microtime(true) - $start)->toBeLessThan(0.3);
+        expect(file_exists($marker))->toBeFalse();
+        usleep(600000);
+        expect(file_get_contents($marker))->toBe('finished');
+        // The connection serves the next request once the previous one is done
+        fwrite($conn, "GET /hello HTTP/1.1\r\nHost: t\r\n\r\n");
+        expect(native_read_response($conn)['body'])->toBe('Hello');
+    } finally {
+        native_stop($process);
+        @unlink($marker);
+    }
+    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
+})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');

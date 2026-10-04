@@ -16,6 +16,7 @@ use Swerve\CLI\Args;
 use Swerve\Dispatcher;
 use Swerve\FastCGI\FastCGIServer;
 use Swerve\Http\HttpServer;
+use Swerve\Http\TrustedProxies;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
 use Swerve\Util\Cluster;
@@ -106,8 +107,8 @@ foreach ([\STDOUT, \STDERR] as $out) {
             \fwrite(\STDERR, "swerve: Can't combine --fastcgi with --http\n");
             exit(2);
         }
-        if ($args->bufferResponses || !$args->isDefault('maxBody') || '' !== $args->public) {
-            \fwrite(\STDERR, "swerve: --buffer-responses, --max-body and --public only apply to --http\n");
+        if ($args->bufferResponses || !$args->isDefault('maxBody') || '' !== $args->public || $args->trustedProxy) {
+            \fwrite(\STDERR, "swerve: --buffer-responses, --max-body, --public and --trusted-proxy only apply to --http\n");
             exit(2);
         }
     }
@@ -222,7 +223,16 @@ foreach ([\STDOUT, \STDERR] as $out) {
     // such as a subscriber that runs for the worker's whole life
     // Before the application loads, which may change the working directory
     $files = '' !== $args->public ? new StaticFiles($args->public) : null;
-    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $fastcgi, $files) {
+    // What a web server in front would have supplied to the application's $_SERVER
+    Swerve::setServer([
+        'SERVER_SOFTWARE' => 'Swerve/' . Swerve::getVersion(),
+        'DOCUMENT_ROOT'   => '' !== $args->public ? \rtrim($args->public, '/') : \dirname($swerveFile),
+        'SCRIPT_FILENAME' => $swerveFile,
+        'SCRIPT_NAME'     => '/' . \basename($swerveFile),
+        'PHP_SELF'        => '/' . \basename($swerveFile),
+    ]);
+    $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
+    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $fastcgi, $files, $proxies) {
         try {
             Cache::$loader = phasync::getFiber();
             $app           = require $swerveFile;
@@ -284,7 +294,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         foreach ($fastcgi ?: $http as $address) {
             $server = $fastcgi
                 ? new FastCGIServer(\str_starts_with($address, 'unix:') ? $address : "tcp://$address", $dispatcher, $logger)
-                : new HttpServer($address, $dispatcher, $logger, (bool) $args->bufferResponses, $maxBody);
+                : new HttpServer($address, $dispatcher, $logger, (bool) $args->bufferResponses, $maxBody, $proxies);
             try {
                 $server->listen();
             } catch (\Throwable $e) {

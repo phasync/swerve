@@ -40,8 +40,10 @@ final class Swerve
      * Run every request as under PHP-FPM: `echo`, `header()`, `setcookie()`, `http_response_code()`,
      * the session functions, `php://input`, `exit()` and the superglobals work as in a request of
      * their own, also while other requests run in the same worker. What the application echoes
-     * goes to the client as it is made, with the headers it set sent before the first byte; a
-     * response the handler returns is sent as it is, when nothing was echoed. Call it in
+     * goes to the client in pieces of 8 KiB and at `flush()`, as PHP-FPM sends it, with the headers
+     * it set sent before the first byte; a response the handler returns is sent as it is, when
+     * nothing was echoed, with the headers the application set added to it. `fastcgi_finish_request()`,
+     * `getallheaders()` and `apache_request_headers()` work. Call it in
      * `swerve.php`, before the worker serves:
      *
      * ```php
@@ -59,7 +61,34 @@ final class Swerve
         if ($on && !Virtual::available()) {
             throw new \LogicException('Swerve::virtualize() needs phasync-ext 0.5.0-beta2 or later');
         }
+        if ($on) {
+            require_once __DIR__ . '/Http/functions.php';
+        }
         self::$virtualize = $on;
+    }
+
+    /** @var array<string, string> */
+    private static array $server = [];
+
+    /**
+     * @internal what bin/swerve knows of the server: the part of a virtualized request's `$_SERVER`
+     *           that a web server in front would have supplied
+     *
+     * @param array<string, string> $server
+     */
+    public static function setServer(array $server): void
+    {
+        self::$server = $server;
+    }
+
+    /**
+     * @internal
+     *
+     * @return array<string, string>
+     */
+    public static function server(): array
+    {
+        return self::$server;
     }
 
     /** @internal whether virtualize() is on */

@@ -402,12 +402,16 @@ function native_read_head($conn): ?array
     $lines   = explode("\r\n", rtrim($head));
     $status  = (int) explode(' ', array_shift($lines))[1];
     $headers = [];
+    $cookies = [];
     foreach ($lines as $line) {
         [$name, $value]                   = explode(':', $line, 2);
         $headers[strtolower(trim($name))] = trim($value);
+        if ('set-cookie' === strtolower(trim($name))) {
+            $cookies[] = trim($value);
+        }
     }
 
-    return ['status' => $status, 'headers' => $headers];
+    return ['status' => $status, 'headers' => $headers, 'cookies' => $cookies];
 }
 
 /**

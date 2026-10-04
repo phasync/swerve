@@ -63,6 +63,11 @@ grows past it: a new worker starts, then the old one finishes its plain requests
 accepting. With `memory_limit=-1` this is off; give a size such as `--max-memory=512M`.
 `--max-requests` recycles after about so many requests.
 
+With `Swerve::virtualize()`, `memory_limit` bounds the sum of the requests running at once in a
+worker, and a fatal error (out of memory, say) ends the worker and every request in it, not only the
+request that caused it. Count `memory_limit` as the peak of one request times the concurrency you
+expect.
+
 A recycled worker lingers: it keeps its upgraded connections (WebSockets, SSE) instead of
 dropping them, until the last client has left or `--linger` seconds (1800) have passed, then
 closes what is left (WebSockets get 1001) and exits. Its subscriptions, cache and claims go on
@@ -70,6 +75,15 @@ working meanwhile. Budget for them: a slot may have up to three lingering worker
 serving one, each with its memory (a recycle that would be the fourth waits until one exits, and
 is logged once). `--linger=0` drops the connections of a recycled worker at once, as a reload
 does. A reload or shutdown does not linger: it ends the lingering too, within `--grace`.
+
+## Behind a proxy
+
+Behind nginx or HAProxy over HTTP, `REMOTE_ADDR` is the proxy until swerve is told to trust it:
+`--trusted-proxy=10.0.0.5` (or a range, or `unix` for a Unix socket) makes the `X-Forwarded-For`,
+`-Proto` and `-Host` headers of that peer count: `REMOTE_ADDR`, `HTTPS`, `SERVER_PORT` and the host of
+`$request->getUri()` are then the client's. The `X-Forwarded-For` chain is read from the right: the first address that is not a trusted
+proxy is the client, so a client's own forged entries are never reached. `X-Forwarded-Proto` and
+`-Host` are taken as the proxy sent them: trust only proxies that set them.
 
 ## systemd
 

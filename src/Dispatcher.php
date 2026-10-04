@@ -78,7 +78,8 @@ final class Dispatcher
     /**
      * Swerve::virtualize(): the handler runs as a request of its own, in a context that swaps the
      * superglobals (PHP builds them as the request starts, so the context exists before). What it
-     * echoes streams to the client; a response it returns without echoing is sent as usual.
+     * echoes streams to the client; a response it returns without echoing is sent as usual, with
+     * the headers the application set up added.
      */
     private function virtual(ServerRequestInterface $request, StreamingResponderInterface $responder): mixed
     {
@@ -93,13 +94,16 @@ final class Dispatcher
 
                 return $this->handler->handle($request);
             }, $sapi);
+            if ($sapi->finished) {
+                return $sapi->result;
+            }
             if (!$sapi->started && $response instanceof ResponseInterface) {
-                return $responder->respond($request, $response);
+                return $responder->respond($request, $sapi->withHead($response));
             }
             $sapi->commit();
 
             return $responder->streamEnd();
-        }, new Superglobals($this->logger, $request, Superglobals::current()));
+        }, new Superglobals($this->logger, $request, Superglobals::current(), $sapi));
     }
 
     /** PHP's $_FILES as PSR-7 uploaded files, nested as the field names are. */

@@ -71,7 +71,8 @@ final class HttpServer implements ServerInterface
     private int $reclaimed = 0;
 
     /**
-     * @param int $maxBodySize the largest request body (413); PHP_INT_MAX for no limit
+     * @param int              $maxBodySize the largest request body (413); PHP_INT_MAX for no limit
+     * @param ?TrustedProxies  $proxies     the proxies whose X-Forwarded-* headers are believed
      */
     public function __construct(
         private readonly string $address,
@@ -79,6 +80,7 @@ final class HttpServer implements ServerInterface
         private readonly LoggerInterface $logger,
         private readonly bool $bufferResponses = false,
         private readonly int $maxBodySize = HttpConnection::MAX_BODY,
+        private readonly ?TrustedProxies $proxies = null,
     ) {
     }
 
@@ -299,7 +301,7 @@ final class HttpServer implements ServerInterface
     private function adopt($socket, string $peer, ?\Socket $sock): void
     {
         null === $sock ? \stream_set_blocking($socket, false) : \socket_set_nonblock($sock);
-        $connection = new HttpConnection($socket, $peer, $this->dispatcher, $this->logger, $this->bufferResponses, $this->maxBodySize, $sock);
+        $connection = new HttpConnection($socket, $peer, $this->dispatcher, $this->logger, $this->bufferResponses, $this->maxBodySize, $sock, $this->proxies);
         $id         = \spl_object_id($connection);
 
         $this->connections[$id] = $connection;

@@ -104,12 +104,16 @@ unless phasync-ext is loaded and the database is MySQL: then they wait as a coro
 
 ## Things that work differently from PHP-FPM
 
+With phasync-ext and `Swerve::virtualize()` in `swerve.php`, none of this applies: every request
+runs as under PHP-FPM (see [Code written for PHP-FPM](../README.md#code-written-for-php-fpm)).
+Without it:
+
 - **Superglobals are not filled**: no `$_GET`, `$_POST`, `$_SERVER`, `$_COOKIE`, `$_FILES`.
   Use the PSR-7 request: `getQueryParams()`, `getCookieParams()`, `getServerParams()`,
   `getBody()`.
 - **`header()`, `echo`, `setcookie()`, `http_response_code()` don't make the response.**
-  Return a PSR-7 response. Output during a request ends the worker, unless phasync-ext is loaded:
-  see [Stray output](stray-output.md).
+  Return a PSR-7 response. Output during a request ends the worker: see
+  [Stray output](stray-output.md).
 - **PHP's sessions (`session_start()`) don't work.** Use a PSR-7 session library, or your
   framework's.
 - **`exit()` and `die()` end the worker**, and every request it serves. The master starts a

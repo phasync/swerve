@@ -216,6 +216,13 @@ final class HttpConnection implements StreamingResponderInterface
     private readonly string $remoteAddr;
     private readonly int $remotePort;
 
+    /** This end of the connection, if TCP: SERVER_ADDR and SERVER_PORT. */
+    private readonly string $serverAddr;
+    private readonly int $serverPort;
+
+    /** The peer is a trusted proxy: what it says about the client is believed, see forwarded(). */
+    private readonly bool $proxied;
+
     /** The current request body, as far as the connection knows, see settle(). */
     private const BODY_OPEN     = 0;
     private const BODY_DONE     = 1;
@@ -270,6 +277,7 @@ final class HttpConnection implements StreamingResponderInterface
      *                                         the application runs, or when a chunk would exceed it
      * @param ?\Socket        $sock            the same connection as ext-sockets' object, which is read and
      *                                         written instead when given (faster than the stream)
+     * @param ?TrustedProxies $proxies         whose X-Forwarded-* headers are believed, when this peer is one of them
      */
     public function __construct(
         private readonly mixed $socket,
@@ -279,6 +287,7 @@ final class HttpConnection implements StreamingResponderInterface
         private readonly bool $bufferResponses = false,
         private readonly int $maxBodySize = self::MAX_BODY,
         private ?\Socket $sock = null,
+        private readonly ?TrustedProxies $proxies = null,
     ) {
         if (null === $sock) {
             // Without PHP's own 8 KiB read buffer, a read asks the kernel for what it asks for:
@@ -286,8 +295,13 @@ final class HttpConnection implements StreamingResponderInterface
             \stream_set_read_buffer($socket, 0);
         }
         $colon            = (int) \strrpos($peer, ':');
-        $this->remoteAddr = \substr($peer, 0, $colon);
+        $this->remoteAddr = \trim(\substr($peer, 0, $colon), '[]');
         $this->remotePort = (int) \substr($peer, $colon + 1);
+        $this->proxied    = $proxies?->trusts($this->remoteAddr) ?? false;
+        $local            = \stream_socket_get_name($socket, false);
+        $colon            = false === $local ? false : \strrpos($local, ':');
+        $this->serverAddr = false === $colon ? '' : \trim(\substr($local, 0, $colon), '[]');
+        $this->serverPort = false === $colon ? 0 : (int) \substr($local, $colon + 1);
     }
 
     public function serve(): void
@@ -756,6 +770,42 @@ final class HttpConnection implements StreamingResponderInterface
         }
     }
 
+
+    /**
+     * What the trusted proxy in front says about the client: its address (the last X-Forwarded-For
+     * hop that is not a trusted proxy itself; what is before it is only a claim), whether it came by
+     * https (X-Forwarded-Proto), and the host it asked for (X-Forwarded-Host, which replaces Host).
+     * A value that is not what it should be is ignored.
+     *
+     * @param array<string, string[]> $headers
+     *
+     * @return array{0: string, 1: bool} the client's address, and whether the request was https
+     */
+    private function forwarded(array &$headers): array
+    {
+        $client = $this->remoteAddr;
+        foreach (\array_reverse(\array_map('trim', \explode(',', \implode(',', $headers['x-forwarded-for'] ?? [])))) as $hop) {
+            if (\preg_match('/^\[([^\]]+)\](?::\d+)?$/', $hop, $m)) {
+                $hop = $m[1];
+            } elseif (1 === \substr_count($hop, ':')) {
+                $hop = \strstr($hop, ':', true);
+            }
+            if (false === \filter_var($hop, \FILTER_VALIDATE_IP)) {
+                break;
+            }
+            $client = $hop;
+            if (!$this->proxies->trusts($hop)) {
+                break;
+            }
+        }
+        $host = \trim(\explode(',', $headers['x-forwarded-host'][0] ?? '')[0]);
+        if ('' !== $host && \strspn($host, self::HOST) === \strlen($host)) {
+            $headers['host'] = [$host];
+        }
+
+        return [$client, 'https' === \strtolower(\trim(\explode(',', $headers['x-forwarded-proto'][0] ?? '')[0]))];
+    }
+
     /**
      * Handle one request. Returns whether the connection stays open for another.
      *
@@ -971,8 +1021,13 @@ final class HttpConnection implements StreamingResponderInterface
 
         $body = new RequestBody($this, null !== $te ? null : ($length ?? 0), $continue, $this->maxBodySize, $upgrade);
         $now     = \microtime(true);
+        $client  = $this->remoteAddr;
+        $https   = false;
+        if ($this->proxied) {
+            [$client, $https] = $this->forwarded($headers);
+        }
         $server  = [
-            'REMOTE_ADDR'        => $this->remoteAddr,
+            'REMOTE_ADDR'        => $client,
             'REMOTE_PORT'        => $this->remotePort,
             'REQUEST_METHOD'     => $method,
             'REQUEST_URI'        => $target,
@@ -980,6 +1035,17 @@ final class HttpConnection implements StreamingResponderInterface
             'REQUEST_TIME'       => (int) $now,
             'REQUEST_TIME_FLOAT' => $now,
         ];
+        if ($https) {
+            $server['HTTPS'] = 'on';
+        }
+        if ($this->proxied) {
+            // The port the client used: what its Host says, or the scheme's
+            $host                  = $headers['host'][0] ?? '';
+            $server['SERVER_PORT'] = \preg_match('/:(\d+)$/', $host, $m) ? (int) $m[1] : ($https ? 443 : 80);
+        } elseif (0 !== $this->serverPort) {
+            $server['SERVER_ADDR'] = $this->serverAddr;
+            $server['SERVER_PORT'] = $this->serverPort;
+        }
         $request = new ServerRequest($method, $target, $body, $headers, $names, $server, $version, $upgrade);
 
         // Each request runs in a phasync context of its own, which the coroutines it starts share:

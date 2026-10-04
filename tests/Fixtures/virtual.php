@@ -20,6 +20,15 @@ return new class implements RequestHandlerInterface {
         if ('/hello' === $path) {
             return new Response(200, ['Content-Type' => 'text/plain'], 'Hello'); // a PSR response, nothing echoed
         }
+        if ('/virtual-psr' === $path) {
+            // header(), a cookie and a session started, then a PSR response returned with nothing echoed
+            \session_save_path(\sys_get_temp_dir());
+            \session_start();
+            \header('X-Called: yes');
+            \setcookie('flavour', 'oat');
+
+            return new Response(202, ['X-Own' => 'yes', 'Content-Type' => 'text/plain'], 'psr body');
+        }
         match ($path) {
             // A session counter, a header, a cookie, the request body, a pause of ?ms= between two outputs; ?exit=1 exits after the first
             '/virtual' => (function () {
@@ -78,6 +87,29 @@ return new class implements RequestHandlerInterface {
                     \flush();
                     \phasync::sleep((int) $_GET['ms'] / 1000);
                 }
+            })(),
+            // $_SERVER, as an application written for PHP-FPM reads it
+            '/virtual-server' => (function () {
+                echo \json_encode(\array_intersect_key($_SERVER, \array_flip(['PHP_AUTH_USER', 'PHP_AUTH_PW', 'AUTH_TYPE', 'SERVER_NAME', 'SERVER_PORT', 'SERVER_SOFTWARE',
+                    'REQUEST_SCHEME', 'HTTPS', 'DOCUMENT_ROOT', 'SCRIPT_NAME', 'SCRIPT_FILENAME', 'PHP_SELF', 'REMOTE_ADDR', 'HTTP_HOST'])));
+            })(),
+            // The request headers as getallheaders() and apache_request_headers() give them
+            '/virtual-headers' => (function () {
+                echo \json_encode([\getallheaders(), \apache_request_headers() === \getallheaders()]);
+            })(),
+            // ?n= small echoes without a flush()
+            '/virtual-small' => (function () {
+                for ($i = 0; $i < (int) $_GET['n']; ++$i) {
+                    echo 'x';
+                }
+            })(),
+            // The response ends with fastcgi_finish_request(); the work goes on for ?ms= and leaves its mark in ?marker=
+            '/virtual-finish' => (function () {
+                echo 'done';
+                \fastcgi_finish_request();
+                echo 'discarded';
+                \phasync::sleep((int) $_GET['ms'] / 1000);
+                \file_put_contents($_GET['marker'], 'finished');
             })(),
             // The application's own Content-Length
             '/virtual-length' => (function () {

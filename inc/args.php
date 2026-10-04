@@ -42,6 +42,20 @@ return (function () {
         placeholder: 'dir',
         validator: fn ($value) => \is_dir($value) ? null : "$value is not a directory",
     ));
+    $args->add('trustedProxy', new Option(
+        '', 'trusted-proxy', 'HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several',
+        placeholder: 'ip|range|unix',
+        validator: static function ($value) {
+            try {
+                new Swerve\Http\TrustedProxies([$value]);
+            } catch (\InvalidArgumentException $e) {
+                return $e->getMessage();
+            }
+
+            return null;
+        },
+        multiple: true
+    ));
     $args->add('workers', new Option(
         'w', 'workers', 'Worker processes; auto is one per CPU core',
         default: 'auto',

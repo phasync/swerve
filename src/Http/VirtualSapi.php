@@ -2,34 +2,81 @@
 
 namespace Swerve\Http;
 
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\StreamingResponderInterface;
+use Swerve\Swerve;
 
 /**
  * The SAPI of a virtualized request (phasync-ext's virtualize(), see Swerve::virtualize()): what the
- * application echoes goes to the client as it is made, with the head the application set up with
- * header(), setcookie() and http_response_code() sent before the first byte.
+ * application echoes goes to the client in pieces of BUFFER bytes and at flush(), as PHP-FPM sends
+ * it, with the head the application set up with header(), setcookie() and http_response_code()
+ * sent before the first byte.
  *
  * @internal
  */
 final class VirtualSapi
 {
-    /** Whether the head was sent: the application's output is the response, and the PSR response it returned (if any) is not. */
+    /** Output reaches the client in pieces of at least this many bytes, or at flush(). */
+    private const BUFFER = 8192;
+
+    /** The application echoed or flushed: its output is the response, and the PSR response it returned (if any) is not. */
     public bool $started = false;
+
+    /** fastcgi_finish_request() ended the response: what the application does from now on is not sent. */
+    public bool $finished = false;
+
+    /** What the responder returned when the response ended. */
+    public mixed $result = null;
 
     /** @var array{0: int, 1: string, 2: array<string, list<string>>}|null */
     private ?array $head = null;
+
+    private bool $sent = false;
+
+    private string $buffer = '';
 
     public function __construct(private readonly ServerRequestInterface $request, private readonly StreamingResponderInterface $responder)
     {
     }
 
-    /** The head, if the request ended without any output (the code called exit(), or only set headers). */
+    /** The head, and the output not sent yet: the request ended (also when the code called exit(), or only set headers). */
     public function commit(): void
     {
-        if (!$this->started) {
-            $this->start();
+        if (!$this->finished) {
+            $this->drain();
         }
+    }
+
+    /** fastcgi_finish_request(): the response ends here, and the request goes on without it. */
+    public function finish(): bool
+    {
+        if ($this->finished) {
+            return false;
+        }
+        $this->started = true;
+        $this->drain();
+        $this->result   = $this->responder->streamEnd();
+        $this->finished = true;
+
+        return true;
+    }
+
+    /** The PSR response the handler returned, with the headers the application set up (header(), setcookie(), the session's cookie) that it has none of. */
+    public function withHead(ResponseInterface $response): ResponseInterface
+    {
+        foreach ($this->head[2] ?? [] as $name => $values) {
+            $lower = \strtolower($name);
+            if ('set-cookie' === $lower) {
+                foreach ($values as $value) {
+                    $response = $response->withAddedHeader($name, $value); // one at a time: phasync before beta6 fails on a list for an absent header
+                }
+            } elseif (!$response->hasHeader($name) && 'content-length' !== $lower && 'transfer-encoding' !== $lower) {
+                $response = $response->withHeader($name, $values);
+            }
+        }
+
+        return $response;
     }
 
     public function send_headers(int $status, ?string $statusLine, array $headers): void
@@ -45,9 +92,26 @@ final class VirtualSapi
 
     public function ub_write(string $data): bool
     {
-        $this->started || $this->start();
+        if ($this->finished) {
+            return true;
+        }
+        $this->started = true;
+        if ('' === $this->buffer && \strlen($data) >= self::BUFFER) {
+            $this->sent || $this->start();
 
-        return $this->responder->stream($data);
+            return $this->responder->stream($data);
+        }
+        $this->buffer .= $data;
+
+        return \strlen($this->buffer) < self::BUFFER || $this->drain();
+    }
+
+    public function flush(): void
+    {
+        if (!$this->finished) {
+            $this->started = true;
+            $this->drain();
+        }
     }
 
     public function connection_aborted(): bool
@@ -55,9 +119,22 @@ final class VirtualSapi
         return $this->responder->streamGone();
     }
 
+    /** The head, if not sent yet, and the buffered output. */
+    private function drain(): bool
+    {
+        $this->sent || $this->start();
+        if ('' === $this->buffer) {
+            return true;
+        }
+        $data         = $this->buffer;
+        $this->buffer = '';
+
+        return $this->responder->stream($data);
+    }
+
     private function start(): void
     {
-        $this->started = true;
+        $this->sent = true;
         [$status, $reason, $headers] = $this->head ?? [200, '', []];
         $this->responder->streamHead($status, $reason, $headers);
     }
@@ -115,7 +192,29 @@ final class VirtualSapi
         $server['REQUEST_METHOD'] = $this->request->getMethod();
         $server['REQUEST_URI']    = $this->request->getRequestTarget();
         $server['QUERY_STRING']   = $this->request->getUri()->getQuery();
+        foreach (['SERVER_PORT', 'REMOTE_PORT'] as $port) {
+            if (isset($server[$port])) {
+                $server[$port] = (string) $server[$port]; // strings, as PHP-FPM has them
+            }
+        }
 
-        return $server;
+        // What a web server in front would have supplied (and does, over FastCGI: it comes first)
+        $host    = $this->request->getHeaderLine('Host');
+        $colon   = \strrpos($host, ':');
+        $extras  = [
+            'SERVER_NAME'    => false !== $colon && \strlen($host) - 1 !== \strrpos($host, ']') && \substr($host, $colon + 1) === (string) (int) \substr($host, $colon + 1) ? \substr($host, 0, $colon) : $host,
+            'REQUEST_SCHEME' => isset($server['HTTPS']) && 'off' !== $server['HTTPS'] ? 'https' : 'http',
+        ];
+        $auth = $this->request->getHeaderLine('Authorization');
+        if (0 === \strncasecmp($auth, 'Basic ', 6) && false !== ($credentials = \base64_decode(\substr($auth, 6), true)) && \str_contains($credentials, ':')) {
+            // As PHP does with the Authorization header: PHP_AUTH_USER and PHP_AUTH_PW
+            [$extras['PHP_AUTH_USER'], $extras['PHP_AUTH_PW']] = \explode(':', $credentials, 2);
+            $extras['AUTH_TYPE']                               = 'Basic';
+        } elseif (0 === \strncasecmp($auth, 'Digest ', 7)) {
+            $extras['PHP_AUTH_DIGEST'] = \substr($auth, 7);
+            $extras['AUTH_TYPE']       = 'Digest';
+        }
+
+        return $server + $extras + Swerve::server();
     }
 }

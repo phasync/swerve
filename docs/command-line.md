@@ -23,6 +23,7 @@ Logging (to the terminal, or with --log to a file):
 
 Limits:
   --max-body=<bytes>      HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
+  --trusted-proxy=<ip|cidr|unix>  HTTP: trust this peer's X-Forwarded-For, -Proto and -Host (repeatable)
   --buffer-responses      HTTP: send each response body whole (up to 8 MiB) with a Content-Length, instead of streaming it
   --grace=<seconds>       Seconds workers get to finish their requests on shutdown and reload before SIGKILL (default: 30)
   --linger=<seconds>      Seconds a recycled worker keeps its upgraded connections (WebSockets, SSE) before closing them; 0 = close them at once (default: 1800)
@@ -49,7 +50,13 @@ Information:
   listens, or a file that isn't a socket is in the way, swerve refuses to start) and removed at
   stop. Anyone may connect: limit access with the permissions of the directory it is in.
 - `--fastcgi` serves FastCGI instead of HTTP, for nginx or another web server in front;
-  `--public`, `--max-body` and `--buffer-responses` are for HTTP mode only.
+  `--public`, `--max-body`, `--buffer-responses` and `--trusted-proxy` are for HTTP mode only.
+
+- `--trusted-proxy` names the proxies in front of swerve: an address (`10.0.0.5`, `::1`), a range
+  (`10.0.0.0/8`, `fd00::/8`) or `unix` for clients on a Unix socket. For a request from one of them,
+  `REMOTE_ADDR` is the rightmost `X-Forwarded-For` address that is not a trusted proxy, `HTTPS` is `on`
+  when `X-Forwarded-Proto` is `https`, and the `Host` is `X-Forwarded-Host`. From any other peer these
+  headers are left as they came, and mean nothing to swerve. Over `--fastcgi` the web server sets these.
 
 ## Exit codes
 
