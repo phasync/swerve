@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0-beta5 (2026-10-04)
+
+### Added
+
+- `--ext` loads phasync-ext, which now ships inside phasync (2.0.0-beta7, now required), without
+  touching `composer.json`. Swerve also loads it when the project's `composer.json` has
+  `"extra": {"phasync": {"ext": true}}`; otherwise it no longer loads it, and the start notice says
+  how to enable it.
+
+### Changed
+
+- phasync-ext is no longer a separate package: `composer require phasync/phasync-ext` is replaced by the
+  setting or flag above.
+
 ## 0.1.0-beta4 (2026-10-04)
 
 ### Changed
