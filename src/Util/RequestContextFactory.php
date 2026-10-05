@@ -3,7 +3,7 @@
 namespace Swerve\Util;
 
 use phasync\Context\ContextFactoryInterface;
-use Psr\Http\Message\ServerRequestInterface;
+use Swerve\ClientRequest;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -14,7 +14,7 @@ use Psr\Log\LoggerInterface;
  */
 final class RequestContextFactory implements ContextFactoryInterface
 {
-    public function __construct(private readonly LoggerInterface $logger, private readonly ServerRequestInterface $request)
+    public function __construct(private readonly LoggerInterface $logger, private readonly ClientRequest $request)
     {
     }
 

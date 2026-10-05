@@ -3,7 +3,7 @@
 namespace Swerve\Util;
 
 use phasync\Context\ExceptionHandlerInterface;
-use Psr\Http\Message\ServerRequestInterface;
+use Swerve\ClientRequest;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -18,7 +18,7 @@ use Psr\Log\LoggerInterface;
  */
 class LoggingContext implements ExceptionHandlerInterface
 {
-    public function __construct(private readonly LoggerInterface $logger, public readonly ?ServerRequestInterface $request = null)
+    public function __construct(private readonly LoggerInterface $logger, public readonly ?ClientRequest $request = null)
     {
     }
 

@@ -5,17 +5,15 @@
  */
 
 use phasync\Util\Console;
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Server\RequestHandlerInterface;
 use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 use Swerve\Cache;
 use Swerve\CLI\Address;
 use Swerve\CLI\Args;
-use Swerve\Dispatcher;
+use Swerve\ClientRequest;
 use Swerve\Http\HttpServer;
 use Swerve\Http\TrustedProxies;
+use Swerve\RequestHandler;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
 use Swerve\Util\Cluster;
@@ -226,55 +224,31 @@ foreach ([\STDOUT, \STDERR] as $out) {
             $logger->critical('Loading {file} failed: {exception}', ['file' => $swerveFile, 'exception' => $e]);
             exit(Worker::EXIT_BAD_APP);
         }
-        if (!$app instanceof RequestHandlerInterface) {
-            $logger->critical('{file} returned {value}; it must return a PSR-15 RequestHandlerInterface', ['file' => $args->swervefile, 'value' => \get_debug_type($app)]);
+        if (!$app instanceof RequestHandler) {
+            $logger->critical('{file} returned {value}; it must return a Swerve\\RequestHandler', ['file' => $args->swervefile, 'value' => \get_debug_type($app)]);
             exit(Worker::EXIT_BAD_APP);
         }
         $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
 
+        $app = $app->handler;
         if (null !== $files) {
-            // Files first; the application gets what is not one
-            $app = new class($files, $app) implements RequestHandlerInterface {
-                public function __construct(private StaticFiles $files, private RequestHandlerInterface $app)
-                {
-                }
-
-                public function handle(ServerRequestInterface $request): ResponseInterface
-                {
-                    return $this->files->process($request, $this->app);
-                }
-            };
+            $app = $files->wrap($app); // files first; the application gets what is not one
         }
-        $handler = new class($app, $worker, $logger instanceof Logger && $logger->access ? $logger : null) implements RequestHandlerInterface {
-            public function __construct(private RequestHandlerInterface $app, private Worker $worker, private ?Logger $access)
-            {
-            }
-
-            /** The access log's line is written when the application returns the response, before its body is sent. */
-            public function handle(ServerRequestInterface $request): ResponseInterface
-            {
-                $id     = $this->worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getRequestTarget());
-                $start  = \hrtime(true);
-                $status = 500;
-                try {
-                    $response = $this->app->handle($request);
-                    $status   = $response->getStatusCode();
-
-                    return $response;
-                } finally {
-                    $this->worker->requestDone($id);
-                    $this->access?->request($request->getMethod(), $request->getRequestTarget(), $status, (\hrtime(true) - $start) / 1e9);
-                }
+        $handler = static function (ClientRequest $request) use ($app, $worker) {
+            $id = $worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getTarget());
+            try {
+                $app($request);
+            } finally {
+                $worker->requestDone($id);
             }
         };
-        $dispatcher          = new Dispatcher($handler, $logger);
 
         // Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
         // kernel spreads new connections over them
         $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
         $servers = [];
         foreach ($http as $address) {
-            $server = new HttpServer($address, $dispatcher, $logger, (bool) $args->bufferResponses, $maxBody, $proxies);
+            $server = new HttpServer($address, $handler, $logger, $maxBody, $proxies);
             try {
                 $server->listen();
             } catch (\Throwable $e) {

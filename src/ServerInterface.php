@@ -5,8 +5,8 @@ namespace Swerve;
 /**
  * A protocol server, such as HTTP/1.1 (`--http`).
  *
- * It turns what arrives on its listener into PSR-7 requests, gives each to the
- * {@see Dispatcher}, and sends the response back in its protocol. A worker calls `listen()`, then
+ * It turns what arrives on its listener into {@see ClientRequest}s and gives each to the
+ * application's {@see RequestHandler}. A worker calls `listen()`, then
  * `run()` inside `phasync::run()`, and `drain()` when it is to stop.
  *
  * ```php
@@ -14,8 +14,7 @@ namespace Swerve;
  * phasync::run($server->run(...));      // returns once drain() was called and every connection ended
  * ```
  *
- * @see Swerve\Dispatcher
- * @see Swerve\ResponderInterface
+ * @see Swerve\ClientRequest
  */
 interface ServerInterface
 {
