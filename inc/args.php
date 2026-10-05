@@ -21,7 +21,7 @@ return (function () {
     $seconds = fn ($value) => \is_numeric($value) && $value >= 0 ? null : 'A number of seconds (0 or more) required';
 
     $args->section('Application');
-    $args->add('swervefile', new Argument('swerve.php', 'A PHP file returning a PSR-15 RequestHandlerInterface, such as a Slim app', './swerve.php'));
+    $args->add('swervefile', new Argument('swerve.php', 'A PHP file returning a Swerve\\RequestHandler, which runs once per request with a ClientRequest', './swerve.php'));
 
     $args->section('Serving');
     $args->add('http', new Option(
@@ -114,7 +114,7 @@ return (function () {
         validator: $seconds,
     ));
     $args->add('linger', new Option(
-        '', 'linger', 'Seconds a recycled worker may keep serving its WebSockets and other upgraded connections after its replacement took over; 0 = not at all',
+        '', 'linger', 'Seconds a recycled worker may keep serving its upgraded connections (101) after its replacement took over; 0 = not at all',
         default: '1800',
         placeholder: 'seconds',
         validator: $seconds,
