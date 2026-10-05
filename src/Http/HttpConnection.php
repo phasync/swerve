@@ -281,7 +281,13 @@ final class HttpConnection
         $this->draining = true;
         if ($this->upgraded) {
             if (null !== $this->reader) {
-                phasync::throw($this->reader, new CancelledException('The server is draining')); // not cancel(): the linger at the close must not be cancelled too
+                try {
+                    phasync::throw($this->reader, new CancelledException('The server is draining')); // not cancel(): the linger at the close must not be cancelled too
+                } catch (\LogicException) {
+                    // $this->reader already has an exception on its way: the application ended
+                    // its own exchange (a WebSocket's end(), say) right as the drain started.
+                    // Nothing more to cancel; readRaw()'s finally clears $this->reader itself.
+                }
             }
 
             return true;

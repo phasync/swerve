@@ -486,7 +486,12 @@ final class WebSocket implements \IteratorAggregate
             $this->connection->end();
         }
         if (null !== $this->reading && $this->reading !== \Fiber::getCurrent()) {
-            phasync::throw($this->reading, new CancelledException('The WebSocket was ended')); // from the wait for the client's bytes
+            try {
+                phasync::throw($this->reading, new CancelledException('The WebSocket was ended')); // from the wait for the client's bytes
+            } catch (\LogicException) {
+                // $this->reading already has an exception on its way: a drain cancelled the
+                // same wait at the same moment. Nothing more to do; need()'s catch sees it.
+            }
         }
         phasync::raiseFlag($this); // a reader that waits for room in the inbox
         $this->onClose->trigger($this->code, $this->reason);

@@ -51,6 +51,14 @@
 - `Swerve::virtualize()`.
 - The PSR-15 and Slim requirements.
 
+### Fixed
+
+- A drain (`Swerve\Http\HttpConnection::drain()`) and a WebSocket ending itself (`WebSocket::end()`)
+  could race to cancel the same pending read: whichever lost found the fiber already had a
+  cancellation on its way and crashed the worker with an uncaught `LogicException` ("the coroutine is
+  not waiting"), instead of the drain or the end() having nothing left to do. Both now let that
+  `LogicException` go, since `phasync::throw()` delivers only once. (phasync/swerve#36)
+
 ## 0.1.0-beta5 (2026-10-04)
 
 ### Added

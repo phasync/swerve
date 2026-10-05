@@ -128,3 +128,29 @@ test('run() echoes a message and ends 1000 on return, over a Duplex that is not 
     expect(\unpack('n', $payload)[1])->toBe(1000);
     expect($connection->isClosed())->toBeFalse(); // end() only ends our side; close() is for a dead peer
 });
+
+test('end() does not let a second canceller of the same read crash it: phasync::throw() on a fiber already being cancelled is a LogicException, swallowed', function () {
+    $connection = new MemoryDuplex(); // never fed or ended: read() parks, so need() sets $this->reading
+    $ws         = null;
+
+    phasync::run(function () use ($connection, &$ws) {
+        $runFiber = phasync::go(function () use ($connection, &$ws) {
+            WebSocket::run($connection, function (WebSocket $w) use (&$ws) {
+                $ws = $w;
+                phasync::sleep(10); // park the callback so pump()'s own read loop gets to need() and blocks
+            });
+        });
+
+        expect($ws)->not->toBeNull(); // the callback ran up to its sleep(); pump() is now blocked in need()
+
+        // A drain cancelling the same wait at the same moment: it gets there first, so $this->reading
+        // already has an exception on its way when end() tries to cancel it too (swerve's
+        // Http\HttpConnection::drain() and WebSocket::end() target the same fiber this way).
+        phasync::throw($runFiber, new phasync\CancelledException('simulated drain'));
+
+        // Without the fix, this throws: phasync::throw() refuses a fiber that already has one queued.
+        $ws->end(1000);
+
+        expect($ws->isClosed())->toBeTrue();
+    });
+});
