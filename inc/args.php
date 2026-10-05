@@ -107,9 +107,6 @@ return (function () {
         placeholder: 'bytes',
         validator: fn ($value) => \ctype_digit((string) $value) ? null : 'A number of bytes required',
     ));
-    $args->add('bufferResponses', new Flag(
-        '', 'buffer-responses', 'HTTP: send each response body whole (up to 8 MiB) with a Content-Length, instead of streaming it'
-    ));
     $args->add('grace', new Option(
         '', 'grace', 'Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL',
         default: '30',
