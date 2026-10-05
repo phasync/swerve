@@ -10,7 +10,7 @@
   and loads no adapter code. Chosen by `--adapter=<name>`, the application's composer.json, or being
   the only one installed; `swerve` is the built-in adapter (`swerve.php`). See the README, Adapters.
 
-- `Swerve\WebSocket`: RFC 6455 over the `101` connection of a `ClientRequest`, in core. `serve()` runs a
+- `Swerve\WebSocket`: RFC 6455 over the `101` connection of a `ClientRequest`, in core. `from()` runs a
   callback, `accept()` leaves the reading to the handler; messages are pulled (`receive()`, `foreach`) or
   pushed (`$onMessage`), with `$onClose`, subprotocols, an origin allow-list, a `maxMessage` limit,
   server pings, backpressure both ways, and every close code the protocol defines. A drain closes

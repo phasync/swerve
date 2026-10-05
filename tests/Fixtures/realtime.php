@@ -80,7 +80,7 @@ return new RequestHandler((new class {
 
             // An echo as a browser would use it: "bye" ends the callback (1000), "throw" throws (1011)
             case '/websocket':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     foreach ($ws as $message) {
                         if ('bye' === $message) {
                             return;
@@ -109,13 +109,13 @@ return new RequestHandler((new class {
                 return;
             // Subprotocols the server speaks, in its order of preference; tells which was chosen
             case '/websocket-sub':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     $ws->send($ws->subprotocol ?? 'none');
                 }, subprotocols: ['chat.v2', 'chat.v1']);
 
                 return;
             case '/websocket-origin':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     $ws->send('welcome');
                     foreach ($ws as $message) {
                         $ws->send($message);
@@ -124,7 +124,7 @@ return new RequestHandler((new class {
 
                 return;
             case '/websocket-limit':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     foreach ($ws as $message) {
                         $ws->send(\strlen($message) . ' bytes');
                     }
@@ -133,7 +133,7 @@ return new RequestHandler((new class {
                 return;
             // A WebSocket that only sends: what is published to 'news' goes to the browser
             case '/websocket-news':
-                WebSocket::serve($r, function (WebSocket $ws) {
+                WebSocket::from($r, function (WebSocket $ws) {
                     $subscription = Swerve::subscribe('news'); // waits for the master: counted as live once subscribed
                     ++$this->live['news'];
                     try {
@@ -148,7 +148,7 @@ return new RequestHandler((new class {
                 return;
             // A WebSocket that forwards 'feed' and ends itself on a message saying it ends
             case '/websocket-feed':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     foreach (Swerve::subscribe('feed') as $message) {
                         if ($message instanceof \Swerve\Util\SealedObject && ($message->end ?? false)) {
                             return;
@@ -160,7 +160,7 @@ return new RequestHandler((new class {
                 return;
             // A chat: what the browser sends is published (events in, sequential code out); "end" published ends it
             case '/websocket-chat':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     $ws->onMessage->listen(static function (string $data) {
                         Swerve::publish('chat', $data);
                     });
@@ -175,7 +175,7 @@ return new RequestHandler((new class {
                 return;
             // Events: echoes with the binary flag ("t:"/"b:"); "end" calls end(4000, 'server done'), "throw" throws
             case '/websocket-events':
-                WebSocket::serve($r, function (WebSocket $ws) {
+                WebSocket::from($r, function (WebSocket $ws) {
                     $ws->onClose->listen(function (int $code, string $reason) {
                         $this->closes[] = [$code, $reason];
                     });
@@ -194,7 +194,7 @@ return new RequestHandler((new class {
                 return;
             // The first message goes to a once() listener, the rest are pulled
             case '/websocket-once':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     $first = new stdClass();
                     $ws->onMessage->once(static function (string $data) use ($ws, $first) {
                         $ws->send("once:$data");
@@ -209,7 +209,7 @@ return new RequestHandler((new class {
                 return;
             // receive() while $onMessage has listeners
             case '/websocket-mixed':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     $ws->onMessage->listen(static fn () => null);
                     try {
                         $ws->receive();
@@ -221,7 +221,7 @@ return new RequestHandler((new class {
                 return;
             // 100 kB binary messages: sends 1000 of them, as fast as the client takes them
             case '/websocket-flood':
-                WebSocket::serve($r, function (WebSocket $ws) {
+                WebSocket::from($r, function (WebSocket $ws) {
                     $this->sent = 0;
                     $chunk      = \str_repeat('x', 100_000);
                     for ($i = 0; $i < 1000; ++$i) {
@@ -236,7 +236,7 @@ return new RequestHandler((new class {
                 return;
             // Ten coroutines send 30 messages each ("who:n:filler") at once; then the callback returns
             case '/websocket-concurrent':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     $fibers = [];
                     for ($who = 0; $who < 10; ++$who) {
                         $fibers[] = \phasync::go(static function () use ($ws, $who) {
@@ -253,7 +253,7 @@ return new RequestHandler((new class {
                 return;
             // Takes no message for 1.5 s, then counts them: "done" answers how many arrived
             case '/websocket-slow':
-                WebSocket::serve($r, static function (WebSocket $ws) {
+                WebSocket::from($r, static function (WebSocket $ws) {
                     \phasync::sleep(1.5);
                     $n = 0;
                     foreach ($ws as $message) {

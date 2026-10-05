@@ -13,7 +13,7 @@ use phasync\Util\Event;
  *
  * ```php
  * return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
- *     Swerve\WebSocket::serve($request, function (Swerve\WebSocket $ws) {
+ *     Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
  *         $ws->onMessage->listen(function (string $data) {      // inbound: events
  *             Swerve::publish('chat', $data);
  *         });
@@ -27,7 +27,7 @@ use phasync\Util\Event;
  * });
  * ```
  *
- * {@see WebSocket::serve()} checks the handshake (and answers 426, 400 or 403 itself when it is
+ * {@see WebSocket::from()} checks the handshake (and answers 426, 400 or 403 itself when it is
  * not one), then runs the callback in a coroutine of its own. The connection closes when the
  * callback returns (1000) or throws (1011, and swerve logs the exception); {@see WebSocket::end()}
  * closes it early. The connection is read all the time, also when the callback only sends: pings
@@ -63,7 +63,7 @@ final class WebSocket implements \IteratorAggregate
     /** The largest message received by default; a larger one closes the connection with 1009. */
     public const MAX_MESSAGE = 1 << 20;
 
-    /** Messages received and not yet taken by receive() before the reading waits, in serve(). */
+    /** Messages received and not yet taken by receive() before the reading waits, in from(). */
     public const INBOX = 64;
 
     /** Seconds a send() waits for a client that doesn't read; then the client is given up and the connection closed. */
@@ -78,7 +78,7 @@ final class WebSocket implements \IteratorAggregate
     public static float $pingInterval = 15.0;
 
     /**
-     * Called with `(string $data, bool $binary)` for each text or binary message received, in serve().
+     * Called with `(string $data, bool $binary)` for each text or binary message received, in from().
      *
      * The listeners are called one at a time, in the order the messages arrived, in the
      * coroutine that reads the connection: a slow listener holds back the reading. A listener
@@ -133,7 +133,7 @@ final class WebSocket implements \IteratorAggregate
     /** The fiber that waits for the client's bytes, for end() to wake. */
     private ?\Fiber $reading = null;
 
-    /** serve() reads the connection into $inbox; accept() leaves the reading to receive(). */
+    /** from() reads the connection into $inbox; accept() leaves the reading to receive(). */
     private bool $pumped = false;
 
     /** @var list<array{0: string, 1: bool}> */
@@ -157,7 +157,7 @@ final class WebSocket implements \IteratorAggregate
      * 1011 and is logged by swerve; the client leaving cancels it.
      *
      * ```php
-     * WebSocket::serve($request, function (WebSocket $ws) {
+     * WebSocket::from($request, function (WebSocket $ws) {
      *     foreach ($ws as $message) {
      *         $ws->send(strtoupper($message));
      *     }
@@ -169,7 +169,7 @@ final class WebSocket implements \IteratorAggregate
      * @param string[]|null             $origins      see accept()
      * @param int                       $maxMessage   see accept()
      */
-    public static function serve(ClientRequest $request, callable $callback, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): void
+    public static function from(ClientRequest $request, callable $callback, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): void
     {
         if (null !== $ws = self::accept($request, $subprotocols, $origins, $maxMessage)) {
             $ws->pump($callback(...));

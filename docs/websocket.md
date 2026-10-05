@@ -10,7 +10,7 @@ without phasync-ext, and nothing differs.
 
 ```php
 return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    Swerve\WebSocket::serve($request, function (Swerve\WebSocket $ws) {
+    Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
         foreach ($ws as $message) {          // ends when the connection closes
             $ws->send("echo: $message");
         }
@@ -20,7 +20,7 @@ return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
 
 | | |
 |---|---|
-| `WebSocket::serve($request, $callback, subprotocols: [], origins: null, maxMessage: 1 MiB)` | handshake, then the callback in a coroutine of its own; returns when the connection has closed |
+| `WebSocket::from($request, $callback, subprotocols: [], origins: null, maxMessage: 1 MiB)` | handshake, then the callback in a coroutine of its own; returns when the connection has closed |
 | `WebSocket::accept($request, ...)` | the same handshake; returns the `WebSocket` (or `null` after refusing), and the handler reads it itself |
 | `receive(): ?string`, `foreach ($ws as $m)` | the next message, `null` once closed; `isBinary()` tells what the last was |
 | `send($text)`, `sendBinary($data)` | one message; from any coroutine; ignored once closed |
@@ -28,7 +28,7 @@ return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
 | `$onMessage`, `$onClose` | `phasync\Util\Event`s: `(string $data, bool $binary)` and `(int $code, string $reason)` |
 | `$subprotocol`, `isClosed()` | the subprotocol chosen, or `null` |
 
-`serve()` closes the connection when the callback returns (1000) or throws (1011, and swerve logs the
+`from()` closes the connection when the callback returns (1000) or throws (1011, and swerve logs the
 exception). The connection is read all the time, also when the callback only sends: a client that leaves cancels
 the callback, so a loop forwarding a subscription ends with its client.
 
@@ -36,7 +36,7 @@ Messages come in two styles that do not mix: `receive()` and `foreach` pull them
 one at a time in arrival order. `receive()` throws `LogicException` while `$onMessage` has listeners.
 
 ```php
-Swerve\WebSocket::serve($request, function (Swerve\WebSocket $ws) {
+Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
     $ws->onMessage->listen(fn (string $data) => Swerve::publish('chat', $data));   // events in
     foreach (Swerve::subscribe('chat') as $out) {                                  // sequential code out
         $ws->send($out);
@@ -123,10 +123,10 @@ wire. `send()` throws `ValueError` for text that is not UTF-8; use `sendBinary()
 - **Backpressure out.** `send()` waits for a client that reads slowly, and the worker buffers nothing for it. A
   client that reads nothing for `WRITE_TIMEOUT` (30 s) is given up: the connection is closed without a close frame.
 - **Backpressure in.** A client that sends faster than the application takes is not read from, so TCP holds it
-  back. With `foreach` or `receive()` under `serve()`, up to `INBOX` (64) messages wait, then the reading
+  back. With `foreach` or `receive()` under `from()`, up to `INBOX` (64) messages wait, then the reading
   stops; with `$onMessage`, the reading waits for the listener; under `accept()`, nothing is read between
   `receive()` calls. Memory stays at about `maxMessage` plus `INBOX` messages.
-- **Cancellation.** When the connection ends under `serve()` (the client left or reset, or a drain), a callback
+- **Cancellation.** When the connection ends under `from()` (the client left or reset, or a drain), a callback
   still running is cancelled, and its `CancelledException` is not an error. A reset ends the callback without a
   line in the log; `$onClose` fires once with 1006.
 - **Drain.** A shutdown or reload closes every open WebSocket with 1001, so the process exits within its grace
@@ -145,7 +145,7 @@ are not required.
 
 | | Default | Where |
 |---|---|---|
-| Largest message | 1 MiB | `maxMessage:` of `serve()` and `accept()`, per socket |
+| Largest message | 1 MiB | `maxMessage:` of `from()` and `accept()`, per socket |
 | Messages waiting in the pull style | 64 | `WebSocket::INBOX` |
 | Control frame | 125 bytes | the protocol |
 | Close reason | 123 bytes | the protocol |

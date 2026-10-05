@@ -81,7 +81,7 @@ spoken over it with `read()` and `write()`; a client that stops reading is dropp
 backpressure. Its contract is in [WebSockets and Server-Sent Events](websocket.md).
 
 ```php
-Swerve\WebSocket::serve($request, function (Swerve\WebSocket $ws) {
+Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
     foreach ($ws as $message) {
         $ws->send($message);
     }
