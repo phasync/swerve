@@ -66,6 +66,14 @@ while ('' !== ($piece = $request->read())) {
 - `Expect: 100-continue` is answered when you first read the body, so a client only sends a body
   you actually want.
 
+For a framework adapter (swerve-psr15, Symfony, Tether), `Swerve\Psr\RequestBody` is this body as a
+PSR-7 stream, and `Swerve\Psr\FormBody` is the PHP-compatible form data parsed from it on demand
+(`fields()`, `files()`, `input()`): a POST whose Content-Type is `application/x-www-form-urlencoded`
+or `multipart/form-data` is parsed under PHP's own `php.ini` limits (`post_max_size`,
+`upload_max_filesize`, `max_file_uploads`, `max_input_vars`, ...), exactly as `$_POST` and `$_FILES`
+would be. Every adapter builds the same request body the same way; applications don't use these
+directly.
+
 ## The response head
 
 `sendResponseHeaders(int $status, array $headers = [])`, with header values a string or a list:

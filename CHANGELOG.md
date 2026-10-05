@@ -4,6 +4,10 @@
 
 ### Added
 
+- `Swerve\Psr\RequestBody` and `Swerve\Psr\FormBody`, moved here from swerve-psr15 so every framework
+  adapter (swerve-psr15, Symfony, Tether) builds a `ClientRequest`'s body and parses its form the same
+  way: a PSR-7 stream over the connection, and the fields/files PHP would put in `$_POST`/`$_FILES`,
+  under the same `php.ini` limits. swerve-psr15 now uses these instead of its own copies.
 - Adapter discovery: an installed package that declares `"extra": {"swerve": {"adapter": "name", "entry": "Function\\name"}}`
   provides the entry point in place of `swerve.php`: each worker calls the function with the application
   directory, and it returns a `Swerve\RequestHandler`. The master reads `vendor/composer/installed.json`
