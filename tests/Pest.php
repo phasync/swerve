@@ -375,7 +375,7 @@ function ws_read($conn): ?array
 }
 
 /**
- * Serve requests in this process with a HttpConnection over a SEQPACKET socket pair, so
+ * Serve requests in this process with a HttpConnection (the handler takes a Swerve\ClientRequest) over a SEQPACKET socket pair, so
  * each of the server's writes arrives as one packet: the packets of the responses, up to the
  * end of the connection. Each of $requests is sent as one packet, and a read shorter than a
  * packet loses the rest of it, so a test sees whether the server reads a packet whole.
@@ -385,14 +385,14 @@ function ws_read($conn): ?array
  *
  * @return string[]
  */
-function native_serve_packets(Psr\Http\Server\RequestHandlerInterface $handler, string|array $requests, bool $close = false): array
+function native_serve_packets(Closure $handler, string|array $requests, bool $close = false): array
 {
     return phasync::run(function () use ($handler, $requests, $close) {
         [$server, $client] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_SEQPACKET, 0);
         stream_set_blocking($server, false);
         stream_set_blocking($client, false);
         stream_set_read_buffer($client, 0);
-        $connection = new Swerve\Http\HttpConnection($server, '127.0.0.1:1', new Swerve\Dispatcher($handler, new Psr\Log\NullLogger()), new Psr\Log\NullLogger());
+        $connection = new Swerve\Http\HttpConnection(new phasync\Net\StreamDuplex($server, '127.0.0.1:1'), $handler, new Psr\Log\NullLogger(), null);
         phasync::go($connection->serve(...));
 
         foreach ((array) $requests as $packet) {

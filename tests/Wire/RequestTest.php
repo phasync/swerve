@@ -13,7 +13,7 @@ afterEach(function () {
     native_stop($this->master);
 });
 
-test('request headers reach the application under the names the client wrote, repeated ones as separate values', function () {
+test('request headers reach the application in lower case, repeated ones as separate values', function () {
     $conn = native_connect($this->addr);
     fwrite($conn, "GET /request HTTP/1.1\r\nHost: t\r\nX-Multi: a\r\nX-Other: o\r\nx-multi: b\r\nX-Utf: h\xc3\xa9llo\r\n\r\n");
     $seen = json_decode(native_read_response($conn)['body'], true)['headers'];
@@ -23,7 +23,7 @@ test('request headers reach the application under the names the client wrote, re
     expect($byLower['x-other'])->toBe(['o']);
     expect($byLower['x-utf'])->toBe(["h\u{e9}llo"]);
     expect($byLower['host'])->toBe(['t']);
-    expect(array_keys($seen))->toContain('X-Other'); // the name as it was sent
+    expect(array_keys($seen))->toContain('x-other');
 });
 
 test('Connection and Transfer-Encoding values are matched without regard to case', function () {

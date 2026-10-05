@@ -4,10 +4,8 @@
  * An application that starts a coroutine as it loads, running for the worker's life.
  */
 
-use phasync\Psr\Response;
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\ClientRequest;
+use Swerve\RequestHandler;
 
 $ticks = 0;
 phasync::go(static function () use (&$ticks) {
@@ -17,13 +15,7 @@ phasync::go(static function () use (&$ticks) {
     }
 });
 
-return new class($ticks) implements RequestHandlerInterface {
-    public function __construct(private int &$ticks)
-    {
-    }
-
-    public function handle(ServerRequestInterface $request): ResponseInterface
-    {
-        return new Response(200, [], (string) $this->ticks);
-    }
-};
+return new RequestHandler(static function (ClientRequest $r) use (&$ticks) {
+    $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen((string) $ticks)]);
+    $r->write((string) $ticks);
+});

@@ -8,7 +8,6 @@
  * processes are killed by process group afterwards (see Pest.php).
  */
 
-use phasync\Psr\Response;
 
 /**
  * A fresh directory for the fixture's SWERVE_TEST_DIR, with version.php returning $version.
@@ -884,17 +883,15 @@ test('SIGTERM is acted on at once, not at the next heartbeat', function () {
 });
 
 test('drain answers a request that reached an idle keep-alive connection before the drain', function () {
-    $handler = new class implements Psr\Http\Server\RequestHandlerInterface {
-        public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface
-        {
-            return new Response(200, [], 'Hello');
-        }
+    $handler = static function (Swerve\ClientRequest $r) {
+        $r->sendResponseHeaders(200, ['Content-Length' => '5']);
+        $r->write('Hello');
     };
     [$first, $rest] = phasync::run(function () use ($handler) {
         [$server, $client] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
         stream_set_blocking($server, false);
         stream_set_blocking($client, false);
-        $connection = new Swerve\Http\HttpConnection($server, '127.0.0.1:1', new Swerve\Dispatcher($handler, new Psr\Log\NullLogger()), new Psr\Log\NullLogger());
+        $connection = new Swerve\Http\HttpConnection(new phasync\Net\StreamDuplex($server, '127.0.0.1:1'), $handler, new Psr\Log\NullLogger(), null);
         phasync::go($connection->serve(...));
         fwrite($client, "GET /1 HTTP/1.1\r\nHost: test\r\n\r\n");
         phasync::sleep(0.05);

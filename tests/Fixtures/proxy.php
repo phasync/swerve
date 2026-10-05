@@ -5,21 +5,17 @@
  * through a proxy shows them.
  */
 
-use phasync\Psr\Response;
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\ClientRequest;
+use Swerve\RequestHandler;
 
-return new class implements RequestHandlerInterface {
-    public function handle(ServerRequestInterface $request): ResponseInterface
-    {
-        $server = $request->getServerParams();
-
-        return new Response(200, ['Content-Type' => 'application/json'], \json_encode([
-            'remote' => $server['REMOTE_ADDR'],
-            'https'  => $server['HTTPS'] ?? null,
-            'uri'    => (string) $request->getUri(),
-            'host'   => $request->getHeaderLine('Host'),
-        ]));
-    }
-};
+return new RequestHandler(static function (ClientRequest $r) {
+    $host = $r->getRequestHeaders()['host'][0];
+    $body = \json_encode([
+        'remote' => \trim(\substr($r->peer(), 0, \strrpos($r->peer(), ':')), '[]'),
+        'https'  => 'https' === $r->getScheme() ? 'on' : null,
+        'uri'    => $r->getScheme() . '://' . $host . $r->getTarget(),
+        'host'   => $host,
+    ]);
+    $r->sendResponseHeaders(200, ['Content-Type' => 'application/json', 'Content-Length' => (string) \strlen($body)]);
+    $r->write($body);
+});

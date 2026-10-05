@@ -71,7 +71,7 @@ test('a Date header from the application is sent as it is, and no other', functi
 
 test('an error response from swerve itself carries a Date', function () {
     expect(preg_grep('/^date:/i', wire_head($this->addr, "NONSENSE\r\n\r\n")))->toHaveCount(1);
-})->skip('bug: error responses written by swerve itself (400, 408, 431, 500 ...) have no Date header, which RFC 9110 6.6.1 requires of an origin server with a clock');
+});
 
 test('an error response from swerve itself has its reason phrase, no body, and says Connection: close', function () {
     $cases = [

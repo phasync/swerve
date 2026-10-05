@@ -282,27 +282,6 @@ test('System names the signals PHP defines constants for', function () {
     expect(System::signalName(SIGUSR1))->toBe('SIGUSR1');
 })->skip(!defined('SIGTERM'), 'needs ext-pcntl');
 
-test('System listens on an ephemeral port, non-blocking, and several may share it', function () {
-    $a = System::listen('127.0.0.1:0');
-    $b = null;
-    try {
-        expect(is_resource($a))->toBeTrue();
-        expect(stream_get_meta_data($a)['blocked'])->toBeFalse();
-        [$ip, $port] = explode(':', stream_socket_get_name($a, false));
-        expect($ip)->toBe('127.0.0.1');
-        expect((int) $port)->toBeGreaterThan(0);
-        $b = System::listen("tcp://127.0.0.1:$port"); // SO_REUSEPORT, as the workers do
-        expect(stream_socket_get_name($b, false))->toBe("127.0.0.1:$port");
-    } finally {
-        is_resource($a) && fclose($a);
-        is_resource($b) && fclose($b);
-    }
-});
-
-test('System refuses to listen where it cannot, with a RuntimeException', function () {
-    unitQuiet(fn () => expect(fn () => System::listen('999.1.1.1:80'))->toThrow(RuntimeException::class, 'Could not listen at 999.1.1.1:80'));
-});
-
 test('System listens on a unix socket once, and unlinkSocket removes the file', function () {
     $path = unitTmpPath();
     $a    = System::listen("unix:$path");

@@ -5,11 +5,9 @@
  * coroutines started here that have not waited yet. /report answers what each of them saw.
  */
 
-use phasync\Psr\Response;
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Server\RequestHandlerInterface;
+use Swerve\ClientRequest;
 use Swerve\OrderedChannel;
+use Swerve\RequestHandler;
 use Swerve\Swerve;
 
 $report = new ArrayObject();
@@ -38,19 +36,13 @@ phasync::service(static function () use ($attempt) {
 });
 $attempt('load', static fn () => Swerve::cache()->get('early'));
 
-return new class($report) implements RequestHandlerInterface {
-    public function __construct(private ArrayObject $report)
-    {
+return new RequestHandler(static function (ClientRequest $r) use ($report) {
+    for ($waited = 0; \count($report) < 5 && $waited < 200; ++$waited) {
+        phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
     }
-
-    public function handle(ServerRequestInterface $request): ResponseInterface
-    {
-        for ($waited = 0; \count($this->report) < 5 && $waited < 200; ++$waited) {
-            phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
-        }
-        $report = $this->report->getArrayCopy();
-        \ksort($report);
-
-        return new Response(200, [], \json_encode($report));
-    }
-};
+    $report = $report->getArrayCopy();
+    \ksort($report);
+    $body = \json_encode($report);
+    $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen($body)]);
+    $r->write($body);
+});

@@ -59,7 +59,7 @@ test('Server-Sent Events to a client that reads a little at a time do not stall 
 test('a WebSocket whose client sends and never reads does not stall the worker', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);
     try {
-        $conn = ws_connect($addr, '/websocket');
+        $conn = ws_connect($addr, '/ws');
         $text = str_repeat('x', 60_000);
         stream_set_timeout($conn, 0, 300_000);
         set_error_handler(static fn (): bool => true); // the last send times out part way
@@ -80,7 +80,7 @@ test('a WebSocket whose client sends and never reads does not stall the worker',
 test('a WebSocket frame sent a few bytes at a time does not stall the worker', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);
     try {
-        $conn = ws_connect($addr, '/websocket');
+        $conn = ws_connect($addr, '/ws');
         $mask = "\x01\x02\x03\x04";
         $frame = "\x81" . chr(0x80 | 100) . $mask . (str_repeat('y', 100) ^ str_repeat($mask, 25));
         fwrite($conn, substr($frame, 0, 10));
