@@ -14,7 +14,6 @@ use Swerve\Cache;
 use Swerve\CLI\Address;
 use Swerve\CLI\Args;
 use Swerve\Dispatcher;
-use Swerve\FastCGI\FastCGIServer;
 use Swerve\Http\HttpServer;
 use Swerve\Http\TrustedProxies;
 use Swerve\StaticFiles;
@@ -106,24 +105,12 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     $http      = \array_map(Address::normalize(...), $args->http);
-    $fastcgi   = \array_map(Address::normalize(...), $args->fastcgi);
-    $addresses = $fastcgi ?: $http;
+    $addresses = $http;
     if (\count(\array_unique($addresses)) < \count($addresses)) {
         $twice = \implode(' ', \array_unique(\array_diff_assoc($addresses, \array_unique($addresses))));
         \fwrite(\STDERR, "swerve: $twice more than once\n");
         exit(2);
     }
-    if ($fastcgi) {
-        if (!$args->isDefault('http')) {
-            \fwrite(\STDERR, "swerve: Can't combine --fastcgi with --http\n");
-            exit(2);
-        }
-        if ($args->bufferResponses || !$args->isDefault('maxBody') || '' !== $args->public || $args->trustedProxy) {
-            \fwrite(\STDERR, "swerve: --buffer-responses, --max-body, --public and --trusted-proxy only apply to --http\n");
-            exit(2);
-        }
-    }
-
     /*
      * Argument verbosity. Without -v: notices and up, so that reloads, recycles, drained
      * workers and shutdown are logged.
@@ -139,8 +126,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $workerCount = 'auto' === $args->workers ? System::getCPUCount() : (int) $args->workers;
     // The column after the time: a worker's slot number, right-aligned; blank for the master
     $source = \str_repeat(' ', \strlen((string) ($workerCount - 1)));
-    // A line per request, in HTTP mode: in FastCGI mode the web server in front logs them
-    $access = !$args->noAccessLog && !$fastcgi;
+    $access = !$args->noAccessLog;
 
     /*
      * Logger Interface. With --log, PHP's own errors go to the file too: after a fatal error
@@ -206,7 +192,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         (float) $args->watchdog,
         $args->watch ? \dirname($swerveFile) : null,
         \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(), $args->swervefile,
-            \implode(', ', \array_map(static fn ($a) => ($fastcgi ? 'fastcgi' : 'http') . (\str_starts_with($a, 'unix:') ? '+unix://' . \substr($a, 5) : "://$a"), $addresses)),
+            \implode(', ', \array_map(static fn ($a) => 'http' . (\str_starts_with($a, 'unix:') ? '+unix://' . \substr($a, 5) : "://$a"), $addresses)),
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
         (int) \ini_parse_quantity($args->cacheSize),
         $extInComposer,
@@ -244,7 +230,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         'PHP_SELF'        => '/' . \basename($swerveFile),
     ]);
     $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
-    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $fastcgi, $files, $proxies) {
+    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $files, $proxies) {
         try {
             Cache::$loader = phasync::getFiber();
             $app           = require $swerveFile;
@@ -296,17 +282,12 @@ foreach ([\STDOUT, \STDERR] as $out) {
         };
         $dispatcher          = new Dispatcher($handler, $logger);
 
-        /*
-         * HTTP: every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
-         * kernel spreads new connections over them. FastCGI: for a web server in front, such as
-         * nginx, which speaks FastCGI to the workers.
-         */
+        // Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
+        // kernel spreads new connections over them
         $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
         $servers = [];
-        foreach ($fastcgi ?: $http as $address) {
-            $server = $fastcgi
-                ? new FastCGIServer(\str_starts_with($address, 'unix:') ? $address : "tcp://$address", $dispatcher, $logger)
-                : new HttpServer($address, $dispatcher, $logger, (bool) $args->bufferResponses, $maxBody, $proxies);
+        foreach ($http as $address) {
+            $server = new HttpServer($address, $dispatcher, $logger, (bool) $args->bufferResponses, $maxBody, $proxies);
             try {
                 $server->listen();
             } catch (\Throwable $e) {

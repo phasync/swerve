@@ -3,7 +3,7 @@
 namespace Swerve;
 
 /**
- * A protocol server, such as HTTP/1.1 (`--http`) or FastCGI (`--fastcgi`).
+ * A protocol server, such as HTTP/1.1 (`--http`).
  *
  * It turns what arrives on its listener into PSR-7 requests, gives each to the
  * {@see Dispatcher}, and sends the response back in its protocol. A worker calls `listen()`, then

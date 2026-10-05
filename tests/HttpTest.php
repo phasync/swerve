@@ -1216,13 +1216,13 @@ test('accepted connections have TCP_NODELAY and keepalive probing (15 s idle, 15
     fclose($client);
 })->skip(!Swerve\Util\System::hasSockets(), 'PHP streams give accepted sockets no keepalive');
 
-test('on a unix: address every worker accepts from one socket, a reload keeps serving, and stopping removes the file', function (string $mode) {
+test('on a unix: address every worker accepts from one socket, a reload keeps serving, and stopping removes the file', function () {
     $dir  = temp_path(true);
     $addr = "unix:$dir/s.sock";
-    [$process, , $log, $pid] = swerve_start(['--grace=3'], 3, mode: $mode, addr: $addr);
+    [$process, , $log, $pid] = swerve_start(['--grace=3'], 3, addr: $addr);
 
     expect(decoct(fileperms("$dir/s.sock") & 0777))->toBe('666');
-    $get = fn () => 'http' === $mode ? probe($addr, '/pid') : fcgi_get($addr, '/pid')['body'] ?? null;
+    $get = fn () => probe($addr, '/pid');
     $seen = [];
     $deadline = microtime(true) + 5;
     while (count($seen) < 3 && microtime(true) < $deadline) {
@@ -1246,18 +1246,18 @@ test('on a unix: address every worker accepts from one socket, a reload keeps se
     [$code] = swerve_wait($process, 10);
     expect($code)->toBe(0);
     expect(file_exists("$dir/s.sock"))->toBeFalse();
-})->with(['http', 'fastcgi']);
+});
 
-test('on a unix: address the workers drain at once on a shutdown, not at the end of the grace period', function (string $mode) {
+test('on a unix: address the workers drain at once on a shutdown, not at the end of the grace period', function () {
     $dir = temp_path(true);
-    [$process] = swerve_start(['--grace=10'], 2, mode: $mode, addr: "unix:$dir/s.sock");
+    [$process] = swerve_start(['--grace=10'], 2, addr: "unix:$dir/s.sock");
 
     $start = microtime(true);
     swerve_signal($process, SIGTERM);
     [$code] = swerve_wait($process, 15);
     expect($code)->toBe(0);
     expect(microtime(true) - $start)->toBeLessThan(3.0);
-})->with(['http', 'fastcgi']);
+});
 
 test('a unix: address replaces a stale socket file, and is refused where something listens or a file is in the way', function () {
     $dir  = temp_path(true);

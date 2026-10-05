@@ -778,7 +778,7 @@ test('a 101 goes out at once, then both directions are the raw connection, beyon
         expect(array_intersect_key($head['headers'], ['content-length' => 1, 'transfer-encoding' => 1]))->toBe([]);
 
         fwrite($conn, 'hello');
-        expect(fcgi_read_exactly($conn, 5))->toBe('hello');
+        expect(read_exactly($conn, 5))->toBe('hello');
 
         $data         = random_bytes(3 * 102400); // far past --max-body
         [$received]   = duplex($conn, $data, strlen($data));
@@ -793,7 +793,7 @@ test('a 101 goes out at once, then both directions are the raw connection, beyon
         $conn = native_connect($addr);
         fwrite($conn, "GET /upgrade-echo HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: echo\r\n\r\nearly");
         expect(native_read_head($conn)['status'])->toBe(101);
-        expect(fcgi_read_exactly($conn, 5))->toBe('early');
+        expect(read_exactly($conn, 5))->toBe('early');
     } finally {
         native_stop($master);
     }
@@ -825,7 +825,7 @@ test('a tunnel outlives the HTTP timeouts', function () {
         sleep(11);
 
         fwrite($conn, 'body5hello');
-        expect(fcgi_read_exactly($conn, 10))->toBe('BODY5HELLO');
+        expect(read_exactly($conn, 10))->toBe('BODY5HELLO');
     } finally {
         native_stop($master);
     }
@@ -985,7 +985,7 @@ test('many tunnels at once in one worker, which still answers requests meanwhile
         expect(probe($addr, '/hello'))->toBe('Hello');
         expect(microtime(true) - $start)->toBeLessThan(0.5);
         foreach ($conns as $i => $conn) {
-            expect(fcgi_read_exactly($conn, 6))->toBe(sprintf("%03d:%d\n", $i, $round));
+            expect(read_exactly($conn, 6))->toBe(sprintf("%03d:%d\n", $i, $round));
         }
     }
     foreach ($conns as $conn) {

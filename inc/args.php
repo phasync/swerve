@@ -31,12 +31,6 @@ return (function () {
         validator: $addr_validator,
         multiple: true
     ));
-    $args->add('fastcgi', new Option(
-        '', 'fastcgi', 'Serve FastCGI here instead, behind nginx or the like; the same forms as --http',
-        placeholder: 'address',
-        validator: $addr_validator,
-        multiple: true
-    ));
     $args->add('public', new Option(
         '', 'public', 'HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application',
         placeholder: 'dir',

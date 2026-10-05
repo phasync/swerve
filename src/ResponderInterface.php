@@ -8,7 +8,7 @@ use Psr\Http\Message\ServerRequestInterface;
 /**
  * What sends the application's response in the protocol the request arrived in.
  *
- * It is the connection (HTTP) or the request (FastCGI) of a server. {@see Dispatcher::dispatch()}
+ * It is the connection of a server. {@see Dispatcher::dispatch()}
  * calls it with the application's response.
  *
  * ```php

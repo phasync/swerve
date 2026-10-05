@@ -138,13 +138,10 @@ test('a relative --public is the directory where swerve started, also when the a
     }
 });
 
-test('--public needs a directory, and HTTP', function () {
+test('--public needs a directory', function () {
     $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
     exec("$swerve --public=/no/such/dir 2>&1", $out, $code);
     expect([$code, $out[0]])->toBe([2, 'swerve: Illegal value for option: --public: /no/such/dir is not a directory']);
-    $out = [];
-    exec("$swerve --public=/tmp --fastcgi=9000 " . escapeshellarg(__DIR__ . '/Fixtures/app.php') . ' 2>&1', $out, $code);
-    expect([$code, $out[0]])->toBe([2, 'swerve: --buffer-responses, --max-body, --public and --trusted-proxy only apply to --http']);
 });
 
 test('a PHP file in the public directory is passed to the application, never sent as source', function () {

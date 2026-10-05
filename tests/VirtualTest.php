@@ -159,31 +159,6 @@ test('Swerve::virtualize(): the application\'s Content-Length, HEAD, a redirect 
     expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
 })->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
 
-test('Swerve::virtualize() over FastCGI: echo, status, headers and the body become the response, several requests multiplexed on one connection', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1, fixture: 'virtual.php', mode: 'fastcgi', php: Virtual::available() ? [] : ['-d', 'extension=' . getenv('PHASYNC_EXT')]);
-    try {
-        $conn  = fcgi_connect($addr);
-        $start = microtime(true);
-        fwrite($conn, fcgi_request(1, 'POST', '/virtual?ms=300', 'hello') . fcgi_request(2, 'GET', '/virtual?ms=300&exit=1') . fcgi_request(3, 'GET', '/virtual-length') . fcgi_request(4, 'GET', '/nowhere'));
-        $responses = fcgi_read_responses($conn, [1, 2, 3, 4]);
-
-        expect(microtime(true) - $start)->toBeLessThan(0.55); // the two waits overlapped
-        expect($responses[1]['status'])->toBe(201);
-        expect($responses[1]['headers']['x-virtual'])->toBe('yes');
-        expect($responses[1]['body'])->toStartWith('n=1 body=hello sid=')->toEndWith("last\n");
-        expect($responses[2]['body'])->toStartWith('n=1 body= sid=')->not->toEndWith("last\n");
-        expect($responses[3]['body'])->toBe('hello');
-        expect($responses[4]['status'])->toBe(404);
-        expect($responses[4]['body'])->toBe('Not found');
-        foreach ($responses as $response) {
-            expect([$response['appStatus'], $response['protocolStatus']])->toBe([0, 0]);
-        }
-    } finally {
-        native_stop($process);
-    }
-    expect(log_count($log, '/(ERROR|CRITICAL|Unhandled)/i'))->toBe(0, file_get_contents($log));
-})->skip(fn () => !Virtual::available() && !getenv('PHASYNC_EXT'), 'needs PHASYNC_EXT=/path/to/phasync.so');
-
 test('Swerve::virtualize(): a form is read by PHP, and the PSR request has the same $_POST and uploaded files; other bodies stay in the PSR request', function () {
     [$process, $addr, $log] = virtual_start();
     try {

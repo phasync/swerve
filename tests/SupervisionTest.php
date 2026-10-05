@@ -60,12 +60,12 @@ function expect_log_order(string $log, array $regexes): void
  * Wait until 10 answers in a row are $version: a replaced worker serves on until it notices
  * the master's SIGTERM, a tick after the reload completed.
  */
-function wait_version(string $addr, string $version, float $timeout = 3, bool $fastcgi = false): void
+function wait_version(string $addr, string $version, float $timeout = 3): void
 {
     $deadline = microtime(true) + $timeout;
     for ($same = 0; $same < 10;) {
         expect(microtime(true))->toBeLessThan($deadline, "Not all answers were $version within $timeout s");
-        $answer = $fastcgi ? fcgi_get($addr, '/version')['body'] ?? null : probe($addr, '/version');
+        $answer = probe($addr, '/version');
         $same   = $answer === $version ? $same + 1 : 0;
     }
 }
@@ -258,32 +258,6 @@ test('a port taken by another program stops the master with an error', function 
     expect(file_get_contents($log))->toContain('failed to start');
 });
 
-test('FastCGI: an application exception answers 500, and the connection serves on', function () {
-    [$process, $addr] = swerve_start(mode: 'fastcgi');
-    $conn             = fcgi_connect($addr);
-    stream_set_timeout($conn, 1);
-    fwrite($conn, fcgi_request(1, 'GET', '/throw'));
-    $response = fcgi_read_responses($conn, [1])[1];
-    expect($response['status'])->toBe(500);
-    expect($response['protocolStatus'])->toBe(0);
-
-    fwrite($conn, fcgi_request(2, 'GET', '/hello'));
-    expect(fcgi_read_responses($conn, [2])[2]['body'])->toBe('Hello');
-    native_stop($process);
-});
-
-test('FastCGI without the cluster: an application exception answers 500', function () {
-    [$worker, $addr] = fcgi_start_worker();
-    try {
-        $conn = fcgi_connect($addr);
-        stream_set_timeout($conn, 1);
-        fwrite($conn, fcgi_request(1, 'GET', '/throw'));
-        expect(fcgi_read_responses($conn, [1])[1]['status'])->toBe(500);
-    } finally {
-        fcgi_stop_worker($worker);
-    }
-});
-
 test('a worker stuck when the master dies ends itself, instead of holding the port as an orphan', function (string $path) {
     // It checks a second after the watchdog's timeout, see Worker's SIGALRM handler
     [$process, $addr, $log, $pid] = swerve_start(['--watchdog=2']);
@@ -405,27 +379,6 @@ test('an application that exits 0 while loading fails to start with a non-zero e
     expect(group_gone($pid))->toBeTrue();
 });
 
-test('FastCGI: exit() in a request is logged with its exit code, without PHP errors', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1, mode: 'fastcgi');
-    for ($round = 1; $round <= 3; ++$round) {
-        // Each on a connection of its own with FCGI_KEEP_CONN, closed by the client, as cgi-fcgi does
-        foreach (['/pid', '/hello', '/pid', '/exit?code=5'] as $path) {
-            $conn = fcgi_connect($addr);
-            fwrite($conn, fcgi_request(1, 'GET', $path));
-            '/exit?code=5' === $path ? expect(fcgi_read_record($conn))->toBeNull() : fcgi_read_responses($conn, [1]);
-            fclose($conn);
-        }
-        $deadline = microtime(true) + 3;
-        while (log_count($log, '/died: /') < $round || null === fcgi_get($addr, '/hello', 0.3)) {
-            expect(microtime(true))->toBeLessThan($deadline, file_get_contents($log));
-            usleep(20_000);
-        }
-    }
-    expect(log_count($log, '/died: exit 5, /'))->toBe(3);
-    expect(file_get_contents($log))->not->toContain('UNHANDLED')->not->toContain('Fatal error')->not->toContain('exit 255');
-    native_stop($process);
-});
-
 test('an exception in a background coroutine of the application is logged', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);
     expect(probe($addr, '/bgthrow'))->toBe('ok');
@@ -493,29 +446,6 @@ test('a background job of the application keeps no listener after its worker die
     expect(@stream_socket_server("tcp://$addr"))->not->toBeFalse();
 })->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
 
-test('FastCGI: a background job of the application keeps no listener after a reload, nor after shutdown', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1, mode: 'fastcgi');
-    expect(fcgi_get($addr, '/spawn?s=30')['body'])->toBe('spawned');
-    swerve_signal($process, SIGHUP);
-    log_wait($log, '/exited after draining/', 4);
-    for ($i = 0; $i < 10; ++$i) {
-        expect(fcgi_get($addr, '/hello'))->not->toBeNull();
-    }
-    native_stop($process);
-    expect(@stream_socket_server("tcp://$addr"))->not->toBeFalse();
-});
-
-test('FastCGI: a drain that runs out of time ends the worker without a PHP fatal error', function () {
-    [$process, $addr, $log] = swerve_start(['--grace=2'], workers: 1, mode: 'fastcgi');
-    $conn                   = fcgi_connect($addr);
-    fwrite($conn, fcgi_request(1, 'GET', '/sleep?ms=10000&id=a'));
-    usleep(300_000);
-    swerve_signal($process, SIGTERM);
-    swerve_wait($process, 4);
-
-    expect(file_get_contents($log))->toContain('Drain deadline reached')->not->toContain('Fatal error')->not->toContain('UNHANDLED')->not->toContain('exit 255');
-});
-
 test('an application exception is logged with its request', function () {
     [$process, $addr, $log] = swerve_start();
     probe($addr, '/throw?x=1');
@@ -524,21 +454,13 @@ test('an application exception is logged with its request', function () {
     native_stop($process);
 });
 
-test('FastCGI: an application exception is logged with its request', function () {
-    [$process, $addr, $log] = swerve_start(mode: 'fastcgi');
-    fcgi_get($addr, '/throw?x=1');
-    log_wait($log, '/RuntimeException: boom/');
-    expect(file_get_contents($log))->toContain('GET /throw?x=1');
-    native_stop($process);
-});
-
-test('a log that can\'t be written, under an application error handler that throws, neither ends the worker nor cuts its drain short', function (string $mode) {
+test('a log that can\'t be written, under an application error handler that throws, neither ends the worker nor cuts its drain short', function () {
     // /dev/full fails every write as a full disk does
     $addr     = free_address();
-    $process  = swerve_spawn(["--$mode=$addr", '--workers=1', '--grace=5', '--log=/dev/full', '-vv'], 'strict.php');
-    $get      = static fn (string $path) => 'http' === $mode ? native_read_response(send_get($addr, $path)) : fcgi_get($addr, $path, 3);
+    $process  = swerve_spawn(["--http=$addr", '--workers=1', '--grace=5', '--log=/dev/full', '-vv'], 'strict.php');
+    $get      = static fn (string $path) => native_read_response(send_get($addr, $path));
     $deadline = microtime(true) + 5;
-    while ('Hello' !== ('http' === $mode ? probe($addr, '/hello') : fcgi_get($addr, '/hello')['body'] ?? null)) {
+    while ('Hello' !== probe($addr, '/hello')) {
         expect(proc_get_status($process)['running'])->toBeTrue();
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(20_000);
@@ -547,18 +469,13 @@ test('a log that can\'t be written, under an application error handler that thro
     expect($get('/throw')['status'] ?? null)->toBe(500);
     expect($get('/pid')['body'])->toBe($pid);
 
-    if ('http' === $mode) {
-        $conn = send_get($addr, '/sleep?ms=1000&id=a');
-    } else {
-        $conn = fcgi_connect($addr);
-        fwrite($conn, fcgi_request(1, 'GET', '/sleep?ms=1000&id=a'));
-    }
+    $conn = send_get($addr, '/sleep?ms=1000&id=a');
     usleep(300_000);
     swerve_signal($process, SIGTERM);
-    expect('http' === $mode ? native_read_response($conn)['body'] : fcgi_read_responses($conn, [1])[1]['body'])->toBe('slept a');
+    expect(native_read_response($conn)['body'])->toBe('slept a');
     [$code] = swerve_wait($process, 3);
     expect($code)->toBe(0);
-})->with(['http', 'fastcgi']);
+});
 
 test('a PHP fatal error is logged by its worker, with the requests it had in flight', function () {
     [$process, $addr, $log] = swerve_start(php: ['-d', 'memory_limit=32M']);
@@ -611,19 +528,6 @@ test('an application exit(255) is not logged as a PHP fatal error', function () 
     expect(probe($addr, '/exit?code=255'))->toBeNull();
     $match = log_wait($log, '/died: exit 255(.*)/');
     expect($match[0][1])->toStartWith(', up ');
-    native_stop($process);
-});
-
-test('FastCGI: a protocol error is logged once, with the peer, and without a PHP warning', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1, mode: 'fastcgi');
-    $conn                   = fcgi_connect($addr);
-    fwrite($conn, fcgi_record(99, 1));
-    log_wait($log, '/unknown request id 1/');
-    usleep(200_000);
-
-    expect(log_count($log, '/ProtocolErrorException/'))->toBe(1);
-    expect(file_get_contents($log))->toContain('type 99 with unknown request id 1')->toContain(stream_socket_get_name($conn, false))->not->toContain('Undefined array key');
-    expect(fcgi_get($addr, '/hello')['body'])->toBe('Hello');
     native_stop($process);
 });
 
@@ -946,22 +850,6 @@ test('workers drain and exit when the master is killed', function () {
     proc_close($process);
 });
 
-test('FastCGI: SIGTERM finishes multiplexed requests in flight, then closes the connection', function () {
-    [$process, $addr] = swerve_start(mode: 'fastcgi');
-    $conn             = fcgi_connect($addr);
-    fwrite($conn, fcgi_request(1, 'GET', '/sleep?ms=1000&id=1') . fcgi_request(2, 'GET', '/sleep?ms=1000&id=2'));
-    usleep(200_000);
-    $start = microtime(true);
-    swerve_signal($process, SIGTERM);
-
-    $responses = fcgi_read_responses($conn, [1, 2]);
-    expect([$responses[1]['body'], $responses[2]['body']])->toBe(['slept 1', 'slept 2']);
-    expect(fcgi_read_record($conn))->toBeNull();
-    [$code] = swerve_wait($process, 3);
-    expect($code)->toBe(0);
-    expect(microtime(true) - $start)->toBeLessThan(2);
-});
-
 test('two signals sent back to back still kill the workers at once', function () {
     [$process, $addr, $log] = swerve_start(['--grace=10']);
     $sleep                  = send_get($addr, '/sleep?ms=3000&id=x');
@@ -1026,46 +914,6 @@ test('drain answers a request that reached an idle keep-alive connection before 
     expect($rest)->toStartWith('HTTP/1.1 200')->toContain("\r\nConnection: close\r\n")->toEndWith('Hello');
 });
 
-test('FastCGI: requests sent before the drain started are answered', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1, mode: 'fastcgi');
-    $worker                 = (int) fcgi_get($addr, '/pid')['body'];
-    $conns                  = [fcgi_connect($addr), fcgi_connect($addr)];
-    usleep(200_000); // accepted
-    posix_kill($worker, SIGSTOP);
-    foreach ($conns as $conn) {
-        fwrite($conn, fcgi_request(1, 'GET', '/hello', keepConn: false));
-    }
-    swerve_signal($process, SIGTERM);
-    usleep(200_000);
-    posix_kill($worker, SIGCONT);
-
-    foreach ($conns as $conn) {
-        expect(fcgi_read_responses($conn, [1])[1]['body'])->toBe('Hello');
-    }
-    [$code] = swerve_wait($process, 3);
-    expect($code)->toBe(0);
-    expect(file_get_contents($log))->not->toContain('Buffer has been ended')->not->toContain('ended while draining');
-});
-
-test('FastCGI: a request sent on an open connection after SIGTERM is answered, and the drain ends at once', function () {
-    [$process, $addr, $log] = swerve_start(['--grace=6'], workers: 1, mode: 'fastcgi');
-    $conn                   = fcgi_connect($addr);
-    fwrite($conn, fcgi_request(1, 'GET', '/sleep?ms=1000&id=1'));
-    usleep(200_000);
-    $start = microtime(true);
-    swerve_signal($process, SIGTERM);
-    usleep(400_000);
-    fwrite($conn, fcgi_request(2, 'GET', '/sleep?ms=100&id=2'));
-
-    $responses = fcgi_read_responses($conn, [1, 2]);
-    expect([$responses[1]['body'], $responses[2]['body']])->toBe(['slept 1', 'slept 2']);
-    expect(fcgi_read_record($conn))->toBeNull();
-    [$code] = swerve_wait($process, 3);
-    expect($code)->toBe(0);
-    expect(microtime(true) - $start)->toBeLessThan(2);
-    expect(file_get_contents($log))->not->toContain('Drain deadline');
-});
-
 test('a drain that runs out of time ends the worker without a PHP fatal error', function () {
     [$process, $addr, $log] = swerve_start(['--grace=2'], workers: 1);
     $conn                   = send_get($addr, '/stream?n=1000&ms=100');
@@ -1101,32 +949,25 @@ test('a log reader that stops reading stops neither the server nor its shutdown'
     fclose($reader);
 });
 
-test('a drain does not cut short a blocking call in a request in flight', function (string $mode, ?int $signal, array $args) {
-    [$process, $addr, $log] = swerve_start($args, workers: 1, env: ['SWERVE_TEST_DIR' => test_dir()], mode: $mode);
-    if ('http' === $mode) {
-        if (null === $signal) {
-            expect(probe($addr, '/hello'))->toBe('Hello'); // the second request: a recycle
-        }
-        $conn = send_get($addr, '/usleep?ms=2000');
-        stream_set_timeout($conn, 5);
-    } else {
-        $conn = fcgi_connect($addr);
-        fwrite($conn, fcgi_request(1, 'GET', '/usleep?ms=2000'));
+test('a drain does not cut short a blocking call in a request in flight', function (?int $signal, array $args) {
+    [$process, $addr, $log] = swerve_start($args, workers: 1, env: ['SWERVE_TEST_DIR' => test_dir()]);
+    if (null === $signal) {
+        expect(probe($addr, '/hello'))->toBe('Hello'); // the second request: a recycle
     }
+    $conn = send_get($addr, '/usleep?ms=2000');
+    stream_set_timeout($conn, 5);
     usleep(300_000);
     if (null !== $signal) {
         swerve_signal($process, $signal);
     }
-    $body = 'http' === $mode ? native_read_response($conn)['body'] : fcgi_read_responses($conn, [1])[1]['body'];
+    $body = native_read_response($conn)['body'];
     expect((float) $body)->toBeGreaterThanOrEqual(1.99);
     log_wait($log, '/Draining/', 2);
     native_stop($process);
 })->with([
-    'reload'            => ['http', SIGHUP, []],
-    'recycle'           => ['http', null, ['--max-requests=2']],
-    'shutdown'          => ['http', SIGTERM, []],
-    'FastCGI: reload'   => ['fastcgi', SIGHUP, []],
-    'FastCGI: shutdown' => ['fastcgi', SIGTERM, []],
+    'reload'   => [SIGHUP, []],
+    'recycle'  => [null, ['--max-requests=2']],
+    'shutdown' => [SIGTERM, []],
 ]);
 
 test('SIGTERM to the whole process group, as systemd sends it, is not taken for a signal from outside', function () {
@@ -1394,24 +1235,6 @@ test('a log file that can\'t be reopened on SIGHUP is said in the log still open
     }
 });
 
-test('FastCGI: SIGHUP reloads without failing requests', function () {
-    $dir                    = test_dir();
-    [$process, $addr, $log] = swerve_start(env: ['SWERVE_TEST_DIR' => $dir], mode: 'fastcgi');
-    expect(fcgi_get($addr, '/version')['body'])->toBe('v1');
-    write_version($dir, 'v2');
-    swerve_signal($process, SIGHUP);
-
-    $failed   = 0;
-    $deadline = microtime(true) + 3;
-    while (!log_count($log, '/Reload complete/')) {
-        expect(microtime(true))->toBeLessThan($deadline);
-        $failed += (int) (null === fcgi_get($addr, '/version'));
-    }
-    expect($failed)->toBeLessThanOrEqual(resets_allowed());
-    wait_version($addr, 'v2', 1, fastcgi: true);
-    native_stop($process);
-});
-
 test('a reload whose new worker fails to start is retried, so a passing failure does not leave the old code serving', function () {
     $dir                    = test_dir();
     [$process, $addr, $log] = swerve_start(env: ['SWERVE_TEST_DIR' => $dir]);
@@ -1642,21 +1465,21 @@ test('options may follow the swerve file; a second file is refused', function ()
     expect([$code, $out[0]])->toBe([2, 'swerve: Unknown argument: other.php']);
 });
 
-test('--http and --fastcgi take an IPv6 address', function (string $mode) {
+test('--http takes an IPv6 address', function () {
     $probe = stream_socket_server('tcp://[::1]:0');
     $addr  = stream_socket_get_name($probe, false);
     fclose($probe);
     expect($addr)->toStartWith('[::1]:');
     $log      = temp_path();
-    $process  = swerve_spawn(["--$mode=$addr", '--workers=1', "--log=$log"], 'app.php');
+    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log"], 'app.php');
     $deadline = microtime(true) + 5;
-    while ('Hello' !== ('http' === $mode ? probe($addr, '/hello') : fcgi_get($addr, '/hello')['body'] ?? null)) {
+    while ('Hello' !== probe($addr, '/hello')) {
         expect(proc_get_status($process)['running'])->toBeTrue(file_get_contents($log));
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(20_000);
     }
     native_stop($process);
-})->with(['http', 'fastcgi'])->skip(fn () => false === @stream_socket_server('tcp://[::1]:0'), 'no IPv6');
+})->skip(fn () => false === @stream_socket_server('tcp://[::1]:0'), 'no IPv6');
 
 test('-q keeps PHP\'s own errors off the terminal', function () {
     $addr     = free_address();
@@ -2014,16 +1837,16 @@ test('the application may start coroutines as it loads; they run for the worker\
     expect(log_count($log, '/(error|critical|warning)/'))->toBe(0, file_get_contents($log));
 });
 
-test('a worker\'s accepts leave no error behind for the application\'s shutdown handler to report', function (string $mode) {
+test('a worker\'s accepts leave no error behind for the application\'s shutdown handler to report', function () {
     $dir = temp_path(true);
     \touch("$dir/record-last-error");
-    [$process, $addr] = swerve_start([], 1, env: ['SWERVE_TEST_DIR' => $dir], mode: $mode);
-    'http' === $mode ? probe($addr, '/hello') : fcgi_get($addr, '/hello');
+    [$process, $addr] = swerve_start([], 1, env: ['SWERVE_TEST_DIR' => $dir]);
+    probe($addr, '/hello');
     native_stop($process);
     $recorded = \array_map('file_get_contents', \glob("$dir/last-error-*"));
     expect($recorded)->not->toBeEmpty();
     expect(\array_filter($recorded))->toBe([]); // phasync/swerve#2: "stream_socket_accept(): Accept failed"
-})->with(['http', 'fastcgi']);
+});
 
 test('startup: the log recommends phasync-ext when it is not loaded, and says nothing when it is', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);

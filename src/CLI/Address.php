@@ -3,7 +3,7 @@
 namespace Swerve\CLI;
 
 /**
- * An address to listen on, as given to --http or --fastcgi:
+ * An address to listen on, as given to --http:
  *
  * - `8080`: port 8080 on 127.0.0.1, this machine only
  * - `:8080`: port 8080 on every IPv4 interface (0.0.0.0)
