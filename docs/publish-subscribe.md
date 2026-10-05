@@ -102,8 +102,8 @@ $subscription = $ledger->subscribe(maxLag: 30.0, heartbeat: null);
   refused: a subscription with a heartbeat yields `null` for "nothing came".
 - Messages go to the subscribers in the workers, never to a browser by themselves. Publish
   values as they are (`Swerve::publish('game', ['kill', $playerId])`), so 10,000 subscribers don't
-  each decode a string. When subscribers pass a message on unchanged to their WebSocket or SSE
-  clients, publish the string those clients should get: it is encoded once, by the publisher,
+  each decode a string. When subscribers pass a message on unchanged to their
+  SSE clients, publish the string those clients should get: it is encoded once, by the publisher,
   not by every subscriber.
 
 ## Patterns

@@ -1,14 +1,6 @@
 <?php
 
-use Psr\Http\Message\RequestInterface;
-use Psr\Http\Message\ResponseInterface;
-use Slim\Factory\AppFactory;
-
-$app = AppFactory::create();
-$app->get('/', function (RequestInterface $request, ResponseInterface $response) {
-    $response->getBody()->write('Hello, World');
-
-    return $response;
+return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
+    $request->write("Hello, World\n");
 });
-
-return $app;

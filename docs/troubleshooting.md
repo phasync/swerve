@@ -18,12 +18,19 @@ development, or reload (`kill -HUP <master pid>`, `systemctl reload`).
 requests go to different workers. Keep shared state in a database or Redis, and use
 [publish and subscribe](publish-subscribe.md) to notify the other workers.
 
-**A WebSocket upgrade answers 500, or its first messages are lost.** The request body was read
-inside the handler, before the 101 was returned (a body-parsing middleware can do that). Read it
-from the coroutine you start. See [WebSockets](realtime.md#websockets).
+**`sendResponseHeaders(101)` throws.** A 101 answers an HTTP/1.1 request with `Connection: upgrade`
+and an `Upgrade` header, whose body you have read to its end. See
+[Raw connections](realtime.md#raw-connections-and-websockets).
+
+**`Swerve\HeadersSentException`.** The final head was committed already: by an earlier
+`sendResponseHeaders()`, or by a `write()`, `flush()`, `end()` or `sendFile()` that sent the implicit
+`200`. Send the head first.
 
 **An SSE stream arrives all at once, at the end.** A proxy buffers it (nginx:
-`proxy_buffering off`), or swerve runs with `--buffer-responses`.
+`proxy_buffering off`).
+
+**swerve stops with exit code 2.** The log says why: `swerve.php` threw while loading, or returned
+something other than a `Swerve\RequestHandler` (which takes a closure).
 
 **`At the limit of 512 connections`.** A worker is full; see [Sizing](production.md#sizing).
 
@@ -54,7 +61,7 @@ Where:
 
 - Swerve (the server, the command line, publish/subscribe, static files):
   <https://github.com/phasync/swerve/issues>
-- phasync (coroutines, channels, `UnbufferedStream`, timeouts):
+- phasync (coroutines, channels, timeouts):
   <https://github.com/phasync/phasync/issues>
 - phasync-ext (the extension): <https://github.com/phasync/phasync-ext/issues>
 

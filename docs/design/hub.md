@@ -7,11 +7,11 @@ is decided until the prototype (phase 1) has been measured.
 
 Swerve becomes a native executable (Rust) that owns every client connection and spawns plain
 PHP worker processes. The binary speaks the network protocols (HTTP/1.1, HTTP/2, HTTP/3,
-FastCGI, TLS), supervises the workers, carries publish/subscribe between them, and keeps a
+TLS), supervises the workers, carries publish/subscribe between them, and keeps a
 shared key/value store. Each worker has one channel to the binary, over which requests, raw
 streams, pub/sub messages, store operations and control messages travel as frames.
 
-PHP applications don't change: they are PSR-15 request handlers, use `Swerve::publish()` and
+PHP applications don't change: they are `Swerve\RequestHandler` closures taking a `ClientRequest`, use `Swerve::publish()` and
 `Swerve::subscribe()`, and run in phasync coroutines, thousands per worker.
 
 ## Why
@@ -47,7 +47,7 @@ fixes:
 ## Process model
 
 ```
-            clients (HTTP/1.1, HTTP/2, HTTP/3, FastCGI; TLS)
+            clients (HTTP/1.1, HTTP/2, HTTP/3; TLS)
                                  │
                     ┌────────────▼────────────┐
                     │      swerve (Rust)      │  listeners, TLS, HTTP parsing
@@ -164,7 +164,7 @@ flight, memory), and reload signals.
 
 Nothing new is required:
 
-- `swerve.php` returns a PSR-15 request handler, as today.
+- `swerve.php` returns a `Swerve\RequestHandler` (a closure taking a `ClientRequest`), as today.
 - `Swerve::publish()`, `Swerve::subscribe()`, `Swerve::log()`, `Swerve::draining()` as today.
 - New APIs are additions: the store, groups and fan-out, stream hand-off, message streams.
 - phasync/net's `Duplex` stays the API for raw streams; its transport becomes the channel.
@@ -191,13 +191,13 @@ Nothing new is required:
 Each is measured before the next starts.
 
 1. **Prototype**: Rust (tokio, hyper): HTTP/1.1 parsed in the binary, request frames to N PHP
-   workers, round-robin; a PHP transport in swerve turning frames into a `ServerRequest` and
-   responses into frames. Benchmarked against the table above.
+   workers, round-robin; a PHP transport in swerve turning frames into a `ClientRequest` and
+   its writes into frames. Benchmarked against the table above.
 2. **Parity with today's master**: supervision, reload, recycling, watchdog, publish/subscribe,
    logging, the command line. Replaces the PHP master.
 3. **The store**: PSR-16, sessions, locks, TTL notifications (presence for Tether).
 4. **Protocols**: TLS, HTTP/2, then HTTP/3; WebSocket framing in the binary; groups and
-   fan-out; stream hand-off; FastCGI.
+   fan-out; stream hand-off.
 
 ## Open questions
 

@@ -9,14 +9,14 @@ much memory (recycling), and does rolling reloads.
 
 Every worker loads your application file once, inside its event loop. The file is the
 application's bootstrap: it sets things up, may start coroutines that run for the worker's
-whole life (a subscriber, a periodic job) and servers of its own, and returns the request
-handler ([details](bootstrap.md)). Then the worker serves HTTP on the same address as the
+whole life (a subscriber, a periodic job) and servers of its own, and returns the
+`Swerve\RequestHandler` ([details](bootstrap.md)). Then the worker serves HTTP on the same address as the
 others (`SO_REUSEPORT`): the kernel hands each new connection to one of them. A connection
 stays with its worker until it closes.
 
 ## Coroutines
 
-A worker serves many connections at once. Each connection, and each request, runs in a
+A worker serves many connections at once. Each connection runs in a
 **coroutine** (a PHP Fiber, managed by [phasync](https://github.com/phasync/phasync)). Only one
 coroutine runs at a time; another gets its turn when the running one **waits**: for the
 network, for `phasync::sleep()`, for a message. So your handler code is ordinary sequential
@@ -33,10 +33,12 @@ phasync::go(function () {
 });
 ```
 
-A request is served like a `phasync::run()`: the connection reads its next request once the
-coroutines the request started have ended, but the client has the whole response before that,
-so work after the response (`phasync::finally()`, a `go()`) costs it nothing. Work that must
-outlive the request belongs in `phasync::service()`.
+The handler runs in the connection's own coroutine, once per request, inside a phasync context of
+its own, which the coroutines the request starts share: request-scoped state belongs on
+`phasync::getContext()`. The connection reads its next request once the handler has returned
+and the coroutines it started have ended, but the client has the whole response before that, so work
+after the response (`phasync::finally()`, a `go()`) costs it nothing. Work that must outlive the
+request belongs in `phasync::service()`.
 
 ## The rule: never block a worker
 
@@ -78,8 +80,8 @@ Everything in PHP memory belongs to one worker, and lives from the worker's star
   state all workers need to read, use storage outside PHP (a database, Redis, a file).
 - **A worker restarts** after a crash, a reload, or recycling (memory, `--max-requests`): its
   memory starts empty. Clients connected to it are disconnected by a crash or a reload and must
-  reconnect (a browser's `EventSource` does; for WebSockets, reconnect in your client code); a
-  recycled worker keeps its WebSockets for up to `--linger` seconds, so they usually leave on
+  reconnect (a browser's `EventSource` does); a
+  recycled worker keeps its upgraded connections for up to `--linger` seconds, so they usually leave on
   their own.
 
 ### Shared state with SQLite
@@ -104,25 +106,20 @@ unless phasync-ext is loaded and the database is MySQL: then they wait as a coro
 
 ## Things that work differently from PHP-FPM
 
-With phasync-ext and `Swerve::virtualize()` in `swerve.php`, none of this applies: every request
-runs as under PHP-FPM (see [Code written for PHP-FPM](../README.md#code-written-for-php-fpm)).
-Without it:
-
-- **Superglobals are not filled**: no `$_GET`, `$_POST`, `$_SERVER`, `$_COOKIE`, `$_FILES`.
-  Use the PSR-7 request: `getQueryParams()`, `getCookieParams()`, `getServerParams()`,
-  `getBody()`.
-- **`header()`, `echo`, `setcookie()`, `http_response_code()` don't make the response.**
-  Return a PSR-7 response. Output during a request ends the worker: see
-  [Stray output](stray-output.md).
-- **PHP's sessions (`session_start()`) don't work.** Use a PSR-7 session library, or your
-  framework's.
+- **Superglobals are not filled**: no `$_GET`, `$_POST`, `$_SERVER`, `$_COOKIE`, `$_FILES`. The
+  request is the `ClientRequest` (see [Requests and responses](requests-and-responses.md)); a
+  framework's adapter builds the framework's own request from it.
+- **`header()`, `echo`, `setcookie()`, `http_response_code()` don't make the response.** Use
+  `sendResponseHeaders()` and `write()`.
+- **PHP's sessions (`session_start()`) don't work.** Use a session library that takes the request,
+  or your framework's.
 - **`exit()` and `die()` end the worker**, and every request it serves. The master starts a
   new one, but the others are cut off.
-- **Uncaught exceptions** become a `500 Internal Server Error` for that request and are
-  logged with their trace; the worker goes on.
+- **Uncaught exceptions** become a `500 Internal Server Error` for that request (when nothing was
+  sent yet) and are logged with their trace; the worker goes on.
 - **Memory leaks accumulate** over the worker's life. `--max-memory` (80 % of
   `memory_limit` by default) recycles a worker that grows too large: a new one starts, then
-  the old one finishes its requests, and exits when its WebSockets are gone.
+  the old one finishes its requests, and exits when its upgraded connections are gone.
 
 ## phasync in one page
 

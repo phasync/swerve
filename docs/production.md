@@ -52,7 +52,7 @@ each worker's CPUs.
 - *Without phasync-ext*, a worker holds at most **512 connections**: half of PHP's `stream_select()`
   limit of 1024 descriptors, because your application opens files and connections of its own,
   about one per client on average. Long-lived
-  connections (SSE, WebSockets, long polling) use one each for as long as they are open. For
+  connections (SSE, long polling, upgraded ones) use one each for as long as they are open. For
   many of them, run more workers than cores: **`--workers` of four times the cores** is a good
   start (4 cores: 16 workers, about 8,000 connections). Idle connections cost almost no CPU,
   so the extra workers don't compete much; they cost memory, one application each.
@@ -62,7 +62,7 @@ each worker's CPUs.
 
 At the limit, a worker closes connections that sit idle (kept-alive ones, ones that never sent
 a request) to make room for new ones, and logs a warning at most once a minute. Upgraded
-connections (WebSockets) and ones whose request is still being handled are never closed to
+(101) connections and ones whose request is still being handled are never closed to
 make room.
 
 **Memory.** `--max-memory` (80 % of `memory_limit` by default) recycles a worker whose memory
@@ -70,14 +70,13 @@ grows past it: a new worker starts, then the old one finishes its plain requests
 accepting. With `memory_limit=-1` this is off; give a size such as `--max-memory=512M`.
 `--max-requests` recycles after about so many requests.
 
-With `Swerve::virtualize()`, `memory_limit` bounds the sum of the requests running at once in a
-worker, and a fatal error (out of memory, say) ends the worker and every request in it, not only the
-request that caused it. Count `memory_limit` as the peak of one request times the concurrency you
-expect.
+`memory_limit` bounds the sum of the requests running at once in a worker, and a fatal error (out of
+memory, say) ends the worker and every request in it, not only the request that caused it. Count
+`memory_limit` as the peak of one request times the concurrency you expect.
 
-A recycled worker lingers: it keeps its upgraded connections (WebSockets, SSE) instead of
+A recycled worker lingers: it keeps its upgraded connections and long responses fed by subscriptions (SSE) instead of
 dropping them, until the last client has left or `--linger` seconds (1800) have passed, then
-closes what is left (WebSockets get 1001) and exits. Its subscriptions, cache and claims go on
+closes what is left and exits. Its subscriptions, cache and claims go on
 working meanwhile. Budget for them: a slot may have up to three lingering workers besides its
 serving one, each with its memory (a recycle that would be the fourth waits until one exits, and
 is logged once). `--linger=0` drops the connections of a recycled worker at once, as a reload
@@ -85,10 +84,10 @@ does. A reload or shutdown does not linger: it ends the lingering too, within `-
 
 ## Behind a proxy
 
-Behind nginx or HAProxy over HTTP, `REMOTE_ADDR` is the proxy until swerve is told to trust it:
+Behind nginx or HAProxy over HTTP, `peer()` is the proxy until swerve is told to trust it:
 `--trusted-proxy=10.0.0.5` (or a range, or `unix` for a Unix socket) makes the `X-Forwarded-For`,
-`-Proto` and `-Host` headers of that peer count: `REMOTE_ADDR`, `HTTPS`, `SERVER_PORT` and the host of
-`$request->getUri()` are then the client's. The `X-Forwarded-For` chain is read from the right: the first address that is not a trusted
+`-Proto` and `-Host` headers of that peer count: `peer()`, `getScheme()` and the `host` header of
+`getRequestHeaders()` are then the client's. The `X-Forwarded-For` chain is read from the right: the first address that is not a trusted
 proxy is the client, so a client's own forged entries are never reached. `X-Forwarded-Proto` and
 `-Host` are taken as the proxy sent them: trust only proxies that set them.
 
@@ -132,7 +131,7 @@ CMD ["vendor/bin/swerve", "--http=:8080", "--public=public"]
 `stop_grace_period: 40s` in compose), or lower `--grace`. The container's CPU count is what
 `--workers=auto` sees.
 
-## nginx in front: TLS, and SSE and WebSockets through it
+## nginx in front: TLS, and SSE through it
 
 Swerve serves plain HTTP. For HTTPS, put a reverse proxy in front. For nginx:
 
@@ -155,7 +154,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        # WebSockets
+        # Upgrades (101)
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         # Server-Sent Events: send each event on at once, and keep long-lived requests open
@@ -165,11 +164,9 @@ server {
 }
 ```
 
-Caddy does all of that with `reverse_proxy 127.0.0.1:8080`. The request's `REMOTE_ADDR` is
-then the proxy's; the client's address is in `X-Forwarded-For`.
-
-Alternatively, `--fastcgi=127.0.0.1:9000` serves FastCGI to nginx's `fastcgi_pass`, several
-requests over one connection. HTTP mode is simpler and supports WebSockets; prefer it.
+Caddy does all of that with `reverse_proxy 127.0.0.1:8080`. The request's `peer()` is then the
+proxy's, unless it is a [trusted proxy](#behind-a-proxy); the client's address is in
+`X-Forwarded-For`.
 
 ## Reloads, shutdown, and long-lived connections
 
@@ -177,12 +174,12 @@ requests over one connection. HTTP mode is simpler and supports WebSockets; pref
   exits; the kernel hands new connections to the other workers (reload) or refuses them
   (shutdown). A worker gets `--grace` seconds (30); what is still open a second before that is
   dropped.
-- WebSocket connections see their request body end at once, so they can say goodbye (see
+- After a `101`, the connection's `read()` returns `''` at once, so a protocol can say goodbye (see
   [Realtime](realtime.md)); subscriptions end, so SSE responses fed by them end too. A recycle
   is gentler: see Memory above. Other
   long responses are requests in flight: they run until the deadline, unless they check
   `Swerve::draining()`. Clients must reconnect: `EventSource` does by itself; write
-  reconnecting into WebSocket clients.
+  reconnecting into other clients.
 - `sysctl net.ipv4.tcp_migrate_req=1` makes the kernel hand connections waiting in a closing
   worker's queue to another worker instead of resetting them; swerve logs a hint at start when
   it is 0.

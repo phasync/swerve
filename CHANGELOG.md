@@ -4,8 +4,30 @@
 
 ### Changed
 
+- Breaking: `swerve.php` returns a `Swerve\RequestHandler` wrapping a closure that takes a
+  `Swerve\ClientRequest`, in place of a PSR-15 request handler. The closure runs once for each HTTP
+  exchange, in the connection's own coroutine and a phasync context of its own, and may keep the
+  request (an event stream, a long download) by not returning. A `ClientRequest` is a
+  `phasync\Net\Duplex`: `read()` is the request body, `write()` the response body, with
+  `sendResponseHeaders()` (`1xx` interim responses, `101` to the raw connection), `flush()`,
+  `sendFile()` and `end()` with trailers; a second final head throws `HeadersSentException`.
+- HTTP/1.1 is served through phasync/net. The module owns the framing, adds `date` to every
+  response, including its own error responses (#35), and `server: Swerve` unless the handler sets one.
+- `Swerve\StaticFiles` (`--public`) is no longer middleware: `wrap(Closure $app)` returns a handler that
+  answers file requests and calls `$app` for the rest.
 - `--ext` stops swerve with an error when the extension cannot be loaded; the start notice about a
   missing extension is logged only when `composer.json` enables it, or does not mention it.
+
+### Removed
+
+- FastCGI mode and `--fastcgi`; `--buffer-responses`.
+- `Swerve\Dispatcher` and the PSR-7 request, response and body classes, `StreamingResponderInterface`
+  and `UnbufferedStream` response bodies. There is no PSR-7 request: a framework is served through an
+  adapter that turns a `ClientRequest` into its own request and response.
+- `Swerve\Http\WebSocket` and `ProtocolUpgrade`, until a WebSocket library is rebuilt on the `101`
+  connection.
+- `Swerve::virtualize()`.
+- The PSR-15 and Slim requirements.
 
 ## 0.1.0-beta5 (2026-10-04)
 

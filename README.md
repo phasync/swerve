@@ -2,34 +2,33 @@
 
 ![SWERVE](swerve-logo.png)
 
-**WebSockets in PHP, solved.**
+**A PHP application server for connections that stay open.**
 
 ```php
-public function chat(ServerRequestInterface $request): ResponseInterface
-{
-    return WebSocket::from($request, static function (WebSocket $ws) {
-        foreach ($ws as $message) {
-            $ws->send("echo: $message");
-        }
-    });
-}
-```
+<?php // swerve.php
 
-Confirmed both ways, with tests, in [Laravel](https://github.com/phasync/swerve-laravel),
-[Symfony](https://github.com/phasync/swerve-symfony), [Yii](https://github.com/phasync/swerve-yii),
-[CakePHP](https://github.com/phasync/swerve-cakephp),
-[Spiral](https://github.com/phasync/swerve-spiral),
-[CodeIgniter](https://github.com/phasync/swerve-codeigniter),
-[Laminas](https://github.com/phasync/swerve-laminas), and Slim and other PSR-15 frameworks.
+return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
+    $request->write("Hello, World\n");
+});
+```
 
 Swerve is a PHP application server, built on [phasync](https://github.com/phasync/phasync)
 coroutines. Your application stays loaded between requests, every worker serves many requests
-and connections at once, and request and response bodies stream.
+and connections at once, and request and response bodies stream. A handler gets a
+`ClientRequest`: the request to read and the response to write, for as long as it keeps it.
+Frameworks are served through an adapter that turns a `ClientRequest` into the framework's own
+request and response: [Laravel](https://github.com/phasync/swerve-laravel),
+[Symfony](https://github.com/phasync/swerve-symfony), [Yii](https://github.com/phasync/swerve-yii),
+[CakePHP](https://github.com/phasync/swerve-cakephp),
+[Spiral](https://github.com/phasync/swerve-spiral),
+[CodeIgniter](https://github.com/phasync/swerve-codeigniter) and
+[Laminas](https://github.com/phasync/swerve-laminas).
 
 > Beta: APIs and options may still change until 1.0.
 
 **[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
-[WebSockets](examples/websocket-chat) and over [Server-Sent Events](examples/sse-chat).
+[Server-Sent Events](examples/sse-chat).
 
 ## Why swerve
 
@@ -38,8 +37,8 @@ container, database connection), runs one request per process, and throws it all
 keeps the application loaded in long-running workers, and each worker serves thousands of
 requests and connections at once on [phasync](https://github.com/phasync/phasync) coroutines.
 
-- **Connections that stay open.** WebSockets and Server-Sent Events from ordinary request
-  handlers, streaming request and response bodies, and
+- **Connections that stay open.** Server-Sent Events and long polling from an ordinary request
+  handler, streaming request and response bodies, raw connections after a `101`, and
   [publish/subscribe](docs/publish-subscribe.md) between workers, so live features need no
   separate Node or Go service.
 - **Boot once, serve forever.** The framework, routes and connection pools are built once per
@@ -50,10 +49,10 @@ requests and connections at once on [phasync](https://github.com/phasync/phasync
   starts share, so request-scoped state stays separate even with thousands in flight.
 - **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
   workers that grow are recycled, and reloads roll one worker at a time.
-- **Yours to own.** MIT, with no third-party dependencies beyond PSR interfaces. See
-  [the Ennerd philosophy](PHILOSOPHY.md).
+- **Yours to own.** MIT, with no third-party dependencies beyond phasync and the PSR logger and
+  cache interfaces. See [the Ennerd philosophy](PHILOSOPHY.md).
 
-The same PSR-15 handler on every server, 2 and 8 workers on one CCD of a Ryzen 9 9950X3D, wrk on
+The same application on every server, 2 and 8 workers on one CCD of a Ryzen 9 9950X3D, wrk on
 the other, over loopback ([method, scripts and raw results](benchmarks/servers/SUMMARY.md)).
 8 workers serve 3.9× what 2 do.
 
@@ -95,16 +94,18 @@ per worker at a time gives about 780.
 Up to 512 connections per worker swerve runs on PHP's own `stream_select()`; above that
 it needs phasync-ext, which waits with epoll.
 
+
 ### Coming from PHP-FPM
 
 1. **Already using phasync under FPM?** That code runs unchanged in swerve: the coroutines you
    started inside one request now also share the worker with other requests.
 2. **Keep per-request state per request.** A worker runs many requests at once, so static
-   properties and globals are shared between them. Read request data from the PSR-7 request, not
-   from `$_GET` or `$_SESSION`, unless your framework maps those per request, as mini does. See
+   properties and globals are shared between them. There are no `$_GET`, `$_SERVER` or
+   `$_SESSION`: read request data from the `ClientRequest` (a framework's adapter does), and hang
+   request-scoped state on `phasync::getContext()`. See
    [How swerve runs your application](docs/how-it-runs.md).
-3. **Return a PSR-15 request handler** from `swerve.php`: a Slim app, mini's dispatcher, or any
-   other PSR-15 stack.
+3. **Return a `Swerve\RequestHandler`** from `swerve.php`. A framework gets an adapter that turns
+   the `ClientRequest` into its own request and response.
 4. **Load phasync-ext** in production (it ships inside phasync: `--ext`, or `"extra": {"phasync": {"ext": true}}` in composer.json). Blocking calls in
    libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
    coroutine instead of stalling the worker, and a worker can hold far more than 1,024
@@ -122,28 +123,41 @@ Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets`
    composer require phasync/swerve
    ```
 
-2. Create `swerve.php` in your project root, returning a PSR-15 `RequestHandlerInterface`
-   (the file is also your [bootstrap](docs/bootstrap.md): each worker runs it once at start). A
-   Slim app is one (`composer require slim/slim slim/psr7`):
+2. Create `swerve.php` in your project root, returning a `Swerve\RequestHandler` that wraps a
+   closure (the file is also your [bootstrap](docs/bootstrap.md): each worker runs it once at
+   start). The closure runs once for each HTTP exchange, and the exchange lasts as long as the
+   closure does:
 
    ```php
-   <?php
+   <?php // swerve.php
 
-   use Psr\Http\Message\ResponseInterface;
-   use Psr\Http\Message\ServerRequestInterface;
-   use Slim\Factory\AppFactory;
-   use Swerve\Swerve;
-
-   $app = AppFactory::create();
-   // Error pages, and errors logged in swerve's log
-   $app->addErrorMiddleware(true, true, false, Swerve::log());
-   $app->get('/', function (ServerRequestInterface $request, ResponseInterface $response) {
-       $response->getBody()->write('Hello, World');
-
-       return $response;
+   return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+       $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
+       $request->write("Hello, World\n");
    });
+   ```
 
-   return $app;
+   Keeping the request open makes a stream. This one pushes a number every second as
+   Server-Sent Events, until the client leaves:
+
+   ```php
+   <?php // swerve.php
+
+   use phasync;
+   use phasync\IOException;
+
+   return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+       $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream', 'cache-control' => 'no-cache']);
+       $request->flush(); // the head goes out now, not with the first event
+       try {
+           for ($n = 1; ; ++$n) {
+               $request->write("data: $n\n\n");
+               phasync::sleep(1);
+           }
+       } catch (IOException) {
+           // the client left
+       }
+   });
    ```
 
 3. Run it:
@@ -173,51 +187,53 @@ Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets`
 Usage: swerve [options] [swerve.php]
 
 Application:
-  [swerve.php]            A PHP file returning a PSR-15 RequestHandlerInterface, such as a Slim app
+  [swerve.php]                     A PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest
 
 Serving:
-  --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
-  --fastcgi=<address>     Serve FastCGI here instead, behind nginx or the like; the same forms as --http
-  --public=<dir>          HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
-  -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
+  --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
+  --public=<dir>                   HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
+  --trusted-proxy=<ip|range|unix>  HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several
+  -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
 
 Extension:
-  --ext                   Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot
+  --ext                            Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot
 
 Development:
-  --watch                 Reload the workers, one at a time, when a PHP file of the application changes
+  --watch                          Reload the workers, one at a time, when a PHP file of the application changes
 
 Logging (to the terminal, or with --log to a file):
-  -v, --verbose           Log more: -v also what swerve does (workers starting, draining), -vv also debug
-  -q, --quiet             Log nothing to the terminal (--log still logs to its file)
-  --no-access-log         No line per request
-  --log=<path>            Append the log, and PHP errors, to this file instead
+  -v, --verbose                    Log more: -v also what swerve does (workers starting, draining), -vv also debug
+  -q, --quiet                      Log nothing to the terminal (--log still logs to its file)
+  --no-access-log                  No line per request
+  --log=<path>                     Append the log, and PHP errors, to this file instead
 
 Limits:
-  --max-body=<bytes>      HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
-  --buffer-responses      HTTP: send each response body whole (up to 8 MiB) with a Content-Length, instead of streaming it
-  --grace=<seconds>       Seconds workers get to finish their requests on shutdown and reload before SIGKILL (default: 30)
-  --linger=<seconds>      Seconds a recycled worker keeps its upgraded connections (WebSockets, SSE) before closing them; 0 = close them at once (default: 1800)
-  --watchdog=<seconds>    Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
-  --max-memory=<size|P%>  Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
-  --max-requests=<n>      Recycle a worker after about n requests; 0 = off (default: 0)
+  --max-body=<bytes>               HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
+  --grace=<seconds>                Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL (default: 30)
+  --linger=<seconds>               Seconds a recycled worker may keep serving its upgraded connections (101) after its replacement took over; 0 = not at all (default: 1800)
+  --watchdog=<seconds>             Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
+  --max-memory=<size|P%>           Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
+  --max-requests=<n>               Recycle a worker after about n requests; 0 = off (default: 0)
+  --cache-size=<size>              The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G (default: 64M)
 
 Information:
-  -h, --help              This help
-  --version               The versions of swerve, PHP, phasync and phasync-ext
+  -h, --help                       This help
+  --version                        The versions of swerve, PHP, phasync and phasync-ext
 ```
 
 Options and the application file may come in any order; an option's value is attached
 (`--workers=4`, `-w4`) or the next word (`--workers 4`, `-w 4`). A usage error exits with
-code 2.
+code 2, and so does a `swerve.php` that returns anything but a `Swerve\RequestHandler`.
 
 swerve runs in the foreground, as systemd, Docker and supervisord expect, and logs to
 standard output, which they collect; there is no daemon mode. Elsewhere,
 `nohup swerve -q --log=/var/log/swerve.log &` does the same.
 
+Every worker serves HTTP/1.1 itself on the `--http` address, and the kernel spreads new
+connections over the workers. A proxy in front (nginx, HAProxy, Caddy) speaks HTTP to it too.
+
 The line per request costs about 5% of the throughput of a hello-world application, and
-less of a real one; `--no-access-log` turns it off. In FastCGI mode there is none: the web
-server in front logs the requests.
+less of a real one; `--no-access-log` turns it off.
 
 ## Static files
 
@@ -231,14 +247,14 @@ and paths leading out of the directory (`..`, a symlink pointing outside) go to 
 directories are never listed. This is deliberately small: for a lot of static content, or
 anything beyond this, let nginx or a CDN serve it in front of swerve.
 
-The same is PSR-15 middleware for your own stack, with swerve or any other server:
-`$app->add(new Swerve\StaticFiles(__DIR__ . '/public'))` in Slim.
+The same is available to your own handler: `(new Swerve\StaticFiles($dir))->wrap($handler)` returns
+a handler that answers file requests and calls `$handler` for the rest.
 
 ## Logging from the application
 
 `Swerve::log()` is swerve's log as a PSR-3 `LoggerInterface`: lines go where swerve's go (the
 terminal, or `--log`'s file), with the time and the worker's slot. Give it to anything that takes
-a logger, such as Slim's error middleware above, or log directly:
+a logger, or log directly:
 
 ```php
 Swerve::log()->warning('Payment {id} declined', ['id' => $id]);
@@ -247,106 +263,52 @@ Swerve::log()->warning('Payment {id} declined', ['id' => $id]);
 With `-q` it logs nothing; embedded without swerve's command line, it logs nothing until you give
 it a logger with `Swerve::setLog()`.
 
-## Modes
+## The ClientRequest
 
-**HTTP (the default).** swerve starts one worker process per CPU core, and every worker
-serves HTTP/1.1 itself on the `--http` address. The kernel spreads new connections over
-the workers. There is nothing else to install or run.
+`Swerve\ClientRequest` is one HTTP exchange, a `phasync\Net\Duplex`: `read()` returns the request
+body (`''` only at its end) and `write()` sends the response body. The module does the framing.
+[Requests and responses](docs/requests-and-responses.md) is the reference; in short:
 
-**FastCGI (`--fastcgi`).** For running swerve behind a web server of your own, such as
-nginx or HAProxy, which speaks FastCGI to the workers. swerve supports several requests
-multiplexed over one FastCGI connection; `etc/haproxy.cnf` is an example HAProxy
-configuration that uses it. The application is the same as in HTTP mode, except for protocol
-upgrades: no web server carries a `101` over FastCGI, so a WebSocket is answered with 501 and
-needs HTTP mode.
+- The handler runs in the connection's own coroutine, once per exchange, in a phasync context of its
+  own (`phasync::finally()` in a handler runs once the exchange is finished). Return to finish the
+  response; the request body can no longer be read after that.
+- `sendResponseHeaders($status, $headers)` sets the head, held until the first `write()`, `end()`,
+  `flush()` or `sendFile()`. A `1xx` goes out at once (`103` Early Hints, repeatable); a `101`
+  switches to the raw connection.
+- Nothing is buffered: `write()` goes straight out, chunked unless you send a `content-length`.
+  `write()` throws `phasync\IOException` once the client is gone, which is how a producer learns
+  it can stop.
+- An exception before the head went out is a `500` (logged); after, the connection is aborted.
+- The request body, query string and cookies are yours to parse from `read()`, `getTarget()` and
+  `getRequestHeaders()`; there is no PSR-7 request.
 
-## Streams: request bodies after the response, upgrades, SSE
+## Long-lived connections
 
-In HTTP mode swerve deals in two streams, and nothing else. The request's body is the unread
-request body, still connected to the socket. The response's body is read piece by piece and
-sent as it comes. swerve doesn't care when or where either is read or written, so WebSocket,
-Server-Sent Events and other protocols are ordinary PSR-7 responses built on the two streams.
-`Swerve\Http\WebSocket` is one, and `Swerve\Http\ProtocolUpgrade`, its base, is there for
-protocols of your own.
-
-- **Reading after the response.** The request body may be read after `handle()` returned, from
-  any coroutine, also while the response is being written. The next request on the connection
-  waits until the body is read to its end, or released (its last reference dropped); so does a
-  drain, up to its deadline. A released body's rest is skipped, up to 64 KiB within 5 s, or the
-  connection closes. A reference held by a container, a cycle or an exception trace holds the
-  body too.
-- **Bodies held, not read.** A body the application still holds after the response but hasn't
-  read, or read only inside `handle()` (Slim's error handler keeps the last request it
-  answered), is read into memory for it when its rest is at most 64 KiB, the client getting as
-  long as if the application read it: it can still be read whenever the application likes, and
-  the connection goes on at once. A larger one that is never read after that closes the
-  connection after 30 s, which is logged. A body another coroutine reads is never cut off,
-  however long it takes between reads.
-- **Upgrade requests** (HTTP/1.1, an `Upgrade` header, and `upgrade` in `Connection`) have a
-  body of unknown size. Past its framing (usually at once), a read from another coroutine
-  waits for the response. After a 101 it is what the client sends, until the client closes its
-  side, the server drains, or the connection closes. After any other status the body ends at
-  its framing, the connection is kept alive, and the response's `Upgrade` and `Connection`
-  options go out as given (a 426 must name the protocol it wants). Reading the body past its
-  framing inside `handle()` itself declines the upgrade: the read returns `''`, and a 101
-  becomes a 500. A client closing its side while a read waits for the response ends the body
-  there, after what it sent before; a 101 still goes out. Until the status is known the HTTP
-  limits apply: that wait counts against the client's time for the body (10 s, more as it
-  sends), after which the upgrade is declined in the same way. So `handle()` waiting for a
-  coroutine that reads the whole body (curl sends `Upgrade: h2c` on plain requests) is stuck
-  for that long; read the body in `handle()` itself where you can.
-- **Answering 101.** Set `Upgrade` and `Connection: Upgrade` yourself. The head goes out as
-  soon as `handle()` returns, and the body goes out raw until it ends, which closes the
-  connection: the request body gets the client's last bytes for 2 s more, then the connection
-  closes lingering, so the client gets all of the response, also when the request body is held
-  unread. No HTTP timeout or size limit applies to it, and `--buffer-responses` doesn't
-  either, so use your protocol's own, such as pings; to give up on a client, `close()` the
-  request body, which ends the connection at once, even while a write to a client that stopped
-  reading waits. Give it a body whose `read()` waits: `new UnbufferedStream(65536,
-  PHP_FLOAT_MAX)` (the default 60 s deadlock timeout would end an idle connection with an
-  error).
-- **Shutdown and reload** (and the end of a recycled worker's lingering, below). An upgraded connection's request body reaches EOF at once,
-  also within the upgrade request's own framed body (even a read of it that began before the
-  101), however much more the client sends. End the response then, for example with a
-  WebSocket close frame: it reaches the client, since the connection closes lingering. Past the drain deadline
-  the worker exits and drops the connection, which is logged. Upgraded connections are never
-  closed to make room at the connection limit. Without the phasync extension that limit is 512
-  connections per worker, whatever `ulimit -n` says: add workers or install the extension for
-  many of them.
+- **Shutdown and reload.** A request in flight is answered with `Connection: close`. A
+  `Swerve::subscribe()` loop ends, so a response fed by one ends too, and the client reconnects to
+  another worker. Another long response (long polling, a slow download) runs until the drain
+  deadline, a second before `--grace`: check `Swerve::draining()` in its loop to end it sooner. After a
+  `101`, the connection's `read()` returns `''`, as if the client had closed its side, however
+  much more it sends: end your side then. Past the deadline the worker exits and drops the
+  connection, which is logged.
 - **Recycle: lingering.** A worker replaced by a recycle (`--max-memory`, `--max-requests`)
-  keeps its upgraded connections, WebSockets and the like, instead of draining them: it stops
-  accepting, finishes its plain requests and stays until the last client has left, or
-  `--linger` seconds (1800) have passed, which then ends it like a drain (request bodies reach
-  EOF, 1001). Subscriptions, the cache and claims keep working meanwhile. A slot has at most
-  three lingering workers; a recycle that would make a fourth waits until one exits. A reload
-  or shutdown ends the lingering with `--grace`. `--linger=0` drains a recycled worker at once.
+  keeps its upgraded connections instead of draining them: it stops accepting, finishes its
+  plain requests and stays until the last client has left, or `--linger` seconds (1800) have
+  passed, which then ends it like a drain. Subscriptions, the cache and claims keep working
+  meanwhile. A slot has at most three lingering workers; a recycle that would make a fourth waits
+  until one exits. A reload or shutdown ends the lingering with `--grace`. `--linger=0` drains a
+  recycled worker at once.
 - **Saying goodbye.** `Swerve::onShutdown($callback)` runs the callback in a coroutine when the
   worker closes its connections (for a recycle, at the end of the lingering; `Swerve::draining()`
   turns true when it begins), for example to send a protocol-level goodbye from a place that
-  holds no request body. Callbacks are held weakly by the registering coroutine's context: one
+  holds no request. Callbacks are held weakly by the registering coroutine's context: one
   whose request has ended is dropped (it relies on phasync's garbage collection, about half a
   second after a coroutine ends) and never runs. An exception in a callback is logged and
   stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
-- **Server-Sent Events** are an ordinary streamed 200 with an `UnbufferedStream` body: every
-  read goes out as a chunk at once. When the client leaves, swerve stops reading the body, and
-  that is all a producer can learn of it: give the stream a small buffer and a finite deadlock
-  timeout, and send a comment line (`: keep-alive`) more often than that timeout, for example
-  `new UnbufferedStream(1, 60)` and one every 15 s. `append()` then throws a minute after the
-  client left, which ends the producer; with `PHP_FLOAT_MAX` it would wait forever, a coroutine
-  and its buffer for every client that left. A drain doesn't signal them either, but the drain
-  deadline bounds them.
-
-```php
-use Swerve\Http\WebSocket;
-
-return WebSocket::from($request, function (WebSocket $ws) {
-    foreach ($ws as $message) {        // ends when the connection closes, or swerve drains
-        $ws->send("echo: $message");
-    }
-});
-```
-
-See [Realtime](docs/realtime.md#websockets) for how the streams behave underneath.
+- **Many connections.** Without phasync-ext a worker serves at most 512 connections, whatever
+  `ulimit -n` says: add workers or install the extension for many of them.
+- **Server-Sent Events** are an ordinary streamed response; see [Realtime](docs/realtime.md).
+  WebSockets will come as a library on the raw connection of a `101`.
 
 ## Publish and subscribe
 
@@ -440,67 +402,6 @@ function nightlyReport(): void
   to a file with its holder's pid in it. Linking is atomic, and fails while the name is held.
   Without the master it works the same, in a directory of the process that dies with it.
 
-## Code written for PHP-FPM
-
-With phasync-ext (see [Production](docs/production.md#phasync-ext)),
-`Swerve::virtualize()` in `swerve.php` runs every request as under PHP-FPM, as a request of its
-own: `echo`, `header()`, `setcookie()`, `http_response_code()`, the session functions,
-`php://input` and `exit()` (which ends the request, not the worker) work, also with many requests
-at once in a worker. What the application echoes goes to the client in pieces of 8 KiB and at
-`flush()`, with the headers it set sent before the first byte (chunked, or with its own
-`Content-Length`). A PSR-7 response that the handler returns is sent when nothing was echoed, with
-the headers the application set (`header()`, `setcookie()`, the session cookie) added to it.
-`getallheaders()`, `apache_request_headers()` and `fastcgi_finish_request()` exist, `$_SERVER` has
-what PHP-FPM gives (`SERVER_NAME`, `REQUEST_SCHEME`, `PHP_AUTH_USER`/`PHP_AUTH_PW`, `DOCUMENT_ROOT`
-and `SCRIPT_FILENAME`), and the handler runs in the connection's coroutine: no coroutine is started
-for the request.
-
-```php
-Swerve::virtualize();
-
-return new class implements RequestHandlerInterface {
-    public function handle(ServerRequestInterface $request): ResponseInterface
-    {
-        session_start();
-        echo 'Hello ', $_SESSION['name'] ?? 'stranger';
-
-        return new Response(200); // sent only when nothing was echoed
-    }
-};
-```
-
-`$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `$_SERVER` and `$_SESSION` are the request's own, as
-under PHP-FPM, also with many requests at once in a worker. Other global variables and static
-properties are shared by the worker's requests; code that keeps request state there keeps its own
-per request by running the request in a switch-aware phasync context, which swaps it in whenever
-the request's coroutines run:
-
-```php
-return phasync::withContext(fn () => $app->handle($request), new class implements phasync\Context\SwitchAwareInterface {
-    private $own;
-    public function resume(): void  { App::$current = $this->own; }
-    public function suspend(): void { $this->own = App::$current; }
-});
-```
-
-Where it differs from PHP-FPM, because the requests share one process:
-
-- **Connections.** A persistent connection (`PDO::ATTR_PERSISTENT`, `mysqli` with `p:`, `pconnect()`)
-  is one connection of the worker, used by every request in it, also when they run at once: two
-  requests in one transaction on it corrupt each other. Open one connection per request, or use a
-  pool.
-- **Settings.** `ini_set()`, `set_time_limit()` (a per-request CPU budget: only the request that
-  exceeds it fails), `error_get_last()`, the default time zone, the `mt_srand()` seed and the
-  `mysqli_report()` mode are the request's own . Shared by the
-  worker's requests: `setlocale()`, `Locale::setDefault()`, `mb_*` settings, libxml errors and handlers,
-  `bcscale()`, `chdir()`, `umask()` and `putenv()`. Set these once at start, not per request.
-- **Memory.** `memory_limit` bounds all the requests in a worker together, and a fatal error ends the
-  worker and every request in it (not only the one that caused it). Size it for the concurrency
-  ([Sizing](docs/production.md#sizing)).
-- **Environment.** `PHP_SAPI` is `cli`, `zlib.output_compression` has no effect (compress in the proxy),
-  `auto_prepend_file` is not run, and a fiber's stack is `fiber.stack_size` (2 MB, not the 8 MB of
-  FPM's main stack): deep recursion that works under FPM can overflow it.
-
 ## Supervision
 
 A master process starts the workers and looks after them. It never loads the application
@@ -581,8 +482,7 @@ Operating notes:
 
 - Linux resets connections still waiting in the accept queue of a listener that closes. For
   handovers without any lost connection, set `sysctl net.ipv4.tcp_migrate_req=1` (swerve logs a
-  hint at startup when it is 0). In FastCGI mode, nginx retries such requests with
-  `fastcgi_next_upstream error`.
+  hint at startup when it is 0).
 - Give the process manager more time than `--grace`: `docker stop -t 35`, Compose
   `stop_grace_period: 35s` or systemd `TimeoutStopSec=35` for the default 30 seconds. During a
   handover a slot briefly has two workers, so budget for one worker's memory more.

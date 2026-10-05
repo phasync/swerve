@@ -10,7 +10,7 @@ use Swerve\Swerve;
  * Tells the application that this worker must now close its connections, see Swerve::onShutdown().
  *
  * The callbacks are kept in a WeakMap by the context of the coroutine that registered them
- * (a request's, as the Dispatcher gives each its own), so that the callbacks of a request that
+ * (a request's, as the connection gives each request its own), so that the callbacks of a request that
  * ended are gone with it and never run: nothing here keeps a request alive. phasync collects
  * the cycles a context ends up in half a second after a coroutine ends, so what a callback
  * holds is freed shortly after its request.

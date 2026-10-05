@@ -1,87 +1,136 @@
 # Requests and responses
 
-Swerve gives your handler a PSR-7 `ServerRequestInterface` (its own implementation) and sends the
-`ResponseInterface` it returns. This page is about HTTP mode, swerve's default; in FastCGI
-mode (`--fastcgi`), the web server in front speaks HTTP.
+`swerve.php` returns a `Swerve\RequestHandler` wrapping a closure. Swerve calls the closure once for
+each HTTP exchange with a `Swerve\ClientRequest`: the request to read and the response to write.
+A closure is required; anything else makes the worker exit with code 2 and a message.
 
-## What a request carries
+```php
+return new Swerve\RequestHandler(function (Swerve\ClientRequest $request): void {
+    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
+    $request->write("Hello, World\n");
+});
+```
+
+The handler runs in the connection's own coroutine, in a phasync context of its own:
+`phasync::getContext()` is per request, and `phasync::finally()` in a handler runs once the
+exchange is finished. It may keep the request for as long as it likes (an event stream, a long
+download) by not returning. When it returns, swerve finishes the exchange: an implicit `end()`,
+and the unread request body is skipped (up to 64 KiB within 5 s) or the connection closed. The
+request body can no longer be read after that.
+
+Request data is not parsed for you: there is no PSR-7 request, no query parameters, cookies,
+parsed body or uploaded files. Parse what you need from `getTarget()` and `getRequestHeaders()`,
+and read the body. A framework is served through an adapter that turns the `ClientRequest` into the
+framework's own request and response.
+
+## The ClientRequest
+
+`ClientRequest` extends `phasync\Net\Duplex`: `read()` is the request body, `write()` the response
+body.
 
 | | |
 |---|---|
-| `getMethod()`, `getUri()` | `http://host/path?query`: the Host header, and `http`, since swerve itself does not do TLS |
-| `getHeaders()`, `getHeaderLine()` | as the client sent them |
-| `getQueryParams()` | parsed from the query string |
-| `getCookieParams()` | parsed from the Cookie header, as PHP does |
-| `getServerParams()` | `REMOTE_ADDR`, `REMOTE_PORT`, `REQUEST_METHOD`, `REQUEST_URI`, `SERVER_PROTOCOL`, `REQUEST_TIME`, `REQUEST_TIME_FLOAT` |
-| `getBody()` | the request body, read from the connection as you read it; see below |
-| `getParsedBody()` | a POST form's fields, as PHP's `$_POST`: see *Forms* below; `null` for any other body |
-| `getUploadedFiles()` | a multipart POST's files, as PHP's `$_FILES`, as PSR-7 `UploadedFileInterface` objects |
-
-Behind a reverse proxy, `REMOTE_ADDR` is the proxy's address. The client's is in the header
-the proxy sets, such as `X-Forwarded-For`; trust it only when the request came from your proxy.
-
-## Forms
-
-Swerve parses what PHP parses, and only that: a **POST** whose `Content-Type` is
-`application/x-www-form-urlencoded` or `multipart/form-data`. Its fields and files are what PHP
-would put in `$_POST` and `$_FILES`, down to how names like `a[b][]` nest and dots in names
-become underscores. Every other body is left raw for you: a PUT, a JSON POST, anything else.
-Decode JSON yourself, or with your framework (Slim: `$app->addBodyParsingMiddleware()`).
-
-Parsing is lazy: the body is read on the first `getParsedBody()` or `getUploadedFiles()`, so a
-handler that never asks costs nothing, and one that streams the body itself still can. Asking
-for the parsed body after reading the raw body throws a `LogicException`: ask first. After
-parsing, `getBody()` is what `php://input` would be: an url-encoded body's bytes, and nothing
-for a multipart one.
-
-PHP's limits from `php.ini` apply as in PHP: `post_max_size` (a larger body gives an empty form,
-and a warning in the log), `upload_max_filesize` (a larger file gets `UPLOAD_ERR_INI_SIZE`),
-`max_file_uploads`, `max_input_vars`, `max_multipart_body_parts`, `file_uploads` and
-`enable_post_data_reading`. Uploads are streamed to temporary files in `upload_tmp_dir` and
-deleted when the request is gone, unless moved with `moveTo()`. The one difference from PHP:
-PHP keeps one field more than `max_input_vars`, swerve exactly that many.
-
-Upgrade requests (WebSockets) are never parsed.
+| `getMethod()` | `'GET'`, `'POST'`, ... as sent |
+| `getTarget()` | the request target as sent: `/path?query`, `*` or an absolute URI |
+| `getProtocolVersion()` | `'1.0'` or `'1.1'` |
+| `getScheme()` | `'http'`, or `'https'` from a [trusted proxy](command-line.md)'s `X-Forwarded-Proto` |
+| `getRequestHeaders()` | `array<string, list<string>>`: lowercase names, values in order; `host` is among them (a trusted proxy's `X-Forwarded-Host` replaces it) |
+| `peer()`, `local()` | the client's address, and ours; behind a trusted proxy the client's is from `X-Forwarded-For` |
+| `read($max = 65536, $timeout = null)` | the next piece of the request body; `''` only at its end |
+| `write($bytes, $timeout = null)` | the next piece of the response body |
+| `sendResponseHeaders($status, $headers = [])` | see below |
+| `headersSent()` | whether the final head is committed (it may still be held back) |
+| `flush()` | commit the head and put it on the wire |
+| `sendFile($stream, $offset = null, $length = null)` | write a file as the body |
+| `end($trailers = null)` | finish the response |
+| `close()` | abort the connection |
 
 ## The request body
 
-The body is a stream connected to the socket: nothing is read before you read it, and a large
-upload never has to fit in memory.
+The body is connected to the socket: nothing is read before you read it, and a large upload never
+has to fit in memory.
 
-- `(string) $request->getBody()` or `getContents()` reads it whole; `read($n)` reads up to
-  `$n` bytes at a time; `read()` returns `''` only at the end.
-- It may be read after the response was returned, and from another coroutine. The next
-  request on that connection waits until the body is read, or dropped.
-- A body you never read is skipped (up to 64 KiB within 5 s), or the connection closes.
+```php
+$body = '';
+while ('' !== ($piece = $request->read())) {
+    $body .= $piece;
+}
+```
+
+- `read()` returns `''` only at the end of the body. It throws `phasync\IOException` when the
+  client vanished in the middle.
 - Bodies larger than `--max-body` (8 MiB by default) get `413`.
-- A client may keep your `read()` waiting 10 s, plus a second for each KiB it sends; past
-  that, `read()` throws `phasync\TimeoutException` (a `RuntimeException`), so a client
-  trickling a byte at a time can't hold your handler for long.
-- `Expect: 100-continue` is answered when you first read the body, so a client only sends a
-  body you actually want.
-- A client that disconnects in the middle makes `read()` throw a `RuntimeException`.
+- A client may keep your `read()` waiting 10 s, plus a second for each KiB it sends; past that,
+  `read()` throws `phasync\TimeoutException`, so a client trickling a byte at a time can't hold your
+  handler for long.
+- `Expect: 100-continue` is answered when you first read the body, so a client only sends a body
+  you actually want.
 
-## The response
+## The response head
 
-Swerve sends the status line and headers, then reads the response body chunk by chunk and
-sends each chunk as it comes, so a large or slow body is streamed, not buffered:
+`sendResponseHeaders(int $status, array $headers = [])`, with header values a string or a list:
 
-- A body with a known size gets a `Content-Length`; one without (a generator-backed or
-  `UnbufferedStream`) is sent chunked, each piece as soon as it is read.
-- `HEAD` requests get the headers only.
-- A response body can be written while it is being sent: that is how Server-Sent Events work,
-  see [Realtime](realtime.md).
-- `--buffer-responses` reads each body whole first (up to 8 MiB) and sends it with one
-  write. It helps only for many small responses with a slow body stream; it delays streaming
-  responses until they end.
+- A `1xx` is an interim response: sent at once, and may be repeated (`103` Early Hints).
+- `101` is sent at once and switches to the raw connection: see
+  [Realtime](realtime.md#raw-connections-and-websockets).
+- Any other status is the final head. It is held until the first `write()`, `end()`, `flush()` or
+  `sendFile()`, and goes out with the first body bytes in one packet. A second call throws
+  `Swerve\HeadersSentException`.
 
-Swerve adds `Date`, and `Connection` as needed; it does not add `Content-Type`, compress, or
-set caching headers.
+Without a `sendResponseHeaders()`, the first `write()`, `end()` or `flush()` sends an implicit `200`
+with no headers of yours.
+
+## The response body
+
+`write()` goes straight out: nothing is buffered, so a stream is just writes with waits between
+them. `write('')` does nothing. Once the client is gone, `write()` throws `phasync\IOException`.
+
+The module owns the framing and the hop-by-hop headers:
+
+- With a `content-length` the body is framed as it is, and writing more than it throws. Without
+  one the body is chunked (HTTP/1.1), or ends with the connection (HTTP/1.0). To send a body of
+  known size, send its `content-length` yourself.
+- A held head with no body at all, and no `content-length` or `transfer-encoding`, gets
+  `content-length: 0`.
+- A handler's `transfer-encoding: chunked` is honoured; any other value, or one together with a
+  `content-length`, is an error (`500`). `connection` and `keep-alive` are the module's: only
+  `connection` options such as `upgrade` are passed on.
+- `HEAD` requests, and `204`, `205` and `304`, get no body.
+- The module adds `date` to every response, including its own error responses, and `server: Swerve`
+  unless the handler sets a `server`.
+
+`flush()` commits the head, an implicit `200` when there is none, and puts it on the wire: a stream
+the browser should see opening before the first event calls it.
+
+`sendFile($stream, $offset, $length)` writes a file, or part of one, as the body under the same
+framing rules, and commits the head first. No `content-length` is computed; send one with the head:
+
+```php
+$file = fopen($path, 'rb');
+$request->sendResponseHeaders(200, ['content-type' => 'application/pdf', 'content-length' => (string) filesize($path)]);
+$request->sendFile($file);
+```
+
+`end(?array $trailers)` finishes the response; the handler returning does it too. Trailers need a
+chunked response: name them in a `trailer` header, and pass them to `end()`. With a `content-length`, on
+HTTP/1.0 or with a status that has no body, `end()` throws `LogicException`.
+
+## Errors
+
+- A handler that throws before the head is committed gives a `500` and is logged. After, the
+  connection is aborted, and it is logged.
+- A malformed header (a name that is not a token, CR, LF or NUL in a value, an invalid
+  `content-length`) throws `UnexpectedValueException` from `sendResponseHeaders()`.
+- `read()`, `write()` and `flush()` throw `phasync\IOException` when the client is gone, and a
+  write `phasync\TimeoutException` when the client stopped reading for 60 s. A producer that writes
+  now and then (a keep-alive comment on an event stream) learns of a client that left at its next
+  write; catch it to end the loop.
+- Reading the request body after the response is finished throws `LogicException`.
 
 ## Connections
 
-HTTP/1.1 keep-alive and pipelining are supported; a kept-alive connection may be idle for
-5 s. Limits, all answered with the proper status:
+HTTP/1.1 keep-alive and pipelining are supported; a kept-alive connection may be idle for 5 s.
+Limits, all answered with the proper status:
 
 | | |
 |---|---|
@@ -96,17 +145,27 @@ while connections that sit idle are closed to make room.
 
 ## Static files
 
-`--public=<dir>` serves the files in a directory before your application sees the request:
-`/app.js` is `<dir>/app.js`, `/` is `<dir>/index.html`. Everything else goes to your
-application: paths that are not files, methods other than GET and HEAD, names starting with a
-dot (`.env`; `.well-known/` is served), and paths leading out of the directory.
+`--public=<dir>` serves the files in a directory before your handler sees the request: `/app.js` is
+`<dir>/app.js`, `/` is `<dir>/index.html`. Everything else goes to your handler: paths that are not
+files, methods other than GET and HEAD, names starting with a dot (`.env`; `.well-known/` is
+served), PHP files, and paths leading out of the directory.
 
-Files are streamed with `Content-Type` (from the extension), `Content-Length`,
-`Last-Modified` and `ETag`; browsers' revalidations get `304 Not Modified`, and a `Range`
-request `206 Partial Content`. Swerve sets no `Cache-Control`.
+Files are streamed with `Content-Type` (from the extension), `Content-Length`, `Last-Modified` and
+`ETag`; browsers' revalidations get `304 Not Modified`, and a `Range` request `206 Partial Content`.
+Swerve sets no `Cache-Control`.
 
-The same is PSR-15 middleware, `Swerve\StaticFiles`, for your own middleware stack:
-`$app->add(new Swerve\StaticFiles(__DIR__ . '/public'))` in Slim.
+`Swerve\StaticFiles` is the same without the option:
+
+```php
+$files = new Swerve\StaticFiles(__DIR__ . '/public');
+
+return new Swerve\RequestHandler($files->wrap(function (Swerve\ClientRequest $request): void {
+    // what is not a file
+}));
+```
+
+`wrap(Closure $app): Closure` returns a handler that answers file requests and calls `$app` for the
+rest.
 
 ## Logging
 

@@ -4,24 +4,19 @@ global
 
 defaults
     log     global
+    mode    http
     timeout connect 5s
     timeout client  50s
     timeout server  50s
+    # Upgraded (101) connections
 
 frontend www
-    mode http
     bind *:10089
-    default_backend phasync-backend
+    default_backend swerve
 
-backend phasync-backend
-    mode http
+# swerve --http=127.0.0.1:10003 --trusted-proxy=127.0.0.1
+backend swerve
     http-reuse always
-    use-fcgi-app phasync-server
-    server phasync1 127.0.0.1:10003 proto fcgi
-
-fcgi-app phasync-server
-    docroot /
-    option mpxs-conns
-    option keep-conn
-    option max-reqs 1000
-    no option get-values
+    option forwardfor
+    http-request set-header X-Forwarded-Proto http
+    server swerve1 127.0.0.1:10003

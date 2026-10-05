@@ -1,7 +1,7 @@
 # swerve.php is your application's bootstrap
 
 The master never loads your application. Each worker requires `swerve.php` once, when it
-starts, inside its event loop, and the file returns the request handler. Everything else the
+starts, inside its event loop, and the file returns the `Swerve\RequestHandler`. Everything else the
 file does happens in that worker, once per worker, before the handler serves its first request:
 
 - configuration, dependency injection, database connections;
@@ -37,7 +37,7 @@ phasync::go(function () use ($app) {                          // one worker at a
 
 (new MemcachedServer(11211))->start();                        // a server of your own
 
-return $app;                                                  // the PSR-15 handler that serves HTTP
+return new Swerve\RequestHandler($app->handle(...));          // the handler that serves HTTP
 ```
 
 [`examples/memcached`](../examples/memcached) is a complete server built this way.

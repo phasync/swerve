@@ -21,48 +21,57 @@ vendor/bin/swerve --ext --version   # swerve 0.1.0-beta4 (PHP 8.5.11, phasync 2.
 
 ## A first application
 
-Swerve serves a PHP file that returns a PSR-15 `RequestHandlerInterface`. By default it is
-`swerve.php` in the current directory.
-
-Without a framework:
-
-```php
-<?php // swerve.php
-
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Server\RequestHandlerInterface;
-use Swerve\Http\Message\Response;
-
-return new class implements RequestHandlerInterface {
-    public function handle(ServerRequestInterface $request): ResponseInterface
-    {
-        return new Response('Hello, ' . ($request->getQueryParams()['name'] ?? 'World'), ['Content-Type' => 'text/plain']);
-    }
-};
-```
-
-`Swerve\Http\Message\Response` is swerve's own PSR-7 implementation, which any application may use; frameworks bring their own. With Slim (`composer require slim/slim slim/psr7`):
+Swerve serves a PHP file that returns a `Swerve\RequestHandler` wrapping a closure. By default it
+is `swerve.php` in the current directory. The closure runs once for each HTTP exchange, with a
+`Swerve\ClientRequest`:
 
 ```php
 <?php // swerve.php
 
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Slim\Factory\AppFactory;
-use Swerve\Swerve;
-
-$app = AppFactory::create();
-$app->addBodyParsingMiddleware();                            // JSON and form bodies
-$app->addErrorMiddleware(true, true, false, Swerve::log());  // error pages; errors in swerve's log
-$app->get('/', function (ServerRequestInterface $request, ResponseInterface $response) {
-    $response->getBody()->write('Hello, World');
-
-    return $response;
+return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
+    $request->write("Hello, World\n");
 });
-
-return $app;
 ```
+
+Reading the request is up to the handler: the method, target and headers are getters, and the
+body is read with `read()`.
+
+```php
+<?php // swerve.php
+
+return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+    parse_str((string) parse_url($request->getTarget(), PHP_URL_QUERY), $query);
+
+    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
+    $request->write('Hello, ' . ($query['name'] ?? 'World') . "\n");
+});
+```
+
+The exchange lasts as long as the closure does, so a handler that waits and writes is a stream:
+
+```php
+<?php // swerve.php
+
+use phasync\IOException;
+
+return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+    $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream', 'cache-control' => 'no-cache']);
+    $request->flush();                       // the head goes out now
+    try {
+        for ($n = 1; ; ++$n) {
+            $request->write("data: $n\n\n");
+            phasync::sleep(1);               // other requests run meanwhile
+        }
+    } catch (IOException) {
+        // the client left
+    }
+});
+```
+
+A framework is served through an adapter that turns a `ClientRequest` into the framework's own
+request and response. [Requests and responses](requests-and-responses.md) is the reference for the
+`ClientRequest`.
 
 The file is loaded once in each worker process, when the worker starts: code outside the
 handler (creating the app, reading configuration, connecting to a database) runs once per

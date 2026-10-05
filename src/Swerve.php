@@ -40,11 +40,10 @@ final class Swerve
      *
      * It writes wherever swerve logs (the terminal, or `--log`'s file), and is a `NullLogger` with
      * `-q`. Without swerve's command line (swerve embedded), it is a `NullLogger` until
-     * {@see Swerve::setLog()} is called. Give it to the libraries that take a PSR-3 logger, such
-     * as Slim's error middleware:
+     * {@see Swerve::setLog()} is called. Give it to the libraries that take a PSR-3 logger, or
+     * log directly:
      *
      * ```php
-     * $app->addErrorMiddleware(true, true, false, Swerve::log());
      * Swerve::log()->warning('disk almost full: {free} MB', ['free' => $free]);
      * ```
      *

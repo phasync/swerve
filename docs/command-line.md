@@ -4,37 +4,38 @@
 Usage: swerve [options] [swerve.php]
 
 Application:
-  [swerve.php]            A PHP file returning a PSR-15 RequestHandlerInterface, such as a Slim app
+  [swerve.php]                     A PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest
 
 Serving:
-  --http=<address>        Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
-  --fastcgi=<address>     Serve FastCGI here instead, behind nginx or the like; the same forms as --http
-  --public=<dir>          HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
-  -w, --workers=<n>       Worker processes; auto is one per CPU core (default: auto)
+  --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
+  --public=<dir>                   HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
+  --trusted-proxy=<ip|range|unix>  HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several
+  -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
+
+Extension:
+  --ext                            Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot
 
 Development:
-  --watch                 Reload the workers, one at a time, when a PHP file of the application changes
+  --watch                          Reload the workers, one at a time, when a PHP file of the application changes
 
 Logging (to the terminal, or with --log to a file):
-  -v, --verbose           Log more: -v also what swerve does (workers starting, draining), -vv also debug
-  -q, --quiet             Log nothing to the terminal (--log still logs to its file)
-  --no-access-log         No line per request
-  --log=<path>            Append the log, and PHP errors, to this file instead
+  -v, --verbose                    Log more: -v also what swerve does (workers starting, draining), -vv also debug
+  -q, --quiet                      Log nothing to the terminal (--log still logs to its file)
+  --no-access-log                  No line per request
+  --log=<path>                     Append the log, and PHP errors, to this file instead
 
 Limits:
-  --max-body=<bytes>      HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
-  --trusted-proxy=<ip|cidr|unix>  HTTP: trust this peer's X-Forwarded-For, -Proto and -Host (repeatable)
-  --buffer-responses      HTTP: send each response body whole (up to 8 MiB) with a Content-Length, instead of streaming it
-  --grace=<seconds>       Seconds workers get to finish their requests on shutdown and reload before SIGKILL (default: 30)
-  --linger=<seconds>      Seconds a recycled worker keeps its upgraded connections (WebSockets, SSE) before closing them; 0 = close them at once (default: 1800)
-  --watchdog=<seconds>    Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
-  --max-memory=<size|P%>  Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
-  --max-requests=<n>      Recycle a worker after about n requests; 0 = off (default: 0)
-  --cache-size=<size>     The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G (default: 64M)
+  --max-body=<bytes>               HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
+  --grace=<seconds>                Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL (default: 30)
+  --linger=<seconds>               Seconds a recycled worker may keep serving its upgraded connections (101) after its replacement took over; 0 = not at all (default: 1800)
+  --watchdog=<seconds>             Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
+  --max-memory=<size|P%>           Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
+  --max-requests=<n>               Recycle a worker after about n requests; 0 = off (default: 0)
+  --cache-size=<size>              The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G (default: 64M)
 
 Information:
-  -h, --help              This help
-  --version               The versions of swerve, PHP, phasync and phasync-ext
+  -h, --help                       This help
+  --version                        The versions of swerve, PHP, phasync and phasync-ext
 ```
 
 - Options and the application file may come in any order. An option's value is attached
@@ -49,14 +50,13 @@ Information:
   The workers share the one socket file, made at start (a stale file is replaced; where anything
   listens, or a file that isn't a socket is in the way, swerve refuses to start) and removed at
   stop. Anyone may connect: limit access with the permissions of the directory it is in.
-- `--fastcgi` serves FastCGI instead of HTTP, for nginx or another web server in front;
-  `--public`, `--max-body`, `--buffer-responses` and `--trusted-proxy` are for HTTP mode only.
-
+- `--public` and `--max-body` apply to HTTP, which is all swerve serves; a proxy in front (nginx,
+  HAProxy, Caddy) speaks HTTP to it.
 - `--trusted-proxy` names the proxies in front of swerve: an address (`10.0.0.5`, `::1`), a range
   (`10.0.0.0/8`, `fd00::/8`) or `unix` for clients on a Unix socket. For a request from one of them,
-  `REMOTE_ADDR` is the rightmost `X-Forwarded-For` address that is not a trusted proxy, `HTTPS` is `on`
-  when `X-Forwarded-Proto` is `https`, and the `Host` is `X-Forwarded-Host`. From any other peer these
-  headers are left as they came, and mean nothing to swerve. Over `--fastcgi` the web server sets these.
+  `peer()` is the rightmost `X-Forwarded-For` address that is not a trusted proxy, `getScheme()` is
+  `https` when `X-Forwarded-Proto` is `https`, and the `host` header is `X-Forwarded-Host`. From any
+  other peer these headers are left as they came, and mean nothing to swerve.
 
 ## Exit codes
 
@@ -64,7 +64,7 @@ Information:
 |---|---|
 | 0 | stopped by a signal, after draining |
 | 1 | could not start: the address is taken, the log file can't be opened, the application file is missing |
-| 2 | a usage error; or the application can't start: loading it threw, or it returned no request handler |
+| 2 | a usage error; or the application can't start: loading it threw, or it returned something other than a `Swerve\RequestHandler` |
 | 255 | the application can't start because of a PHP fatal error, such as a syntax error (when every worker fails to start, swerve stops with the last one's exit code) |
 
 ## Signals to the master process
