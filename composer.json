@@ -6,13 +6,11 @@
         "php": "^8.2",
         "phasync/phasync": "^2.0.0-beta7",
         "psr/log": "^3.0",
-        "psr/http-message": "^1.0 || ^2.0",
         "psr/simple-cache": "^2.0 || ^3.0",
         "ext-pcntl": "*",
         "ext-posix": "*",
         "ext-sockets": "*",
-        "psr/http-server-handler": "^1.0",
-        "psr/http-server-middleware": "^1.0"
+        "phasync/net": "^2.0.0-alpha4"
     },
     "bin": [
         "bin/swerve"
