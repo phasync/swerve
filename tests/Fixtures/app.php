@@ -733,9 +733,12 @@ return new RequestHandler((new class($version) {
                 if (empty($query['ignore-eof'])) {
                     $r->write("EOF\n");
                     $r->end();
-                }
 
-                return;
+                    return;
+                }
+                while (true) {
+                    phasync::sleep(1);
+                }
             // A tunnel sending ?mb= MiB, which the application gives up ?ms= after the 101 (a
             // client that no longer answers its pings): it closes the connection
             case '/upgrade-abort':

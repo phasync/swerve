@@ -281,7 +281,7 @@ final class HttpConnection
         $this->draining = true;
         if ($this->upgraded) {
             if (null !== $this->reader) {
-                phasync::cancel($this->reader);
+                phasync::throw($this->reader, new CancelledException('The server is draining')); // not cancel(): the linger at the close must not be cancelled too
             }
 
             return true;

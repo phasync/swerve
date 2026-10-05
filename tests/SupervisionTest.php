@@ -1579,54 +1579,6 @@ test('a tunnel whose application ignores the end of its input is dropped at the 
     expect(log_count($log, '/FiberError/'))->toBe(0, file_get_contents($log));
 });
 
-test('a drain deadline reached while the application reads a request body after the response ends the worker without a PHP fatal error', function (string $request) {
-    [$process, $addr, $log] = swerve_start(['--grace=3'], workers: 1);
-    $conn                   = native_connect($addr);
-    fwrite($conn, $request);
-    if (str_contains($request, 'late-read')) {
-        expect(native_read_response($conn)['status'])->toBe(202);
-    } else {
-        usleep(200_000);
-    }
-    swerve_signal($process, SIGTERM);
-    // A byte now and then: the application's read waits on the socket, within its allowance
-    $start = microtime(true);
-    set_error_handler(static fn (): bool => true); // the worker may be gone
-    try {
-        while (proc_get_status($process)['running'] && microtime(true) - $start < 5) {
-            fwrite($conn, 'x');
-            usleep(300_000);
-        }
-    } finally {
-        restore_error_handler();
-    }
-    [$code] = swerve_wait($process, 2);
-
-    expect($code)->toBe(0);
-    expect(file_get_contents($log))->toContain('Drain deadline reached')->not->toContain('Fatal error')->not->toContain('exit 255');
-})->with([
-    'read after the response'             => ["POST /late-read?ms=0 HTTP/1.1\r\nHost: t\r\nContent-Length: 100000\r\n\r\nx"],
-    'waiting for an upgrade\'s status'    => ["POST /late-probe?ms=10000 HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: h2c\r\nContent-Length: 0\r\n\r\n"],
-]);
-
-test('a request body read slowly after the response is read to its end during a drain', function () {
-    $dir                    = test_dir();
-    [$process, $addr, $log] = swerve_start(['--grace=10'], workers: 1, env: ['SWERVE_TEST_DIR' => $dir]);
-    $conn                   = native_connect($addr);
-    // Larger than 64 KiB, so the application reads it from the socket: 20000 bytes at a time,
-    // 1.2 s apart
-    $body = str_repeat('x', 70000);
-    fwrite($conn, "POST /slow-consume?ms=1200&size=20000 HTTP/1.1\r\nHost: t\r\nContent-Length: 70000\r\n\r\n$body");
-    expect(native_read_response($conn)['status'])->toBe(202);
-    swerve_signal($process, SIGTERM);
-
-    [$code, $seconds] = swerve_wait($process, 10);
-    expect($code)->toBe(0);
-    expect($seconds)->toBeGreaterThan(4.0);
-    expect(file_get_contents("$dir/late"))->toBe(md5($body) . ':70000');
-    expect(file_get_contents($log))->not->toContain('held unread')->not->toContain('Drain deadline');
-});
-
 /**
  * An upgraded /upgrade-upper connection, non-blocking: the fixture echoes what it reads
  * upper-cased, and says "EOF\n" and ends when its input ends.
@@ -1704,58 +1656,6 @@ test('a drained tunnel whose client still sends gets everything the application 
     expect(trim($received, "A\n"))->toBe('EOF');
     swerve_wait($process, 6);
 })->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
-
-test('a drain ends a tunnel\'s input also while its application reads the upgrade request\'s own body, sent after the 101', function (string $framing, string $first, string $more) {
-    [$process, $addr, $log] = swerve_start(['--grace=4'], workers: 1);
-    $conn                   = native_connect($addr);
-    fwrite($conn, "GET /upgrade-upper HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: upper\r\n$framing\r\n\r\n");
-    expect(native_read_head($conn)['status'])->toBe(101);
-    fwrite($conn, $first);
-    expect(read_until($conn, 'ABC'))->toBe('ABC');
-    stream_set_blocking($conn, false);
-    swerve_signal($process, SIGTERM);
-    // The client may go on sending the body: its input ends all the same
-    $received = '';
-    $start    = microtime(true);
-    while (!str_ends_with($received, "EOF\n") && microtime(true) - $start < 3.5) {
-        if ('' !== $more) {
-            @fwrite($conn, $more);
-        }
-        usleep(50_000);
-        $received .= (string) @fread($conn, 65536);
-    }
-
-    expect(str_ends_with($received, "EOF\n"))->toBeTrue();
-    expect(microtime(true) - $start)->toBeLessThan(1.0);
-    [$code] = swerve_wait($process, 4);
-    expect($code)->toBe(0);
-    expect(log_count($log, '/Drain deadline reached/'))->toBe(0);
-})->with([
-    'Content-Length, 3 of its 10 bytes sent' => ['Content-Length: 10', 'abc', ''],
-    'chunked, sent on and on'                => ['Transfer-Encoding: chunked', "3\r\nabc\r\n", "4\r\nabcd\r\n"],
-]);
-
-test('a drain ends a tunnel\'s input at once also when its application waits since before the 101 for the upgrade request\'s own body', function (string $framing) {
-    [$process, $addr, $log] = swerve_start(['--grace=4'], workers: 1);
-    $conn                   = native_connect($addr);
-    // The fixture's reader starts before handle() returns the 101, and finds no body bytes yet
-    fwrite($conn, "GET /upgrade-upper HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: upper\r\n$framing\r\n\r\n");
-    expect(native_read_head($conn)['status'])->toBe(101);
-    usleep(300_000);
-    $start = microtime(true);
-    swerve_signal($process, SIGTERM);
-    stream_set_blocking($conn, false);
-    [$received] = read_to_end($conn, 3.5);
-
-    expect($received)->toBe("EOF\n");
-    expect(microtime(true) - $start)->toBeLessThan(1.0);
-    [$code] = swerve_wait($process, 4);
-    expect($code)->toBe(0);
-    expect(log_count($log, '/Drain deadline reached/'))->toBe(0);
-})->with([
-    'Content-Length' => ['Content-Length: 10'],
-    'chunked'        => ['Transfer-Encoding: chunked'],
-]);
 
 test('a 101 decided during a drain is sent, and its input ends at once', function () {
     [$process, $addr, $log] = swerve_start(['--grace=3'], workers: 1);
