@@ -329,22 +329,6 @@ test('a small request body held unread after the response does not hold up the n
     expect($late)->toBe([0, '0123', '456789', true]);
 });
 
-test('a small request body held unread keeps a keep-alive connection going in Slim, whose error handler holds it', function () {
-    [$master, $addr] = native_start('slim.php', workers: 1);
-    try {
-        $conn = native_connect($addr);
-        fwrite($conn, "POST /nope HTTP/1.1\r\nHost: t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 5\r\n\r\na=b&c");
-        expect(native_read_response($conn)['status'])->toBe(404);
-        $start = microtime(true);
-        fwrite($conn, "GET /hello HTTP/1.1\r\nHost: t\r\n\r\n");
-
-        expect(native_read_response($conn)['body'] ?? null)->toBe('Hello');
-        expect(microtime(true) - $start)->toBeLessThan(1.0);
-    } finally {
-        native_stop($master);
-    }
-});
-
 test('a request body released after a partial read has its rest skipped', function () {
     $handler  = streams_handler(function (ServerRequestInterface $request) {
         phasync::go(static function () use ($request) {

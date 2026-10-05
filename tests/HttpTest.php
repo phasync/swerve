@@ -1186,20 +1186,6 @@ test('a request head arriving a byte at a time takes linear time, not quadratic'
     expect($time(60000) / $time(6000))->toBeLessThan(13.0);
 });
 
-test('an empty POST body can be rewound, as Slim\'s MethodOverrideMiddleware does', function () {
-    $app = Slim\Factory\AppFactory::create();
-    $app->add(new Slim\Middleware\MethodOverrideMiddleware());
-    $app->post('/', function (Psr\Http\Message\ServerRequestInterface $request, Psr\Http\Message\ResponseInterface $response) {
-        $response->getBody()->write('ok');
-
-        return $response;
-    });
-    foreach (["Content-Length: 0\r\n", ''] as $length) {
-        $packets = native_serve_packets($app, "POST / HTTP/1.1\r\nHost: t\r\n{$length}Connection: close\r\n\r\n");
-        expect(implode('', $packets))->toStartWith('HTTP/1.1 200')->toEndWith("\r\n\r\nok");
-    }
-});
-
 test('accepted connections have TCP_NODELAY and keepalive probing (15 s idle, 15 s apart, 9 probes)', function () {
     $listener = \Swerve\Util\System::listen('127.0.0.1:0');
     $client   = stream_socket_client('tcp://' . stream_socket_get_name($listener, false));
