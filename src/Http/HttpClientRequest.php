@@ -157,8 +157,9 @@ final class HttpClientRequest implements ClientRequest
         if ($status < 200) {
             $head = $this->build($status, $headers) . "\r\n";
             if (101 === $status) {
-                if ('1.1' !== $this->version || !$this->done) {
-                    throw new \LogicException('101 answers an HTTP/1.1 upgrade request whose body was read to its end');
+                if ('1.1' !== $this->version || !$this->done || !isset($this->headers['upgrade'])
+                    || !\in_array('upgrade', \array_map('trim', \explode(',', \strtolower(\implode(',', $this->headers['connection'] ?? [])))), true)) {
+                    throw new \LogicException('101 answers an HTTP/1.1 upgrade request (Connection: upgrade, with an Upgrade header) whose body was read to its end');
                 }
                 $this->committed = $this->wire = $this->raw = true;
                 $this->status    = 101;
@@ -204,7 +205,8 @@ final class HttpClientRequest implements ClientRequest
         $this->begin(false);
         switch ($this->framing) {
             case self::CHUNKED:
-                $bytes = \dechex(\strlen($bytes)) . "\r\n$bytes\r\n";
+                $hex   = \dechex(\strlen($bytes)); // one interpolation copies a large body once, a concatenation twice
+                $bytes = "$hex\r\n$bytes\r\n";
                 break;
             case self::LENGTH:
                 if (\strlen($bytes) > $this->left) {

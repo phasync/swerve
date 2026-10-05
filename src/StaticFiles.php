@@ -2,18 +2,10 @@
 
 namespace Swerve;
 
-use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\ServerRequestInterface;
-use Psr\Http\Message\StreamInterface;
-use Psr\Http\Server\MiddlewareInterface;
-use Psr\Http\Server\RequestHandlerInterface;
-use phasync\Psr\Response;
-use phasync\Psr\StreamFactory;
-
 /**
- * PSR-15 middleware that serves the files of a directory and passes every other request on.
+ * Serves the files of a directory, and passes every other request on to the application's handler.
  *
- * It is what `--public=<dir>` installs; use it as middleware of your own for the same behaviour.
+ * It is what `--public=<dir>` installs; wrap your own handler for the same behaviour.
  *
  * A GET or HEAD request whose path names a file below the directory gets that file: streamed,
  * with its Content-Type (by extension), Content-Length, Last-Modified and ETag; `304 Not
@@ -27,12 +19,13 @@ use phasync\Psr\StreamFactory;
  * never sent), and a directory without index.html. Nothing is ever listed.
  *
  * ```php
- * $app->add(new Swerve\StaticFiles(__DIR__ . '/public'));   // Slim
+ * $files = new Swerve\StaticFiles(__DIR__ . '/public');
+ * return new Swerve\RequestHandler($files->wrap(function (Swerve\ClientRequest $request) {
+ *     // what is not a file
+ * }));
  * ```
- *
- * @see Swerve\Dispatcher
  */
-final class StaticFiles implements MiddlewareInterface
+final class StaticFiles
 {
     private const TYPES = [
         'html' => 'text/html; charset=utf-8', 'htm' => 'text/html; charset=utf-8', 'css' => 'text/css; charset=utf-8',
@@ -69,202 +62,109 @@ final class StaticFiles implements MiddlewareInterface
     }
 
     /**
-     * The file the request names, or the handler's response when it names none that is served.
+     * A handler that answers the requests naming a file from the directory, and calls `$app` for
+     * every other.
      *
-     * @param ServerRequestInterface  $request the request to answer from the directory, if it names a file
-     * @param RequestHandlerInterface $handler the application: gets every request this does not serve
+     * @param \Closure(ClientRequest): void $app the application's handler
      *
-     * @return ResponseInterface the file (200, 206, 304, 416), a 301 to a directory's trailing slash, or the handler's response
+     * @return \Closure(ClientRequest): void
      */
-    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+    public function wrap(\Closure $app): \Closure
     {
-        $method = $request->getMethod();
-        $path   = \rawurldecode($request->getUri()->getPath());
-        if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)|\.(?:php\d?|phps|phtml|phar|inc)$#i', $path)) {
-            return $handler->handle($request);
-        }
-        \clearstatcache(true, $this->root . $path);
-        $file = \realpath($this->root . $path);
-        if (false === $file || ($file !== $this->root && !\str_starts_with($file, $this->root . '/'))) {
-            return $handler->handle($request);
-        }
-        if (\is_dir($file)) {
-            if (!\is_file("$file/index.html")) {
-                return $handler->handle($request);
-            }
-            if (!\str_ends_with($path, '/')) {
-                $query = $request->getUri()->getQuery();
+        return function (ClientRequest $request) use ($app): void {
+            $method = $request->getMethod();
+            $target = $request->getTarget();
+            $path   = \rawurldecode((string) \parse_url($target, \PHP_URL_PATH));
+            if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)|\.(?:php\d?|phps|phtml|phar|inc)$#i', $path)) {
+                $app($request);
 
-                return new Response(301, ['Location' => $request->getUri()->getPath() . '/' . ('' !== $query ? "?$query" : '')], '');
+                return;
             }
-            $file .= '/index.html';
-        }
+            \clearstatcache(true, $this->root . $path);
+            $file = \realpath($this->root . $path);
+            if (false === $file || ($file !== $this->root && !\str_starts_with($file, $this->root . '/'))) {
+                $app($request);
 
-        return $this->serve($request, $file);
+                return;
+            }
+            if (\is_dir($file)) {
+                if (!\is_file("$file/index.html")) {
+                    $app($request);
+
+                    return;
+                }
+                if (!\str_ends_with($path, '/')) {
+                    $query = \parse_url($target, \PHP_URL_QUERY);
+                    $request->sendResponseHeaders(301, ['Location' => \parse_url($target, \PHP_URL_PATH) . '/' . (null !== $query && '' !== $query ? "?$query" : '')]);
+                    $request->end();
+
+                    return;
+                }
+                $file .= '/index.html';
+            }
+            $this->serve($request, $file);
+        };
     }
 
-    private function serve(ServerRequestInterface $request, string $file): ResponseInterface
+    private function serve(ClientRequest $request, string $file): void
     {
         $stat = @\stat($file);
         $fp   = false !== $stat ? @\fopen($file, 'r') : false;
         if (false === $fp) {
-            return new Response(403, [], '');
-        }
-        $size     = $stat['size'];
-        $modified = \gmdate('D, d M Y H:i:s', $stat['mtime']) . ' GMT';
-        $etag     = '"' . \dechex($stat['mtime']) . '-' . \dechex($size) . '"';
-        $headers  = [
-            'Content-Type'  => self::TYPES[\strtolower(\pathinfo($file, \PATHINFO_EXTENSION))] ?? 'application/octet-stream',
-            'Last-Modified' => $modified,
-            'ETag'          => $etag,
-            'Accept-Ranges' => 'bytes',
-        ];
+            $request->sendResponseHeaders(403);
+            $request->end();
 
-        $ifNoneMatch = $request->getHeaderLine('If-None-Match');
-        if ('' !== $ifNoneMatch
-            ? \in_array($etag, \array_map(static fn ($t) => \preg_replace('#^W/#', '', \trim($t)), \explode(',', $ifNoneMatch)), true) || '*' === \trim($ifNoneMatch)
-            : ('' !== ($since = $request->getHeaderLine('If-Modified-Since')) && false !== ($t = \strtotime($since)) && $stat['mtime'] <= $t)) {
+            return;
+        }
+        try {
+            $size     = $stat['size'];
+            $modified = \gmdate('D, d M Y H:i:s', $stat['mtime']) . ' GMT';
+            $etag     = '"' . \dechex($stat['mtime']) . '-' . \dechex($size) . '"';
+            $headers  = [
+                'Content-Type'  => self::TYPES[\strtolower(\pathinfo($file, \PATHINFO_EXTENSION))] ?? 'application/octet-stream',
+                'Last-Modified' => $modified,
+                'ETag'          => $etag,
+                'Accept-Ranges' => 'bytes',
+            ];
+            $in          = $request->getRequestHeaders();
+            $ifNoneMatch = \implode(', ', $in['if-none-match'] ?? []);
+            if ('' !== $ifNoneMatch
+                ? \in_array($etag, \array_map(static fn ($t) => \preg_replace('#^W/#', '', \trim($t)), \explode(',', $ifNoneMatch)), true) || '*' === \trim($ifNoneMatch)
+                : ('' !== ($since = \implode(', ', $in['if-modified-since'] ?? [])) && false !== ($t = \strtotime($since)) && $stat['mtime'] <= $t)) {
+                $request->sendResponseHeaders(304, $headers);
+                $request->end();
+
+                return;
+            }
+
+            // One range; several are answered with the whole file, as RFC 9110 allows
+            $range   = \implode(', ', $in['range'] ?? []);
+            $ifRange = \implode(', ', $in['if-range'] ?? []);
+            if (\preg_match('/^bytes=(\d*)-(\d*)$/', $range, $m) && ('' !== $m[1] || '' !== $m[2]) && ('' === $ifRange || $ifRange === $etag || $ifRange === $modified)) {
+                if ('' === $m[1]) {
+                    $start = \max(0, $size - (int) $m[2]);
+                    $end   = $size - 1;
+                } else {
+                    $start = (int) $m[1];
+                    $end   = '' === $m[2] ? $size - 1 : \min((int) $m[2], $size - 1);
+                }
+                if ($start >= $size || $start > $end) {
+                    $request->sendResponseHeaders(416, ['Content-Range' => "bytes */$size"] + $headers);
+                    $request->end();
+
+                    return;
+                }
+                $length = $end - $start + 1;
+                $request->sendResponseHeaders(206, ['Content-Range' => "bytes $start-$end/$size", 'Content-Length' => (string) $length] + $headers);
+                $request->sendFile($fp, $start, $length);
+
+                return;
+            }
+
+            $request->sendResponseHeaders(200, ['Content-Length' => (string) $size] + $headers);
+            $request->sendFile($fp);
+        } finally {
             \fclose($fp);
-
-            return new Response(304, $headers, '');
         }
-
-        // One range; several are answered with the whole file, as RFC 9110 allows
-        $range   = $request->getHeaderLine('Range');
-        $ifRange = $request->getHeaderLine('If-Range');
-        if (\preg_match('/^bytes=(\d*)-(\d*)$/', $range, $m) && ('' !== $m[1] || '' !== $m[2]) && ('' === $ifRange || $ifRange === $etag || $ifRange === $modified)) {
-            if ('' === $m[1]) {
-                $start = \max(0, $size - (int) $m[2]);
-                $end   = $size - 1;
-            } else {
-                $start = (int) $m[1];
-                $end   = '' === $m[2] ? $size - 1 : \min((int) $m[2], $size - 1);
-            }
-            if ($start >= $size || $start > $end) {
-                \fclose($fp);
-
-                return new Response(416, ['Content-Range' => "bytes */$size"] + $headers, '');
-            }
-            \fseek($fp, $start);
-            $length = $end - $start + 1;
-
-            return new Response(206, ['Content-Range' => "bytes $start-$end/$size", 'Content-Length' => (string) $length] + $headers, self::part($fp, $length));
-        }
-
-        return new Response(200, ['Content-Length' => (string) $size] + $headers, StreamFactory::create($fp));
-    }
-
-    /**
-     * The $length bytes of $fp from where it is: a stream that can't be sought, since a server
-     * rewinds a seekable body to its start before sending it.
-     *
-     * @param resource $fp
-     */
-    private static function part($fp, int $length): StreamInterface
-    {
-        return new class($fp, $length) implements StreamInterface {
-            private int $left;
-
-            /** @param resource $fp */
-            public function __construct(private $fp, private readonly int $length)
-            {
-                $this->left = $length;
-            }
-
-            public function read(int $length): string
-            {
-                if ($this->left <= 0) {
-                    return '';
-                }
-                $data = (string) \fread($this->fp, \min($length, $this->left));
-                $this->left -= \strlen($data);
-                if ('' === $data) {
-                    $this->left = 0; // the file shrank meanwhile
-                }
-
-                return $data;
-            }
-
-            public function eof(): bool
-            {
-                return $this->left <= 0;
-            }
-
-            public function getSize(): int
-            {
-                return $this->length;
-            }
-
-            public function tell(): int
-            {
-                return $this->length - $this->left;
-            }
-
-            public function getContents(): string
-            {
-                $out = '';
-                while ('' !== ($data = $this->read(65536))) {
-                    $out .= $data;
-                }
-
-                return $out;
-            }
-
-            public function close(): void
-            {
-                if (\is_resource($this->fp)) {
-                    \fclose($this->fp);
-                }
-                $this->left = 0;
-            }
-
-            public function detach()
-            {
-                $fp       = $this->fp;
-                $this->fp = null;
-
-                return $fp;
-            }
-
-            public function isSeekable(): bool
-            {
-                return false;
-            }
-
-            public function seek(int $offset, int $whence = \SEEK_SET): void
-            {
-                throw new \RuntimeException('Not seekable');
-            }
-
-            public function rewind(): void
-            {
-                throw new \RuntimeException('Not seekable');
-            }
-
-            public function isWritable(): bool
-            {
-                return false;
-            }
-
-            public function write(string $string): int
-            {
-                throw new \RuntimeException('Not writable');
-            }
-
-            public function isReadable(): bool
-            {
-                return true;
-            }
-
-            public function getMetadata(?string $key = null)
-            {
-                return null === $key ? [] : null;
-            }
-
-            public function __toString(): string
-            {
-                return $this->getContents();
-            }
-        };
     }
 }
