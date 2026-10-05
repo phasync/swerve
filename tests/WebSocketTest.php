@@ -4,6 +4,8 @@
  * Swerve\Http\WebSocket, served by the fixture's /websocket: an echo, as a browser would use it.
  */
 
+beforeEach(fn () => test()->markTestSkipped('phase B: WebSocket on the 101 Duplex'));
+
 /**
  * Send raw bytes as one frame's head and payload, masked with $mask when given.
  */

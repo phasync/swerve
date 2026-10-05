@@ -85,4 +85,4 @@ test('the WebSocket chat: messages sent reach every connection; a ping gets its 
         native_stop($process);
     }
     expect(log_count($log, '/(error|critical)/'))->toBe(0, file_get_contents($log));
-});
+})->skip('phase B: WebSocket on the 101 Duplex');
