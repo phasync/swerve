@@ -741,3 +741,73 @@ function read_to_end($conn, float $timeout = 5): array
 
     return [$data, false];
 }
+
+/*
+ * Helpers of the WebSocket and Server-Sent Events tests (tests/Fixtures/realtime.php): swerve without and with phasync-ext.
+ */
+
+dataset('modes', ['plain' => [[]], 'ext' => [['--ext']]]);
+
+/**
+ * Start swerve serving the realtime fixture in the mode of the dataset, and check that it is the mode.
+ *
+ * @param string[]              $mode [] or ['--ext']
+ * @param array<string, string> $env
+ *
+ * @return array{0: resource, 1: string, 2: string} the process, its address, the log file
+ */
+function ws_start(array $mode, int $workers = 1, array $env = []): array
+{
+    [$process, $addr, $log] = swerve_start($mode, $workers, env: $env, fixture: 'realtime.php');
+    expect(probe($addr, '/ext'))->toBe($mode ? '1' : '0');
+
+    return [$process, $addr, $log];
+}
+
+/** Nothing in the log that a clean run would not have: no error, no PHP warning. */
+function ws_clean(string $log): void
+{
+    expect(log_count($log, '/(ERROR|CRITICAL|WARNING|Unhandled|failed|Warning:|Notice:|Deprecated:|Fatal error)/'))->toBe(0, (string) file_get_contents($log));
+}
+
+/** Wait until /live says $what is running $n times, summed over $workers workers; the sum it ended with. */
+function ws_live(string $addr, string $what, int $n, int $workers = 1): int
+{
+    $total    = -1;
+    $deadline = microtime(true) + 5;
+    do {
+        $seen = [];
+        for ($i = 0; $i < 40 * $workers && count($seen) < $workers; ++$i) {
+            [$pid, $count] = json_decode((string) probe($addr, "/live?what=$what"), true);
+            $seen[$pid]    = $count;
+        }
+        $total = array_sum($seen);
+        if ($total === $n) {
+            break;
+        }
+        usleep(50_000);
+    } while (microtime(true) < $deadline);
+
+    return $total;
+}
+
+/** Reset the connection (RST) instead of closing it, as a killed browser tab does. */
+function ws_reset($conn): void
+{
+    $socket = socket_import_stream($conn);
+    socket_set_option($socket, SOL_SOCKET, SO_LINGER, ['l_onoff' => 1, 'l_linger' => 0]);
+    socket_close($socket);
+}
+
+/** What the $onClose of /websocket-events saw, once there are $count of them (and a moment longer, for a second trigger). */
+function ws_closes(string $addr, int $count): array
+{
+    $deadline = microtime(true) + 3;
+    do {
+        $closes = json_decode((string) probe($addr, '/ws-closes'), true);
+        usleep(50_000);
+    } while (count($closes) < $count && microtime(true) < $deadline);
+    usleep(150_000);
+
+    return json_decode((string) probe($addr, '/ws-closes'), true);
+}
