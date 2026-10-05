@@ -8,24 +8,25 @@
 # dev:  a 5 s warm-up, then one 10 s run (regression checks while developing)
 # docs: a 5 s warm-up, then three 30 s runs; the best is reported (published numbers)
 # WORKLOAD=file4k|file1m: every request reads a 4 KB or 1 MB file from disk (page cache) and serves it, the way
-# most code of each runtime does it: file_get_contents, fs.createReadStream().pipe(), http.ServeFile.
+# most code of each runtime does it: 4 KB read whole into memory (file_get_contents, fs.readFile, os.ReadFile), 1 MB streamed
+# (sendFile, fs.createReadStream().pipe(), http.ServeFile).
 # FRONT=nginx puts nginx in front, as in production: upstream keepalive to the server over TCP, on the
 # physical cores 4-7 and their SMT siblings, wrk against nginx. FRONT=nginx-unix: the same over a unix socket.
 # Every run is appended to results.log. A setup already measured in the same mode (same key: the
 # code, binaries and settings it depends on) is not run again; its logged result is reported.
 # Setup on black, in $RT: phasync.so (phasync-ext), node-v26.10.0-linux-x64, go1.27.1; this
-# swerve tree with its vendor/; `go build -o hello .` and `go build -o file ./gofile` here.
+# swerve tree with its vendor/; `go build -o hello .`, `go build -o file ./gofile` and `go build -o filestream ./gofilestream` here.
 set -u
 cd "$(dirname "$0")"
 MODE=$1 SERVERS=${2:-"phasync phasync-ext node go"} NS=${3:-"1 2 4"}
 RT=$HOME/bench/rt PORT=18600 WRK="taskset -c 8-15 wrk -t8 -c64 --latency"
-EXT=$RT/phasync.so NODE=$RT/node-v26.10.0-linux-x64/bin/node
+EXT=$PWD/../../vendor/phasync/phasync/ext/phasync-8.5-nts-x86_64-glibc.so NODE=$RT/node-v26.10.0-linux-x64/bin/node
 PHP="php8.5 -d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M"
 WORKLOAD=${WORKLOAD:-hello}
 case $WORKLOAD in
     hello)  NAME=hello ;;
     file4k) NAME=file FILE=/tmp/rt-file4k.txt; head -c 4096 /dev/zero | tr '\0' 'x' > $FILE ;;
-    file1m) NAME=file FILE=/tmp/rt-file1m.txt; head -c 1048576 /dev/zero | tr '\0' 'x' > $FILE ;;
+    file1m) NAME=filestream FILE=/tmp/rt-file1m.txt; head -c 1048576 /dev/zero | tr '\0' 'x' > $FILE ;;
     *) echo "workload: hello, file4k or file1m"; exit 1 ;;
 esac
 export FILE

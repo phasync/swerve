@@ -1,24 +1,16 @@
-// Go's net/http reading a file into memory with os.ReadFile
+// Go's net/http streaming a file from disk with http.ServeFile
 package main
 
 import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 )
 
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		data, err := os.ReadFile(os.Getenv("FILE"))
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-		w.Write(data)
+		http.ServeFile(w, r, os.Getenv("FILE"))
 	})
 	network, addr := "tcp", os.Args[1]
 	if strings.HasPrefix(addr, "unix:") {

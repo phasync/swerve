@@ -1,10 +1,12 @@
 <?php
-// swerve: the smallest PSR-15 handler, answering every request the same way
+// swerve: the smallest handler, answering every request the same way
 require __DIR__ . '/../../vendor/autoload.php';
 
-return new class () implements Psr\Http\Server\RequestHandlerInterface {
-    public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface
-    {
-        return new phasync\Psr\Response(200, ['Content-Type' => 'text/plain'], 'Hello, World!');
-    }
-};
+use Swerve\ClientRequest;
+use Swerve\RequestHandler;
+
+return new RequestHandler(function (ClientRequest $request): void {
+    $request->sendResponseHeaders(200, ['content-type' => 'text/plain', 'content-length' => '13']);
+    $request->write('Hello, World!');
+    $request->end();
+});

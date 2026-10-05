@@ -1,10 +1,13 @@
 <?php
-// swerve: a PSR-15 handler that reads a file from disk on every request and serves it
+// swerve: reads a file from disk on every request and serves it
 require __DIR__ . '/../../vendor/autoload.php';
 
-return new class () implements Psr\Http\Server\RequestHandlerInterface {
-    public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface
-    {
-        return new phasync\Psr\Response(200, ['Content-Type' => 'text/plain'], file_get_contents(getenv('FILE')));
-    }
-};
+use Swerve\ClientRequest;
+use Swerve\RequestHandler;
+
+return new RequestHandler(function (ClientRequest $request): void {
+    $body = file_get_contents(getenv('FILE'));
+    $request->sendResponseHeaders(200, ['content-type' => 'text/plain', 'content-length' => (string) strlen($body)]);
+    $request->write($body);
+    $request->end();
+});
