@@ -85,21 +85,25 @@ serves the next request.
 ### For adapters
 
 A framework adapter (swerve-psr15, Symfony, Tether) hands the application this same `WebSocket`, so every
-example reads alike. The framework's request is not a `ClientRequest`, so the adapter uses the two functions
+example reads alike. The framework's request is not a `ClientRequest`, so the adapter uses the functions
 `from()` is made of:
 
 | | |
 |---|---|
 | `WebSocket::handshake($method, $version, $headers, $hasBody, $subprotocols = [], $origins = null)` | the decision, from the parts of any request (`$headers` as `getRequestHeaders()` gives them: lowercase name => list); answers nothing and returns a `WebSocketHandshake` |
-| `WebSocket::upgrade($request, $headers, $callback, $maxMessage = 1 MiB)` | sends the `101` with `$headers` exactly as given, then runs the callback as `from()` does; no second validation |
+| `WebSocket::upgrade($request, $headers, $callback, $maxMessage = 1 MiB)` | sends the `101` with `$headers` exactly as given on a `ClientRequest`, then runs the callback as `from()` does; no second validation |
+| `WebSocket::run($connection, $callback, $subprotocol = null, $maxMessage = 1 MiB)` | the callback on a connection whose `101` was already sent, by the adapter's own code: any `Duplex`, not only a `ClientRequest` |
 
 A `WebSocketHandshake` has `status`, `headers`, `body`, `subprotocol` and `accepted()`. Refused (426, 400, 403),
 `status`, `headers` and `body` are the whole final response, as swerve answers it: the adapter returns it as the
 framework's ordinary response, so middleware may decorate it. Accepted (`101`), `headers` are `Upgrade`,
 `Connection`, `Sec-WebSocket-Accept` and the chosen `Sec-WebSocket-Protocol`: the adapter returns a `101`
-response with them (middleware may add more) that carries the callback, and when it reaches the adapter's
-bridge, the bridge calls `upgrade()` with the response's headers. The subprotocol `$ws->subprotocol` is read
-from `Sec-WebSocket-Protocol` there. Applications call `from()`, not these.
+response with them (middleware may add more) that carries the callback. `upgrade()` is `sendResponseHeaders(101, $headers)`
+followed by `run()`, for an adapter that hands swerve a `ClientRequest` directly. An adapter whose bridge sends
+the `101` itself (swerve-psr15, so that the response's body is the outbound frames a middleware can wrap) calls
+`run()` on a `Duplex` of its own instead, once it decides to start the callback; `WebSocket` only ever calls
+`read()`, `write()`, `end()` and `close()` on it. The subprotocol is not read back from the headers in that
+case, so the adapter passes the one it chose as `$subprotocol`. Applications call `from()`, not these.
 
 ### States
 

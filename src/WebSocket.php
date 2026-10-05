@@ -5,11 +5,12 @@ namespace Swerve;
 use phasync;
 use phasync\CancelledException;
 use phasync\IOException;
+use phasync\Net\Duplex;
 use phasync\TimeoutException;
 use phasync\Util\Event;
 
 /**
- * A WebSocket connection (RFC 6455), server side, on a {@see ClientRequest}.
+ * A WebSocket connection (RFC 6455), server side, on a {@see ClientRequest} or any {@see Duplex}.
  *
  * ```php
  * return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
@@ -142,7 +143,7 @@ final class WebSocket implements \IteratorAggregate
     /** The pump saw the connection end: receive() returns null once the inbox is empty. */
     private bool $readerDone = false;
 
-    private function __construct(private readonly ClientRequest $request, ?string $subprotocol, private readonly int $maxMessage)
+    private function __construct(private readonly Duplex $connection, ?string $subprotocol, private readonly int $maxMessage)
     {
         $this->subprotocol = $subprotocol;
         $this->onMessage   = new Event();
@@ -216,8 +217,9 @@ final class WebSocket implements \IteratorAggregate
 
             return null;
         }
+        $request->sendResponseHeaders(101, $handshake->headers);
 
-        return self::open($request, $handshake->headers, $maxMessage);
+        return self::open($request, self::subprotocolOf($handshake->headers), $maxMessage);
     }
 
     /**
@@ -293,7 +295,22 @@ final class WebSocket implements \IteratorAggregate
      */
     public static function upgrade(ClientRequest $request, array $headers, callable $callback, int $maxMessage = self::MAX_MESSAGE): void
     {
-        self::open($request, $headers, $maxMessage)->pump($callback(...));
+        $request->sendResponseHeaders(101, $headers);
+        self::run($request, $callback, self::subprotocolOf($headers), $maxMessage);
+    }
+
+    /**
+     * For adapters whose own code already sent the `101` (such as swerve-psr15's bridge, after its
+     * middleware decided the headers): run `$callback` on `$connection` as {@see WebSocket::upgrade()}
+     * does, with the same close codes and cancellation. `$connection` need be no more than a
+     * {@see Duplex}: read(), write(), end() and close() are all this uses.
+     *
+     * @param callable(WebSocket): void $callback
+     * @param int                       $maxMessage see upgrade()
+     */
+    public static function run(Duplex $connection, callable $callback, ?string $subprotocol = null, int $maxMessage = self::MAX_MESSAGE): void
+    {
+        self::open($connection, $subprotocol, $maxMessage)->pump($callback(...));
     }
 
     /** The decision for the request of an exchange. */
@@ -302,12 +319,18 @@ final class WebSocket implements \IteratorAggregate
         return self::handshake($request->getMethod(), $request->getProtocolVersion(), $request->getRequestHeaders(), !$request->eof(), $subprotocols, $origins);
     }
 
-    /** Send the 101 and start the connection: the ping loop serves it from now on. */
-    private static function open(ClientRequest $request, array $headers, int $maxMessage): self
+    /** The subprotocol a `101`'s headers carry, however they capitalize its name. */
+    private static function subprotocolOf(array $headers): ?string
     {
-        $request->sendResponseHeaders(101, $headers);
         $subprotocol = \array_change_key_case($headers)['sec-websocket-protocol'] ?? null;
-        $ws          = new self($request, \is_array($subprotocol) ? $subprotocol[0] : $subprotocol, $maxMessage);
+
+        return \is_array($subprotocol) ? $subprotocol[0] : $subprotocol;
+    }
+
+    /** Register the connection and start the ping loop; the `101` is already on its way. */
+    private static function open(Duplex $connection, ?string $subprotocol, int $maxMessage): self
+    {
+        $ws = new self($connection, $subprotocol, $maxMessage);
         self::$open[\spl_object_id($ws)] = \WeakReference::create($ws);
         self::keepAlive();
 
@@ -460,7 +483,7 @@ final class WebSocket implements \IteratorAggregate
         }
         if (!$this->dead) {
             $this->put(self::head(8, 2 + \strlen($reason)) . \pack('n', $code) . $reason, self::CLOSE_TIMEOUT);
-            $this->request->end();
+            $this->connection->end();
         }
         if (null !== $this->reading && $this->reading !== \Fiber::getCurrent()) {
             phasync::throw($this->reading, new CancelledException('The WebSocket was ended')); // from the wait for the client's bytes
@@ -630,7 +653,7 @@ final class WebSocket implements \IteratorAggregate
         while (\strlen($this->buffer) < $n) {
             $this->reading = \Fiber::getCurrent();
             try {
-                $bytes = $this->request->read(65536);
+                $bytes = $this->connection->read(65536);
             } catch (IOException) {
                 $bytes = ''; // reset
             } catch (CancelledException $e) {
@@ -684,12 +707,12 @@ final class WebSocket implements \IteratorAggregate
     private function put(string $bytes, float $timeout): void
     {
         try {
-            $this->request->write($bytes, $timeout);
+            $this->connection->write($bytes, $timeout);
         } catch (IOException) {
             $this->dead = true;
         } catch (TimeoutException) {
             $this->dead = true;
-            $this->request->close(); // the frame may be half sent
+            $this->connection->close(); // the frame may be half sent
         }
     }
 
@@ -719,7 +742,7 @@ final class WebSocket implements \IteratorAggregate
                                 continue;
                             }
                             try {
-                                $ws->request->write("\x89\x00", 0.0); // a ping with no payload
+                                $ws->connection->write("\x89\x00", 0.0); // a ping with no payload
                             } catch (IOException|TimeoutException) {
                                 // gone, or not reading: the connection finds out by itself
                             }
