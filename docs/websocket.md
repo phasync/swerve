@@ -82,6 +82,25 @@ serves the next request.
 - Extensions are never accepted (no permessage-deflate): `Sec-WebSocket-Extensions` is ignored, so frames never
   carry reserved bits.
 
+### For adapters
+
+A framework adapter (swerve-psr15, Symfony, Tether) hands the application this same `WebSocket`, so every
+example reads alike. The framework's request is not a `ClientRequest`, so the adapter uses the two functions
+`from()` is made of:
+
+| | |
+|---|---|
+| `WebSocket::handshake($method, $version, $headers, $hasBody, $subprotocols = [], $origins = null)` | the decision, from the parts of any request (`$headers` as `getRequestHeaders()` gives them: lowercase name => list); answers nothing and returns a `WebSocketHandshake` |
+| `WebSocket::upgrade($request, $headers, $callback, $maxMessage = 1 MiB)` | sends the `101` with `$headers` exactly as given, then runs the callback as `from()` does; no second validation |
+
+A `WebSocketHandshake` has `status`, `headers`, `body`, `subprotocol` and `accepted()`. Refused (426, 400, 403),
+`status`, `headers` and `body` are the whole final response, as swerve answers it: the adapter returns it as the
+framework's ordinary response, so middleware may decorate it. Accepted (`101`), `headers` are `Upgrade`,
+`Connection`, `Sec-WebSocket-Accept` and the chosen `Sec-WebSocket-Protocol`: the adapter returns a `101`
+response with them (middleware may add more) that carries the callback, and when it reaches the adapter's
+bridge, the bridge calls `upgrade()` with the response's headers. The subprotocol `$ws->subprotocol` is read
+from `Sec-WebSocket-Protocol` there. Applications call `from()`, not these.
+
 ### States
 
 ```

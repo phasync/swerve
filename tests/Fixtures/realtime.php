@@ -114,6 +114,23 @@ return new RequestHandler((new class {
                 }, subprotocols: ['chat.v2', 'chat.v1']);
 
                 return;
+            // What an adapter does: decide from the parts of the request, add a header to the 101, upgrade
+            case '/websocket-adapter':
+                $handshake = WebSocket::handshake($r->getMethod(), $r->getProtocolVersion(), $r->getRequestHeaders(), !$r->eof(), ['chat.v1']);
+                if (!$handshake->accepted()) {
+                    $r->sendResponseHeaders($handshake->status, $handshake->headers + ['x-added' => 'by middleware']);
+                    $r->write($handshake->body);
+
+                    return;
+                }
+                WebSocket::upgrade($r, $handshake->headers + ['x-added' => 'by middleware'], static function (WebSocket $ws) {
+                    $ws->send($ws->subprotocol ?? 'none');
+                    foreach ($ws as $message) {
+                        $ws->send($message);
+                    }
+                }, 10);
+
+                return;
             case '/websocket-origin':
                 WebSocket::from($r, static function (WebSocket $ws) {
                     $ws->send('welcome');

@@ -15,6 +15,11 @@
   pushed (`$onMessage`), with `$onClose`, subprotocols, an origin allow-list, a `maxMessage` limit,
   server pings, backpressure both ways, and every close code the protocol defines. A drain closes
   sockets with 1001. Its contract is `docs/websocket.md`, pinned by tests that run with and without phasync-ext.
+- `WebSocket::handshake()` and `WebSocket::upgrade()`, for framework adapters: the handshake decision from
+  the parts of any request (method, version, headers, body or not, subprotocols, origins), returned as a
+  `Swerve\WebSocketHandshake` (a refusal's status, headers and body, or the `101` headers and the chosen
+  subprotocol), and the upgrade that sends given `101` headers and runs the callback. `from()` and
+  `accept()` are built on them, with the same answers as before. `WebSocket` is `final`.
 - `Swerve\ServerSentEvents`: the event stream head, `send()` with `event`, `id` and `retry`, `comment()`
   and `lastEventId()`.
 

@@ -152,7 +152,7 @@ final class WebSocket implements \IteratorAggregate
     /**
      * Answer the handshake and run `$callback` on the open connection; returns when the connection has closed.
      *
-     * A request that is no WebSocket handshake is answered by {@see WebSocket::accept()}, and the
+     * A request that is no WebSocket handshake is answered as {@see WebSocket::accept()} says, and the
      * callback is not called. Returning from the callback closes with 1000, throwing closes with
      * 1011 and is logged by swerve; the client leaving cancels it.
      *
@@ -171,8 +171,11 @@ final class WebSocket implements \IteratorAggregate
      */
     public static function from(ClientRequest $request, callable $callback, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): void
     {
-        if (null !== $ws = self::accept($request, $subprotocols, $origins, $maxMessage)) {
-            $ws->pump($callback(...));
+        $handshake = self::handshakeOf($request, $subprotocols, $origins);
+        if ($handshake->accepted()) {
+            self::upgrade($request, $handshake->headers, $callback, $maxMessage);
+        } else {
+            self::refuse($request, $handshake);
         }
     }
 
@@ -207,8 +210,36 @@ final class WebSocket implements \IteratorAggregate
      */
     public static function accept(ClientRequest $request, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): ?self
     {
-        $headers = $request->getRequestHeaders();
-        $tokens  = static function (string $name) use ($headers): array {
+        $handshake = self::handshakeOf($request, $subprotocols, $origins);
+        if (!$handshake->accepted()) {
+            self::refuse($request, $handshake);
+
+            return null;
+        }
+
+        return self::open($request, $handshake->headers, $maxMessage);
+    }
+
+    /**
+     * For framework adapters: decide a handshake from the parts of any request, answering nothing.
+     *
+     * {@see WebSocket::from()} and {@see WebSocket::accept()} are this decision on a
+     * {@see ClientRequest}, so an adapter whose framework has its own request object (PSR-7, Symfony)
+     * gets the same answer, byte for byte: it sends a refusal as an ordinary response, which the
+     * framework's middleware may decorate, and for an acceptance it returns a `101` response with
+     * these headers and, when the connection reaches swerve, hands it to {@see WebSocket::upgrade()}.
+     * Applications use `from()` and don't call this.
+     *
+     * @param string                      $method       the request method
+     * @param string                      $version      the HTTP version without the prefix: '1.1'
+     * @param array<string, list<string>> $headers      the request headers: lowercase name => the values, in order, as {@see ClientRequest::getRequestHeaders()}
+     * @param bool                        $hasBody      whether the request has a body (a handshake has none)
+     * @param string[]                    $subprotocols see accept()
+     * @param string[]|null               $origins      see accept()
+     */
+    public static function handshake(string $method, string $version, array $headers, bool $hasBody, array $subprotocols = [], ?array $origins = null): WebSocketHandshake
+    {
+        $tokens = static function (string $name) use ($headers): array {
             $tokens = [];
             foreach ($headers[$name] ?? [] as $line) {
                 foreach (\explode(',', $line) as $token) {
@@ -219,24 +250,18 @@ final class WebSocket implements \IteratorAggregate
             return $tokens;
         };
         if (!\in_array('websocket', \array_map('strtolower', $tokens('upgrade')), true) || !\in_array('upgrade', \array_map('strtolower', $tokens('connection')), true)) {
-            self::refuse($request, 426, 'This address speaks WebSocket', ['upgrade' => 'websocket', 'connection' => 'Upgrade']);
-
-            return null;
+            return self::refusal(426, 'This address speaks WebSocket', ['upgrade' => 'websocket', 'connection' => 'Upgrade']);
         }
         $key = $headers['sec-websocket-key'][0] ?? '';
         if (
-            'GET' !== $request->getMethod() || '1.1' !== $request->getProtocolVersion() || !$request->eof()
+            'GET' !== $method || '1.1' !== $version || $hasBody
             || ['13'] !== ($headers['sec-websocket-version'] ?? null)
             || 1 !== \count($headers['sec-websocket-key'] ?? []) || 16 !== \strlen((string) \base64_decode($key, true)) || \base64_encode(\base64_decode($key, true)) !== $key
         ) {
-            self::refuse($request, 400, 'Not a WebSocket handshake', ['sec-websocket-version' => '13']);
-
-            return null;
+            return self::refusal(400, 'Not a WebSocket handshake', ['sec-websocket-version' => '13']);
         }
         if (null !== $origins && null !== ($origin = $headers['origin'][0] ?? null) && !\in_array(\strtolower($origin), \array_map('strtolower', $origins), true)) {
-            self::refuse($request, 403, 'This origin may not connect', []);
-
-            return null;
+            return self::refusal(403, 'This origin may not connect', []);
         }
         $subprotocol = null;
         $offered     = $tokens('sec-websocket-protocol');
@@ -246,13 +271,44 @@ final class WebSocket implements \IteratorAggregate
                 break;
             }
         }
-        $request->sendResponseHeaders(101, [
+
+        return new WebSocketHandshake(101, [
             'upgrade'              => 'websocket',
             'connection'           => 'Upgrade',
             'sec-websocket-accept' => \base64_encode(\sha1($key . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true)),
-        ] + (null === $subprotocol ? [] : ['sec-websocket-protocol' => $subprotocol]));
-        $ws                                  = new self($request, $subprotocol, $maxMessage);
-        self::$open[\spl_object_id($ws)]     = \WeakReference::create($ws);
+        ] + (null === $subprotocol ? [] : ['sec-websocket-protocol' => $subprotocol]), '', $subprotocol);
+    }
+
+    /**
+     * For framework adapters: send the `101` with the headers an adapter decided, and run `$callback` on the open connection.
+     *
+     * What {@see WebSocket::from()} does once {@see WebSocket::handshake()} accepted: the headers are
+     * sent as given (the adapter's middleware may have added some), nothing is validated again, and
+     * the subprotocol is the one in `sec-websocket-protocol`. Returns when the connection has closed.
+     * Applications use `from()` and don't call this.
+     *
+     * @param array<string, string|list<string>> $headers    the `101` response's headers, including `sec-websocket-accept`
+     * @param callable(WebSocket): void          $callback
+     * @param int                                $maxMessage the largest message received, in bytes; a larger one closes with 1009
+     */
+    public static function upgrade(ClientRequest $request, array $headers, callable $callback, int $maxMessage = self::MAX_MESSAGE): void
+    {
+        self::open($request, $headers, $maxMessage)->pump($callback(...));
+    }
+
+    /** The decision for the request of an exchange. */
+    private static function handshakeOf(ClientRequest $request, array $subprotocols, ?array $origins): WebSocketHandshake
+    {
+        return self::handshake($request->getMethod(), $request->getProtocolVersion(), $request->getRequestHeaders(), !$request->eof(), $subprotocols, $origins);
+    }
+
+    /** Send the 101 and start the connection: the ping loop serves it from now on. */
+    private static function open(ClientRequest $request, array $headers, int $maxMessage): self
+    {
+        $request->sendResponseHeaders(101, $headers);
+        $subprotocol = \array_change_key_case($headers)['sec-websocket-protocol'] ?? null;
+        $ws          = new self($request, \is_array($subprotocol) ? $subprotocol[0] : $subprotocol, $maxMessage);
+        self::$open[\spl_object_id($ws)] = \WeakReference::create($ws);
         self::keepAlive();
 
         return $ws;
@@ -676,10 +732,16 @@ final class WebSocket implements \IteratorAggregate
         });
     }
 
-    /** Answer a request that is no handshake, as an ordinary final response. */
-    private static function refuse(ClientRequest $request, int $status, string $body, array $headers): void
+    /** A refusal: the complete final response. */
+    private static function refusal(int $status, string $body, array $headers): WebSocketHandshake
     {
-        $request->sendResponseHeaders($status, $headers + ['content-type' => 'text/plain', 'content-length' => (string) \strlen($body)]);
-        $request->write($body);
+        return new WebSocketHandshake($status, $headers + ['content-type' => 'text/plain', 'content-length' => (string) \strlen($body)], $body);
+    }
+
+    /** Answer a request that is no handshake, as an ordinary final response. */
+    private static function refuse(ClientRequest $request, WebSocketHandshake $refusal): void
+    {
+        $request->sendResponseHeaders($refusal->status, $refusal->headers);
+        $request->write($refusal->body);
     }
 }

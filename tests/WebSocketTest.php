@@ -308,6 +308,29 @@ test('subprotocols: the first the server prefers among the client\'s offers is c
     ws_clean($log);
 })->with('modes');
 
+test('an adapter decides with handshake() and upgrades with upgrade(): its headers are sent as given, and a refusal is its own to send', function (array $mode) {
+    [$process, $addr, $log] = ws_start($mode);
+    try {
+        [$conn, $head] = ws_handshake($addr, '/websocket-adapter', ['Sec-WebSocket-Protocol' => 'other, chat.v1']);
+        expect($head['status'])->toBe(101);
+        expect($head['headers']['x-added'])->toBe('by middleware');
+        expect($head['headers']['sec-websocket-protocol'])->toBe('chat.v1');
+        expect(ws_read($conn))->toBe([1, 'chat.v1']);
+        ws_send($conn, 1, '0123456789');
+        expect(ws_read($conn))->toBe([1, '0123456789']);
+        ws_send($conn, 1, '0123456789a');
+        ws_expect_close($conn, 1009);
+
+        [, $head] = ws_handshake($addr, '/websocket-adapter', ['Sec-WebSocket-Version' => '8']);
+        expect($head['status'])->toBe(400);
+        expect($head['headers']['sec-websocket-version'])->toBe('13');
+        expect($head['headers']['x-added'])->toBe('by middleware');
+    } finally {
+        native_stop($process);
+    }
+    ws_clean($log);
+})->with('modes');
+
 test('an origin allow-list refuses a browser page of another origin with 403, and lets through a client that sends none', function (array $mode) {
     [$process, $addr, $log] = ws_start($mode);
     try {
