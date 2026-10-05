@@ -330,8 +330,8 @@ body (`''` only at its end) and `write()` sends the response body. The module do
   stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
 - **Many connections.** Without phasync-ext a worker serves at most 512 connections, whatever
   `ulimit -n` says: add workers or install the extension for many of them.
-- **Server-Sent Events** are an ordinary streamed response; see [Realtime](docs/realtime.md).
-  WebSockets will come as a library on the raw connection of a `101`.
+- **Server-Sent Events and WebSockets** are in core: `Swerve\ServerSentEvents` and `Swerve\WebSocket`,
+  specified in [WebSockets and Server-Sent Events](docs/websocket.md); see also [Realtime](docs/realtime.md).
 
 ## Publish and subscribe
 

@@ -13,8 +13,10 @@ Read in this order when you build an application on swerve:
    handler (coroutines, subscribers, servers of your own), and when the cache and messages work.
 4. [Requests and responses](requests-and-responses.md): the `ClientRequest` reference: the request,
    the response head and body, static files, logging.
-5. [Realtime: Server-Sent Events and raw connections](realtime.md): long-lived responses, 101
+5. [Realtime: Server-Sent Events, WebSockets and raw connections](realtime.md): long-lived responses, 101
    upgrades, and a complete chat example.
+   [WebSockets and Server-Sent Events](websocket.md) is the contract of `Swerve\WebSocket` and
+   `Swerve\ServerSentEvents`: handshake, close codes, ordering, backpressure, limits.
 6. [Publish and subscribe](publish-subscribe.md): messages between the workers; and the
    [shared cache](../README.md#shared-cache), `Swerve::cache()` and [`Swerve::claim()`](../README.md#claims).
 7. [Command line](command-line.md): every option.

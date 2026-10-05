@@ -10,6 +10,14 @@
   and loads no adapter code. Chosen by `--adapter=<name>`, the application's composer.json, or being
   the only one installed; `swerve` is the built-in adapter (`swerve.php`). See the README, Adapters.
 
+- `Swerve\WebSocket`: RFC 6455 over the `101` connection of a `ClientRequest`, in core. `serve()` runs a
+  callback, `accept()` leaves the reading to the handler; messages are pulled (`receive()`, `foreach`) or
+  pushed (`$onMessage`), with `$onClose`, subprotocols, an origin allow-list, a `maxMessage` limit,
+  server pings, backpressure both ways, and every close code the protocol defines. A drain closes
+  sockets with 1001. Its contract is `docs/websocket.md`, pinned by tests that run with and without phasync-ext.
+- `Swerve\ServerSentEvents`: the event stream head, `send()` with `event`, `id` and `retry`, `comment()`
+  and `lastEventId()`.
+
 ### Changed
 
 - Breaking: `swerve.php` returns a `Swerve\RequestHandler` wrapping a closure that takes a
@@ -32,8 +40,7 @@
 - `Swerve\Dispatcher` and the PSR-7 request, response and body classes, `StreamingResponderInterface`
   and `UnbufferedStream` response bodies. There is no PSR-7 request: a framework is served through an
   adapter that turns a `ClientRequest` into its own request and response.
-- `Swerve\Http\WebSocket` and `ProtocolUpgrade`, until a WebSocket library is rebuilt on the `101`
-  connection.
+- `Swerve\Http\WebSocket` and `ProtocolUpgrade`, replaced by `Swerve\WebSocket` on the `101` connection.
 - `Swerve::virtualize()`.
 - The PSR-15 and Slim requirements.
 
