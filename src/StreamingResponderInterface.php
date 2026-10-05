@@ -5,7 +5,7 @@ namespace Swerve;
 /**
  * A responder that can send a response while the application still produces it: the output of code
  * written for PHP-FPM (echo, header()) goes to the client as it is made (in pieces of 8 KiB, and at
- * flush()), not when the handler has returned. {@see Swerve::virtualize()} makes the Dispatcher use it.
+ * flush()), not when the handler has returned.
  *
  * The head is sent once, before the first byte of the body; {@see streamEnd()} ends the response
  * in place of {@see ResponderInterface::respond()}.

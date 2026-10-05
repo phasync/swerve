@@ -21,7 +21,6 @@ use Swerve\Swerve;
 use Swerve\Util\Cluster;
 use Swerve\Util\Logger;
 use Swerve\Util\LoggingContext;
-use Swerve\Util\StrayOutput;
 use Swerve\Util\System;
 use Swerve\Util\Worker;
 
@@ -213,22 +212,10 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $logger = $worker->logger;
     Swerve::setLog($logger);
     Worker::refreshAutoloader();
-    // Output buffers are the process's and not the request's, unless the application virtualizes
-    // its requests (Swerve::virtualize()): output outside the response is a fatal error then
-    // (docs/stray-output.md). Before the application loads
-    StrayOutput::install();
     // Loaded in the worker's event loop: the application may start coroutines as it loads,
     // such as a subscriber that runs for the worker's whole life
     // Before the application loads, which may change the working directory
     $files = '' !== $args->public ? new StaticFiles($args->public) : null;
-    // What a web server in front would have supplied to the application's $_SERVER
-    Swerve::setServer([
-        'SERVER_SOFTWARE' => 'Swerve/' . Swerve::getVersion(),
-        'DOCUMENT_ROOT'   => '' !== $args->public ? \rtrim($args->public, '/') : \dirname($swerveFile),
-        'SCRIPT_FILENAME' => $swerveFile,
-        'SCRIPT_NAME'     => '/' . \basename($swerveFile),
-        'PHP_SELF'        => '/' . \basename($swerveFile),
-    ]);
     $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
     phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $files, $proxies) {
         try {

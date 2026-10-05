@@ -30,8 +30,6 @@ final class Worker
     public const TICK = 0.25;
     /** The application file failed to load, or returned something that can't be served. */
     public const EXIT_BAD_APP = 2;
-    /** Output reached the guard at the bottom of the output buffers, see StrayOutput. */
-    public const EXIT_STRAY_OUTPUT = 4;
 
     /** Bytes of memory above which the worker asks to be recycled, jitter applied; 0 = off. */
     public int $maxMemory = 0;
