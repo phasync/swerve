@@ -188,6 +188,7 @@ Usage: swerve [options] [swerve.php]
 
 Application:
   [swerve.php]                     A PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest
+  --adapter=<name>                 The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application's composer.json, the only installed adapter, else swerve
 
 Serving:
   --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
@@ -223,7 +224,8 @@ Information:
 
 Options and the application file may come in any order; an option's value is attached
 (`--workers=4`, `-w4`) or the next word (`--workers 4`, `-w 4`). A usage error exits with
-code 2, and so does a `swerve.php` that returns anything but a `Swerve\RequestHandler`.
+code 2, and so does an application (a `swerve.php` or an adapter's entry) that returns anything but a
+`Swerve\RequestHandler`.
 
 swerve runs in the foreground, as systemd, Docker and supervisord expect, and logs to
 standard output, which they collect; there is no daemon mode. Elsewhere,
@@ -234,6 +236,27 @@ connections over the workers. A proxy in front (nginx, HAProxy, Caddy) speaks HT
 
 The line per request costs about 5% of the throughput of a hello-world application, and
 less of a real one; `--no-access-log` turns it off.
+
+## Adapters
+
+An adapter is an installed package that provides the entry point in place of `swerve.php`. It
+declares itself in its own `composer.json`:
+
+```json
+{"extra": {"swerve": {"adapter": "psr15", "entry": "Swerve\\Psr15\\init"}}}
+```
+
+`entry` names a function that each worker calls once, after the fork and after `vendor/autoload.php`
+is loaded, with the application directory; it returns a `Swerve\RequestHandler`, as `swerve.php`
+does, and anything else stops swerve with exit code 2. The master only reads
+`vendor/composer/installed.json` to find adapters, and loads none of their code.
+
+The adapter is the first of: `--adapter=<name>`; `"extra": {"swerve": {"adapter": "<name>"}}` in the
+application's own `composer.json`; the only installed adapter; `swerve`, the built-in one, which
+loads `swerve.php` (always available as `--adapter=swerve`). Several installed adapters and no
+choice, or a name that is not installed, stops swerve at start. With an adapter other than `swerve`,
+a `swerve.php` in the application directory is ignored (logged once), and giving one on the command
+line is an error. The application directory is the directory of that argument, else the current one.
 
 ## Static files
 

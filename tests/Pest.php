@@ -85,17 +85,18 @@ function temp_path(bool $dir = false): string
  * @param string[]              $php  arguments for PHP itself, such as ['-d', 'memory_limit=32M']
  * @param array<string, string> $env  more environment variables
  * @param array<int, mixed>     $out  descriptors for stdout and stderr
+ * @param string|null           $cwd  the working directory; with $fixture null (no swerve.php argument), the application directory
  *
  * @return resource the process; its pid is the master's, and the process group's
  */
-function swerve_spawn(array $args, string $fixture, array $php = [], array $env = [], array $out = [])
+function swerve_spawn(array $args, ?string $fixture, array $php = [], array $env = [], array $out = [], ?string $cwd = null)
 {
-    $path    = str_contains($fixture, '/') ? $fixture : __DIR__ . "/Fixtures/$fixture";
+    $path    = null === $fixture ? [] : [str_contains($fixture, '/') ? $fixture : __DIR__ . "/Fixtures/$fixture"];
     $process = proc_open(
-        ['setsid', PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args, $path],
+        ['setsid', PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args, ...$path],
         $out + [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
-        null,
+        $cwd,
         $env + getenv(),
     );
     $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];

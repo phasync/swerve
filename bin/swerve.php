@@ -16,6 +16,7 @@ use Swerve\Http\TrustedProxies;
 use Swerve\RequestHandler;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
+use Swerve\Util\Adapters;
 use Swerve\Util\Cluster;
 use Swerve\Util\Logger;
 use Swerve\Util\LoggingContext;
@@ -91,12 +92,32 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     /**
+     * The application directory: the directory of the swerve.php given, else the current one.
+     * Then the adapter that provides the entry point (see Adapters), found without loading any
+     * of its code.
+     */
+    $explicitFile = !$args->isDefault('swervefile');
+    $swerveFile   = \str_starts_with($args->swervefile, '/') ? $args->swervefile : \getcwd() . '/' . $args->swervefile;
+    $appDir       = $explicitFile ? \dirname($swerveFile) : \getcwd();
+    try {
+        $installed = Adapters::installed($appDir);
+        $adapter   = Adapters::select($installed, $args->adapter ?: null, Adapters::configured($appDir));
+    } catch (\RuntimeException $e) {
+        \fwrite(\STDERR, 'swerve: ' . $e->getMessage() . "\n");
+        exit(2);
+    }
+    $entry = $installed[$adapter] ?? null;
+    if (null !== $entry && $explicitFile) {
+        \fwrite(\STDERR, "swerve: {$args->swervefile} is given, but the adapter $adapter provides the entry point: use --adapter=swerve to load it\n");
+        exit(2);
+    }
+
+    /**
      * Check that `swerve.php` file exists. The application is loaded in each worker, after
      * the fork, so that a reload runs the current code. Symlinks are not resolved: a deploy
      * that points `current` at a new release, then reloads, runs the new release.
      */
-    $swerveFile = \str_starts_with($args->swervefile, '/') ? $args->swervefile : \getcwd() . '/' . $args->swervefile;
-    if (!\is_file($swerveFile)) {
+    if (null === $entry && !\is_file($swerveFile)) {
         \fwrite(\STDERR, "swerve: {$args->swervefile} not found\n");
         exit(1);
     }
@@ -148,6 +169,10 @@ foreach ([\STDOUT, \STDERR] as $out) {
         $logger = new Logger(\STDOUT, $source, $logLevel, access: $access);
     }
 
+    if (null !== $entry && \is_file("$appDir/swerve.php")) {
+        $logger->notice('{file} is ignored: the adapter {adapter} provides the entry point', ['file' => "$appDir/swerve.php", 'adapter' => $adapter]);
+    }
+
     // Each worker says so at info level; asked for, and then off, is worth a warning, once
     if (!$args->isDefault('maxMemory') && \str_ends_with($args->maxMemory, '%') && (int) $args->maxMemory > 0 && \ini_parse_quantity((string) \ini_get('memory_limit')) <= 0) {
         $logger->warning('Memory recycling is off: memory_limit is -1, so --max-memory={max} is no limit; give a size such as --max-memory=512M', ['max' => $args->maxMemory]);
@@ -187,8 +212,8 @@ foreach ([\STDOUT, \STDERR] as $out) {
         (float) $args->grace,
         (float) $args->linger,
         (float) $args->watchdog,
-        $args->watch ? \dirname($swerveFile) : null,
-        \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(), $args->swervefile,
+        $args->watch ? $appDir : null,
+        \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(), null === $entry ? $args->swervefile : "adapter $adapter",
             \implode(', ', \array_map(static fn ($a) => 'http' . (\str_starts_with($a, 'unix:') ? '+unix://' . \substr($a, 5) : "://$a"), $addresses)),
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
         (int) \ini_parse_quantity($args->cacheSize),
@@ -215,17 +240,17 @@ foreach ([\STDOUT, \STDERR] as $out) {
     // Before the application loads, which may change the working directory
     $files = '' !== $args->public ? new StaticFiles($args->public) : null;
     $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
-    phasync::run(static function () use ($swerveFile, $args, $logger, $worker, $http, $files, $proxies) {
+    phasync::run(static function () use ($swerveFile, $appDir, $adapter, $entry, $args, $logger, $worker, $http, $files, $proxies) {
         try {
             Cache::$loader = phasync::getFiber();
-            $app           = require $swerveFile;
+            $app           = null === $entry ? require $swerveFile : $entry($appDir);
             Cache::$loader = null;
         } catch (\Throwable $e) {
-            $logger->critical('Loading {file} failed: {exception}', ['file' => $swerveFile, 'exception' => $e]);
+            $logger->critical('Loading {what} failed: {exception}', ['what' => null === $entry ? $swerveFile : "the adapter $adapter", 'exception' => $e]);
             exit(Worker::EXIT_BAD_APP);
         }
         if (!$app instanceof RequestHandler) {
-            $logger->critical('{file} returned {value}; it must return a Swerve\\RequestHandler', ['file' => $args->swervefile, 'value' => \get_debug_type($app)]);
+            $logger->critical('{what} returned {value}; it must return a Swerve\\RequestHandler', ['what' => null === $entry ? $args->swervefile : "The entry $entry of the adapter $adapter", 'value' => \get_debug_type($app)]);
             exit(Worker::EXIT_BAD_APP);
         }
         $worker->setLimits($args->maxMemory, (int) $args->maxRequests);

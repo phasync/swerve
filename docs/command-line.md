@@ -5,6 +5,7 @@ Usage: swerve [options] [swerve.php]
 
 Application:
   [swerve.php]                     A PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest
+  --adapter=<name>                 The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application's composer.json, the only installed adapter, else swerve
 
 Serving:
   --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
@@ -50,6 +51,8 @@ Information:
   The workers share the one socket file, made at start (a stale file is replaced; where anything
   listens, or a file that isn't a socket is in the way, swerve refuses to start) and removed at
   stop. Anyone may connect: limit access with the permissions of the directory it is in.
+- `--adapter` picks what provides the entry point when a package such as a framework adapter is installed, see
+  [Adapters](../README.md#adapters). A `swerve.php` argument cannot be combined with an adapter other than `swerve`.
 - `--public` and `--max-body` apply to HTTP, which is all swerve serves; a proxy in front (nginx,
   HAProxy, Caddy) speaks HTTP to it.
 - `--trusted-proxy` names the proxies in front of swerve: an address (`10.0.0.5`, `::1`), a range

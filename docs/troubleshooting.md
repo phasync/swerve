@@ -29,8 +29,10 @@ and an `Upgrade` header, whose body you have read to its end. See
 **An SSE stream arrives all at once, at the end.** A proxy buffers it (nginx:
 `proxy_buffering off`).
 
-**swerve stops with exit code 2.** The log says why: `swerve.php` threw while loading, or returned
-something other than a `Swerve\RequestHandler` (which takes a closure).
+**swerve stops with exit code 2.** The log says why: `swerve.php` (or an adapter's entry function) threw
+while loading, or returned something other than a `Swerve\RequestHandler` (which takes a closure). At
+start, a message on stderr says that several adapters are installed and none is chosen, or that the
+adapter named is not installed: see [Adapters](../README.md#adapters).
 
 **`At the limit of 512 connections`.** A worker is full; see [Sizing](production.md#sizing).
 

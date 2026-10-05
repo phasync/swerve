@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Adapter discovery: an installed package that declares `"extra": {"swerve": {"adapter": "name", "entry": "Function\\name"}}`
+  provides the entry point in place of `swerve.php`: each worker calls the function with the application
+  directory, and it returns a `Swerve\RequestHandler`. The master reads `vendor/composer/installed.json`
+  and loads no adapter code. Chosen by `--adapter=<name>`, the application's composer.json, or being
+  the only one installed; `swerve` is the built-in adapter (`swerve.php`). See the README, Adapters.
+
 ### Changed
 
 - Breaking: `swerve.php` returns a `Swerve\RequestHandler` wrapping a closure that takes a

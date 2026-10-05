@@ -23,6 +23,11 @@ return (function () {
     $args->section('Application');
     $args->add('swervefile', new Argument('swerve.php', 'A PHP file returning a Swerve\\RequestHandler, which runs once per request with a ClientRequest', './swerve.php'));
 
+    $args->add('adapter', new Option(
+        '', 'adapter', 'The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application\'s composer.json, the only installed adapter, else swerve',
+        placeholder: 'name',
+    ));
+
     $args->section('Serving');
     $args->add('http', new Option(
         '', 'http', 'Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several',
