@@ -134,9 +134,10 @@ return new RequestHandler((new class {
             // A WebSocket that only sends: what is published to 'news' goes to the browser
             case '/websocket-news':
                 WebSocket::serve($r, function (WebSocket $ws) {
+                    $subscription = Swerve::subscribe('news'); // waits for the master: counted as live once subscribed
                     ++$this->live['news'];
                     try {
-                        foreach (Swerve::subscribe('news') as $message) {
+                        foreach ($subscription as $message) {
                             $ws->send($message);
                         }
                     } finally {
