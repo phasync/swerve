@@ -141,16 +141,18 @@ test('HTTP/1.0 has no chunks: the stream is delimited by the close', function (a
     ws_clean($log);
 })->with('modes');
 
-test('HEAD gets the head of the stream and no body, and the connection serves the next request', function (array $mode) {
+test('HEAD gets the head of the stream and no body, send() throws IOException, and the connection serves the next request', function (array $mode) {
     [$process, $addr, $log] = ws_start($mode);
     try {
         $conn = native_connect($addr);
-        fwrite($conn, "HEAD /sse-last HTTP/1.1\r\nHost: test\r\n\r\nGET /hello HTTP/1.1\r\nHost: test\r\n\r\n");
+        fwrite($conn, "HEAD /sse-head HTTP/1.1\r\nHost: test\r\n\r\nGET /hello HTTP/1.1\r\nHost: test\r\n\r\n");
         $head = native_read_response($conn, true);
         expect($head['status'])->toBe(200);
         expect($head['headers']['content-type'])->toBe('text/event-stream');
         expect(native_read_response($conn)['body'])->toBe('Hello');
+        expect(json_decode((string) probe($addr, '/ws-closes')))->toBe([[0, 'IOException']]);
     } finally {
         native_stop($process);
     }
+    ws_clean($log);
 })->with('modes');

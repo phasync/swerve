@@ -149,7 +149,7 @@ return new RequestHandler((new class {
             case '/websocket-feed':
                 WebSocket::serve($r, static function (WebSocket $ws) {
                     foreach (Swerve::subscribe('feed') as $message) {
-                        if ($message instanceof Swerve\Util\SealedObject && ($message->end ?? false)) {
+                        if ($message instanceof \Swerve\Util\SealedObject && ($message->end ?? false)) {
                             return;
                         }
                         $ws->send(\is_string($message) ? $message : \json_encode($message));
@@ -290,6 +290,16 @@ return new RequestHandler((new class {
             case '/sse-last':
                 $sse = new ServerSentEvents($r);
                 $sse->send(\json_encode($sse->lastEventId()));
+
+                return;
+            // What HEAD gets: the head, and send() has no stream to send to (reported through /ws-closes)
+            case '/sse-head':
+                $sse = new ServerSentEvents($r);
+                try {
+                    $sse->send('nobody reads this');
+                } catch (\phasync\IOException $e) {
+                    $this->closes[] = [0, 'IOException'];
+                }
 
                 return;
             // An endless stream: a heartbeat every 50 ms, until the client leaves; /live?what=sse counts them
