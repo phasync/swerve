@@ -209,6 +209,7 @@ final class HttpConnection
         try {
             $first     = true;
             $pipelined = 0;
+            $keepAlive = false;
             do {
                 $request = $this->readRequest($first);
                 if (null === $request) {

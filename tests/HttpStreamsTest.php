@@ -661,3 +661,18 @@ test('the client has the whole response while the request\'s own work goes on, a
     expect($endedWhenRead)->toBeFalse();
     expect($ended)->toBeTrue();
 });
+
+test('a connection closed before its first request ends quietly', function () {
+    $warnings = [];
+    set_error_handler(function (int $no, string $message) use (&$warnings) {
+        $warnings[] = $message;
+
+        return true;
+    });
+    try {
+        serve_in_process(fn (ClientRequest $r) => streams_answer($r, 'never'), fn ($conn) => null);
+    } finally {
+        restore_error_handler();
+    }
+    expect($warnings)->toBe([]);
+});
