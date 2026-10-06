@@ -10,6 +10,8 @@ use phasync\TimeoutException;
 use Psr\Log\LoggerInterface;
 use Swerve\Util\Logger;
 use Swerve\Util\RequestContextFactory;
+use Swerve\Util\RequestSwitch;
+use Swerve\Util\SwitchAwareLoggingContext;
 
 /**
  * One HTTP/1.1 client connection: reads a request head, runs the application's handler on
@@ -221,7 +223,15 @@ final class HttpConnection
                 // connection's coroutine: a coroutine per request cost about half of a hello-world request.
                 // The context is created when the request's code first asks for one. The response is
                 // finished inside it, so phasync::finally() in the handler runs once all of it is sent.
-                $keepAlive = phasync::withContext($request->run(...), new RequestContextFactory($this->logger, $request));
+                //
+                // Once Swerve::onRequestSwitch() has registered something, the context is entered
+                // eagerly instead, as a SwitchAwareLoggingContext: phasync's lazy-context bookkeeping
+                // does not expect a resume() it calls while entering one to itself ask for a coroutine
+                // (phasync::go(), see RequestSwitch), which only an eager context avoids.
+                $context   = RequestSwitch::active()
+                    ? new SwitchAwareLoggingContext($this->logger, $request)
+                    : new RequestContextFactory($this->logger, $request);
+                $keepAlive = phasync::withContext($request->run(...), $context);
                 unset($request);
                 // With the next request already buffered (pipelined), and the response written
                 // without waiting, nothing would suspend this coroutine: a client sending many

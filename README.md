@@ -258,6 +258,33 @@ choice, or a name that is not installed, stops swerve at start. With an adapter 
 a `swerve.php` in the application directory is ignored (logged once), and giving one on the command
 line is an error. The application directory is the directory of that argument, else the current one.
 
+## Per-request process state, for framework authors
+
+A framework that runs its requests as coroutines of one worker (not one process each, as
+PHP-FPM does) shares process-wide PHP state - `setlocale()`, `date_default_timezone_set()`,
+`mb_internal_encoding()` - between every request running there. `Swerve::onRequestSwitch()` lets
+it keep that state as each request's own, so application code can go on using the plain
+functions:
+
+```php
+$locales = new WeakMap();
+Swerve::onRequestSwitch(
+    resume: function (Swerve\ClientRequest $request) use ($locales) {
+        setlocale(LC_ALL, $locales[$request] ?? 'C');
+    },
+    suspend: function (Swerve\ClientRequest $request) use ($locales) {
+        $locales[$request] = setlocale(LC_ALL, 0);
+    },
+);
+```
+
+Call it once at boot. `resume($request)` runs just before a coroutine of `$request` runs, but only
+when a coroutine of a *different* request ran last; `suspend($request)` runs just before a
+coroutine of a different request is about to run. Switching between a request's own coroutines
+(its own `phasync::go()` children) calls neither. A closure runs on the switch path: it must
+return without waiting, or it is logged and abandoned instead of hanging the switch; any other
+exception is logged the same way, never thrown into a request.
+
 ## Static files
 
 `--public=<dir>` serves the files in a directory, and passes every other request to the

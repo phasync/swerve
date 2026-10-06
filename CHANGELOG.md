@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Swerve::onRequestSwitch(resume, suspend)`: a framework running requests as coroutines of one
+  worker can keep process-wide PHP state (`setlocale()`, `date_default_timezone_set()`,
+  `mb_internal_encoding()`, ...) as each request's own. `resume($request)` runs just before a
+  coroutine of `$request` runs, but only when a coroutine of a *different* request ran last;
+  `suspend($request)` runs just before a different request's coroutine is about to run; a
+  request's own `phasync::go()` children call neither. Implemented by the request's phasync
+  context (`phasync\Context\SwitchAwareInterface`), entered eagerly only once something is
+  registered - nothing registered costs nothing. See the README, Per-request process state.
+
 ## 0.1.0-beta6 (2026-10-06)
 
 ### Added

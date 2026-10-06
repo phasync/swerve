@@ -204,6 +204,20 @@ return new RequestHandler((new class($version) {
 
     public function __construct(private string $version)
     {
+        // Swerve::onRequestSwitch(), as a framework adapter would call it at boot, before any
+        // request is served: see /locale-switch. Behind an env var so only that test's workers
+        // pay for it.
+        if (\getenv('SWERVE_TEST_LOCALE_SWITCH')) {
+            $locales = new \WeakMap();
+            Swerve::onRequestSwitch(
+                resume: static function (ClientRequest $request) use ($locales) {
+                    \setlocale(LC_ALL, $locales[$request] ?? 'C');
+                },
+                suspend: static function (ClientRequest $request) use ($locales) {
+                    $locales[$request] = \setlocale(LC_ALL, 0);
+                },
+            );
+        }
     }
 
     public function handle(ClientRequest $r): void
@@ -247,6 +261,15 @@ return new RequestHandler((new class($version) {
                         $this->own = SwapFixture::$value;
                     }
                 });
+
+                return;
+            // Swerve::onRequestSwitch(), registered at boot (below, when SWERVE_TEST_LOCALE_SWITCH
+            // is set): setlocale() is this request's own, through every wait. ?v= set, read back
+            // after waiting ?ms=
+            case '/locale-switch':
+                \setlocale(LC_ALL, (string) $query['v']);
+                phasync::sleep((int) $query['ms'] / 1000);
+                fx_send($r, 200, [], (string) \setlocale(LC_ALL, 0));
 
                 return;
             // A WebSocket that sends what is published to 'news'

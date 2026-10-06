@@ -83,6 +83,10 @@ Everything in PHP memory belongs to one worker, and lives from the worker's star
   reconnect (a browser's `EventSource` does); a
   recycled worker keeps its upgraded connections for up to `--linger` seconds, so they usually leave on
   their own.
+- **Process-wide PHP state** (`setlocale()`, `date_default_timezone_set()`, ...) is the same for
+  every request of a worker while it runs, like the others above. A framework running requests as
+  coroutines rather than one process each can keep it as each request's own with
+  [`Swerve::onRequestSwitch()`](../README.md#per-request-process-state-for-framework-authors).
 
 ### Shared state with SQLite
 
