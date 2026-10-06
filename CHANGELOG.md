@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-beta6 (2026-10-06)
 
 ### Added
 
@@ -62,6 +62,8 @@
   cancellation on its way and crashed the worker with an uncaught `LogicException` ("the coroutine is
   not waiting"), instead of the drain or the end() having nothing left to do. Both now let that
   `LogicException` go, since `phasync::throw()` delivers only once. (phasync/swerve#36)
+- A connection closed before its first request no longer logs "Undefined variable $keepAlive".
+  (phasync/swerve#38)
 
 ## 0.1.0-beta5 (2026-10-04)
 
