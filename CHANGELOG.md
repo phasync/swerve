@@ -4,6 +4,13 @@
 
 ### Changed
 
+- A worker stops at once: on a shutdown, reload or the end of a recycle's lingering, every
+  coroutine, requests in flight included, gets a `Swerve\WorkerStoppingException` at its wait,
+  and the worker exits once they have cleaned up (`phasync::finally()`, `phasync::shielded()`),
+  a second before `--grace` at most. swerve ends its own protocols shielded: a `503` for a
+  response not yet started, a `Swerve\WebSocket` closes with 1001, or 1012 on a reload, idle
+  connections close. Requests no longer finish during a drain, and a `101` connection's `read()`
+  throws instead of returning `''`. Clients retry, as after any server's death.
 - A worker's signals go through phasync: it waits for an outside `SIGTERM` with
   `phasync::signal()`, and logs where it is stuck (`SIGQUIT`) or ends itself when its master died
   (`SIGALRM`) with `phasync::onSignal()`, so application coroutines may wait for these signals too.
@@ -25,9 +32,7 @@
 ### Added
 
 - `Swerve\WorkerStoppingException` (a phasync `ShutdownException`) with `StopReason` (`Shutdown`,
-  `Reload`, `Recycle`): coroutines still running when a worker stops get it at their wait, and
-  the worker exits as soon as they have ended, after a second at most, instead of dropping them
-  silently.
+  `Reload`, `Recycle`), see Changed.
 
 - `Swerve::ini()` and `Swerve::onWorkerStart()`: a package integrates with swerve from a file in its
   composer.json `files`, loaded as the master starts. `ini()` sets php.ini settings for every swerve

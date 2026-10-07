@@ -4,6 +4,7 @@ namespace Swerve;
 
 use phasync;
 use phasync\CancelledException;
+use phasync\ShutdownException;
 use phasync\IOException;
 use phasync\Net\Duplex;
 use phasync\TimeoutException;
@@ -340,9 +341,10 @@ final class WebSocket implements \IteratorAggregate
     /**
      * The next text or binary message, or null once the connection is closed.
      *
-     * Closed by the client, by `end()`, because the client broke the protocol, or because swerve
-     * drains (a shutdown or reload), which closes it with 1001. Waits for a message. It is the
-     * alternative to `$onMessage`, and the two don't mix.
+     * Closed by the client, by `end()`, or because the client broke the protocol. When the
+     * worker stops, swerve closes it (1001, or 1012 on a reload) and this throws a
+     * WorkerStoppingException. Waits for a message. It is the alternative to `$onMessage`, and
+     * the two don't mix.
      *
      * ```php
      * while (null !== ($message = $ws->receive())) {
@@ -497,6 +499,12 @@ final class WebSocket implements \IteratorAggregate
         $this->onClose->trigger($this->code, $this->reason);
     }
 
+    /** The close code for a stopping worker: 1012 (Service Restart) on a reload, else 1001 (Going Away). */
+    private static function stopCode(ShutdownException $e): int
+    {
+        return $e instanceof WorkerStoppingException && StopReason::Reload === $e->reason ? 1012 : 1001;
+    }
+
     /**
      * Whether the connection is closed: `end()` was called, the client said goodbye, or the connection ended.
      *
@@ -522,6 +530,8 @@ final class WebSocket implements \IteratorAggregate
             try {
                 $callback($this);
                 $this->end(1000);
+            } catch (ShutdownException $e) {
+                throw $e; // the reader, swerve's side, closes the connection: one close, never cut short
             } catch (CancelledException $e) {
                 if (!$this->readerDone) {
                     $this->end(1011);
@@ -560,6 +570,9 @@ final class WebSocket implements \IteratorAggregate
         }
         $this->readerDone = true;
         phasync::raiseFlag($this);
+        if ($failure instanceof ShutdownException) {
+            return; // the app's coroutine has it too; the worker exits once both end
+        }
         if (!$app->isTerminated()) {
             phasync::cancel($app);
         }
@@ -612,9 +625,13 @@ final class WebSocket implements \IteratorAggregate
                 $payload = $length > 0 ? $this->need($length) ^ \substr(\str_repeat($mask, \intdiv($length, 4) + 1), 0, $length) : '';
             } catch (\UnderflowException) {
                 $this->note(1006, ''); // no close frame came
-                $this->end(1001);      // the client's side ended, or swerve drains: going away
+                $this->end(1001);      // the client's side ended: going away
 
                 return null;
+            } catch (ShutdownException $e) {
+                phasync::shielded(fn () => $this->end(self::stopCode($e))); // the worker stops: going away, or restarting
+
+                throw $e;
             }
             if (8 === $opcode) {
                 $code   = $length >= 2 ? \unpack('n', $payload)[1] : 1005;
@@ -712,7 +729,8 @@ final class WebSocket implements \IteratorAggregate
     private function put(string $bytes, float $timeout): void
     {
         try {
-            $this->connection->write($bytes, $timeout);
+            // A frame once begun is finished: a cancellation waits for it, never leaves half a frame
+            phasync::shielded(fn () => $this->connection->write($bytes, $timeout));
         } catch (IOException) {
             $this->dead = true;
         } catch (TimeoutException) {

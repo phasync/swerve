@@ -3,7 +3,7 @@
 namespace Swerve\Http;
 
 use phasync;
-use phasync\CancelledException;
+use phasync\ShutdownException;
 use phasync\IOException;
 use phasync\Net\Duplex;
 use phasync\TimeoutException;
@@ -166,9 +166,6 @@ final class HttpConnection
     /** Request-body reads in a row that got all they asked for, see readBody(). */
     private int $fullReads = 0;
 
-    /** The coroutine of an upgraded connection's read waiting on the client: drain() wakes it. */
-    private ?\Fiber $reader = null;
-
     /** The client's IP address, '' for a unix socket. */
     public readonly string $remoteAddr;
 
@@ -246,24 +243,29 @@ final class HttpConnection
             }
         } catch (HttpError $e) {
             $this->refuse($e->getCode(), $e->getMessage());
+        } catch (ShutdownException) {
+            $this->linger = false; // the worker stops: close at once, no waiting for the client's end
         } catch (\Throwable $e) {
             $this->logger->error('A connection failed: {exception}', ['exception' => $e]);
         } finally {
-            if ($this->linger && !self::$exiting) {
-                $this->io->end();
-                $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
-                $this->reclaimable = self::ANSWERED;
-                try {
-                    while ('' !== $this->io->read(self::READ_SIZE, \max(0.0, $deadline - \microtime(true))) && \microtime(true) < $deadline) {
+            // swerve's own ending of the connection: shielded, so it completes while the worker stops
+            phasync::shielded(function () {
+                if ($this->linger && !self::$exiting) {
+                    $this->io->end();
+                    $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
+                    $this->reclaimable = self::ANSWERED;
+                    try {
+                        while ('' !== $this->io->read(self::READ_SIZE, \max(0.0, $deadline - \microtime(true))) && \microtime(true) < $deadline) {
+                        }
+                    } catch (IOException|TimeoutException) {
                     }
-                } catch (IOException|TimeoutException) {
                 }
-            }
-            $this->reclaimable = 0;
-            // While PHP shuts down nothing can be raised or woken: the descriptor goes with the process
-            if (!self::$exiting) {
-                $this->io->close();
-            }
+                $this->reclaimable = 0;
+                // While PHP shuts down nothing can be raised or woken: the descriptor goes with the process
+                if (!self::$exiting) {
+                    $this->io->close();
+                }
+            });
         }
     }
 
@@ -275,34 +277,16 @@ final class HttpConnection
      * reason to expect the close. Idle means nothing received: a request in the kernel's
      * buffer, not yet read, arrived before the drain, and is answered.
      *
-     * Returns whether the connection is upgraded (101). With `$linger` (a recycled worker
-     * keeps its upgraded connections), an upgraded connection is left as it is, and drain()
-     * without `$linger` ends it later: its input ends, as if the client had closed its side,
-     * after what was already taken off the socket. The application is expected to end its
-     * side then; one that doesn't is dropped at the worker's drain deadline, which is logged.
-     * Not by shutting the socket's reading side: the closing linger (serve()) would find the
-     * end of the stream at once, closing with unread data, which resets the connection and
-     * destroys what the application wrote last, such as its goodbye.
+     * Returns whether the connection is upgraded (101). An upgraded connection is left as it
+     * is: the worker's stop ends its application with a WorkerStoppingException, and swerve
+     * closes it then (a WebSocket with 1001, or 1012 on a reload).
      */
     public function drain(bool $linger = false): bool
     {
-        if ($linger && $this->upgraded) {
+        if ($this->upgraded) {
             return true;
         }
         $this->draining = true;
-        if ($this->upgraded) {
-            if (null !== $this->reader) {
-                try {
-                    phasync::throw($this->reader, new CancelledException('The server is draining')); // not cancel(): the linger at the close must not be cancelled too
-                } catch (\LogicException) {
-                    // $this->reader already has an exception on its way: the application ended
-                    // its own exchange (a WebSocket's end(), say) right as the drain started.
-                    // Nothing more to cancel; readRaw()'s finally clears $this->reader itself.
-                }
-            }
-
-            return true;
-        }
         if (self::KEPT_ALIVE === $this->reclaimable && $this->nothingReceived()) {
             $this->reclaim(self::KEPT_ALIVE);
         } elseif (self::NEW === $this->reclaimable) {
@@ -454,29 +438,15 @@ final class HttpConnection
     /**
      * An upgraded connection's next bytes: the buffer first (bytes the client sent right behind
      * the upgrade request), then the client, waiting without a timeout. '' at the end: the
-     * client closed its side, or the server drains. Once draining, the client is not read any
-     * more: one that keeps sending would otherwise keep the end from ever coming.
+     * client closed its side.
      */
     public function readRaw(int $max, ?float $timeout = null): string
     {
         if (\strlen($this->buffer) !== $this->offset) {
             return $this->readBody($max, \PHP_INT_MAX); // from the buffer only
         }
-        if ($this->draining) {
-            return '';
-        }
-        $this->reader = \Fiber::getCurrent();
-        try {
-            return $this->io->read($max, $timeout);
-        } catch (CancelledException $e) {
-            if (!$this->draining) {
-                throw $e; // not drain()'s
-            }
 
-            return '';
-        } finally {
-            $this->reader = null;
-        }
+        return $this->io->read($max, $timeout);
     }
 
     /**
@@ -709,12 +679,16 @@ final class HttpConnection
      * Answer a refused request or a failed handler: one best-effort write that never waits,
      * then a lingering close.
      */
-    public function refuse(int $status, string $reason): void
+    /**
+     * Answer $status and close. With $linger, the close waits a moment for the client's end, so
+     * that the answer isn't destroyed by a reset; a stopping worker doesn't wait.
+     */
+    public function refuse(int $status, string $reason, bool $linger = true): void
     {
         try {
             $this->io->write("HTTP/1.1 $status $reason\r\nContent-Length: 0\r\nConnection: close\r\nDate: " . self::date() . "\r\nServer: Swerve\r\n\r\n", 0.0);
         } catch (IOException|TimeoutException) {
         }
-        $this->linger = true;
+        $this->linger = $linger;
     }
 }

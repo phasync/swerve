@@ -44,7 +44,6 @@ final class Worker
     /** When a lingering worker closes its connections; null when it does not linger. */
     private ?float $lingerEnd = null;
     /** When a drain that has not finished drops its connections, see tick(). */
-    private float $deadline = \PHP_FLOAT_MAX;
 
     private bool $recycleSent = false;
     /** Requests started. */
@@ -65,9 +64,6 @@ final class Worker
 
     /** Why this worker stops, for the WorkerStoppingException its coroutines get. */
     private StopReason $stopReason = StopReason::Shutdown;
-
-    /** Seconds the coroutines still running get to clean up once the worker stops. */
-    public const STOP_WINDOW = 1.0;
 
     private array $inFlight = [];
     /** The event loop's last heartbeat; 0 before the first (which then always goes out). */
@@ -251,7 +247,6 @@ final class Worker
                 exit(1);
             }
             if (0 === --$this->running) {
-                $this->logger->info('Drained in {s} s, exiting', ['s' => \round(\microtime(true) - $this->drainStarted, 2)]);
                 $this->stop();
             }
         });
@@ -268,10 +263,11 @@ final class Worker
     }
 
     /**
-     * Exit, once the coroutines still running had their chance: each gets a
-     * WorkerStoppingException with the reason, and the worker waits for them for at most
-     * STOP_WINDOW seconds (not longer than the last one takes), then exits, whatever is left.
-     * Once: a second caller (the drain deadline after the last server ended) returns, and its
+     * Stop the worker as soon as it drains: every other coroutine, requests in flight included,
+     * gets a WorkerStoppingException with the reason at its wait at once, and the worker waits
+     * for them as long as the last one takes, within the grace period, then exits, whatever is
+     * left. A request that must finish catches the exception.
+     * Once: a second caller (the last server ending under the first) returns, and its
      * coroutine, cancelled by the first, ends.
      */
     private function stop(): void
@@ -280,9 +276,14 @@ final class Worker
             return;
         }
         $this->stopping = true;
-        $left = phasync::shutdown(self::STOP_WINDOW, new WorkerStoppingException($this->stopReason));
+        // Within the grace period, a second before the master's SIGKILL
+        $window = \max($this->grace - 1.0, $this->grace / 2);
+        $left   = phasync::shutdown($window, new WorkerStoppingException($this->stopReason));
+        $s      = \round(\microtime(true) - $this->drainStarted, 2);
         if ($left > 0) {
-            $this->logger->warning('{n} coroutines still running after {s} s; exiting', ['n' => $left, 's' => self::STOP_WINDOW]);
+            $this->logger->warning('Drain deadline reached after {s} s; dropping {n} coroutines still running', ['s' => $s, 'n' => $left]);
+        } else {
+            $this->logger->info('Drained in {s} s, exiting', ['s' => $s]);
         }
         exit(0);
     }
@@ -351,7 +352,7 @@ final class Worker
     }
 
     /**
-     * The heartbeat, acting on the master's death, and the drain deadline.
+     * The heartbeat, acting on the master's death, and the end of the linger time.
      *
      * The heartbeat comes from a coroutine in the event loop, not from a timer signal: async
      * signal handlers run even during a busy loop, and would hide the stall the master's
@@ -378,12 +379,6 @@ final class Worker
                 } elseif ($now >= $this->lingerEnd) {
                     $this->stopLingering('the linger time is over');
                 }
-            }
-            if ($now >= $this->deadline) {
-                $this->logger->warning('Drain deadline reached after {s} s; dropping open connections and the coroutines requests started', [
-                    's' => \round($now - $this->drainStarted, 2),
-                ]);
-                $this->stop();
             }
             phasync::sleep(self::TICK);
         }
@@ -520,13 +515,15 @@ final class Worker
         $this->draining     = true;
         $this->drainStarted = \microtime(true);
         $this->lingerEnd    = $linger ? $this->drainStarted + $this->linger : null;
-        $this->deadline     = $linger ? \PHP_FLOAT_MAX : $this->drainStarted + \max($this->grace - 1.0, $this->grace / 2);
         // Asked by the master, the master logs it once for all; anything else is news
         $this->logger->log('the master asked' === $why ? 'info' : 'notice', $linger ? 'Draining, keeping upgraded connections for up to {s} s ({why})' : 'Draining ({why})', ['why' => $why, 's' => \round($this->linger)]);
         $this->send('D'); // the master may not know: a SIGTERM from someone else, or its death
         $linger ? Topics::linger() : Topics::drain(); // drain() ends the long responses fed by subscriptions
         foreach ($this->drains as $drain) {
             $drain($linger);
+        }
+        if (!$linger) {
+            phasync::go($this->stop(...)); // every coroutine gets the exception now, see stop()
         }
     }
 
@@ -540,11 +537,11 @@ final class Worker
     {
         $this->lingerEnd    = null;
         $this->drainStarted = \microtime(true);
-        $this->deadline     = $this->drainStarted + \max($this->grace - 1.0, $this->grace / 2);
         $this->logger->notice('Closing the lingering connections ({why})', ['why' => $why]);
         Topics::drain();
         foreach ($this->drains as $drain) {
             $drain(false);
         }
+        phasync::go($this->stop(...));
     }
 }

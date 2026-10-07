@@ -134,7 +134,7 @@ TimeoutStopSec=40
 WantedBy=multi-user.target
 ```
 
-`systemctl reload myapp` stops every worker (requests in flight finish), then restarts swerve in
+`systemctl reload myapp` stops every worker (requests in flight get a `503`), then restarts swerve in
 place, same PID, running the current code, swerve and `php.ini`: deploy, then reload. Connections
 arriving while it restarts are refused, and the cache starts empty. Logs go to the journal
 (`journalctl -u myapp`).
@@ -192,16 +192,13 @@ proxy's, unless it is a [trusted proxy](#behind-a-proxy); the client's address i
 
 ## Reloads, shutdown, and long-lived connections
 
-- On a reload or shutdown, each worker stops accepting, finishes the requests in flight, and
-  exits; the kernel hands new connections to the other workers (reload) or refuses them
-  (shutdown). A worker gets `--grace` seconds (30); what is still open a second before that is
-  dropped.
-- After a `101`, the connection's `read()` returns `''` at once, so a protocol can say goodbye (see
-  [Realtime](realtime.md)); subscriptions end, so SSE responses fed by them end too. A recycle
-  is gentler: see Memory above. Other
-  long responses are requests in flight: they run until the deadline, unless they check
-  `Swerve::draining()`. Clients must reconnect: `EventSource` does by itself; write
-  reconnecting into other clients.
+- On a reload or shutdown, each worker stops accepting, and every coroutine, requests in flight
+  included, gets a `Swerve\WorkerStoppingException` at its wait at once: a request whose response
+  has not started gets a `503`, long responses and upgraded connections are cut, a
+  `Swerve\WebSocket` closes with 1001 (1012 on a reload). The worker exits once its coroutines
+  have cleaned up, a second before `--grace` (30 s) at most. A recycle is gentler: see Memory
+  above. Clients must retry and reconnect, as after any server's death: `EventSource` does by
+  itself; write reconnecting into other clients.
 - `sysctl net.ipv4.tcp_migrate_req=1` makes the kernel hand connections waiting in a closing
   worker's queue to another worker instead of resetting them; swerve logs a hint at start when
   it is 0.

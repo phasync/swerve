@@ -87,7 +87,7 @@ coroutines and servers of your own, see [swerve.php as bootstrap](bootstrap.md).
 ```
 
 Every line has the time, the worker (its slot number; blank for the master process), and the
-message. Ctrl+C stops swerve after the requests in flight finish.
+message. Ctrl+C stops swerve: requests in flight get a `503`.
 
 During development:
 
@@ -97,8 +97,8 @@ vendor/bin/swerve --watch --public=public # also serve the files in public/
 vendor/bin/swerve -w 1 -v                 # one worker, and more log
 ```
 
-`--watch` restarts all workers when a file changes: requests in flight finish on the old code,
-then new workers start on the new code. A syntax error in a changed file is logged, and the
+`--watch` restarts all workers when a file changes: the old ones stop (requests in flight get a
+`503`), then new workers start on the new code. A syntax error in a changed file is logged, and the
 workers keep failing to start until it is fixed.
 
 Next: [How swerve runs your application](how-it-runs.md).

@@ -2,7 +2,9 @@
 
 namespace Swerve\Http;
 
+use phasync;
 use phasync\IOException;
+use phasync\ShutdownException;
 use phasync\TimeoutException;
 use Swerve\ClientRequest;
 use Swerve\HeadersSentException;
@@ -400,6 +402,12 @@ final class HttpClientRequest implements ClientRequest
             if (!$this->wire && null === $this->gone) {
                 $c->refuse($status, $e->getMessage());
             }
+        } catch (ShutdownException) {
+            // The worker stops: not a failure. A response not begun is answered 503, in full
+            if (!$this->wire && null === $this->gone) {
+                phasync::shielded(fn () => $c->refuse(503, 'Service Unavailable', linger: false));
+            }
+            $status = $this->wire ? $this->status : 503;
         } catch (\Throwable $e) {
             if (null === $this->gone) {
                 $c->logger->error('{request} failed: {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);

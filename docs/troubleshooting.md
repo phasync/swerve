@@ -37,10 +37,10 @@ adapter named is not installed: see [Adapters](../README.md#adapters).
 
 **`At the limit of 512 connections`.** A worker is full; see [Sizing](production.md#sizing).
 
-**A reload takes the full grace period.** A long response that is not fed by a subscription
-(long polling, a slow stream of your own) runs until the drain deadline. End it when
-`Swerve::draining()` turns true, or lower `--grace`. A recycled worker, on the other hand, keeps
-upgraded connections for up to `--linger`; see [Production](production.md#sizing).
+**A reload takes the full grace period.** Something catches the `Swerve\WorkerStoppingException`
+and waits on, or waits inside `phasync::shielded()`: the log says how many coroutines were still
+running. A recycled worker, on the other hand, keeps upgraded connections for up to `--linger`;
+see [Production](production.md#sizing).
 
 ## Seeing more
 

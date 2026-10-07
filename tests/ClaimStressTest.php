@@ -568,7 +568,7 @@ test('a SIGKILL of a worker frees all the names it holds, and only its own (2 an
     }
 });
 
-test('SIGTERM of the master while a claim is held and a request is inside its critical section: a clean stop', function () {
+test('SIGTERM of the master while a claim is held and a request is inside its critical section: a 503 at once, a clean stop', function () {
     $dir = temp_path(true);
     [$process, $addr, $log] = swerve_start(workers: 2, env: ['SWERVE_TEST_DIR' => $dir]);
     worker_pids($addr, 2, 10);
@@ -584,7 +584,7 @@ test('SIGTERM of the master while a claim is held and a request is inside its cr
     }
     swerve_signal($process, SIGTERM);
     $response = native_read_response($inside);
-    expect($response['status'] ?? null)->toBe(200); // the request in flight finishes within the grace
+    expect($response['status'] ?? null)->toBe(503); // the request in flight gets the WorkerStoppingException at its wait
     [$code] = swerve_wait($process, 10);
     expect($code)->toBe(0);
     expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
@@ -605,40 +605,24 @@ test('handles kept by every worker are destroyed as the workers stop: SIGINT, no
     expect(log_count($log, '/(ERROR|CRITICAL|WARNING)/i'))->toBe(0, file_get_contents($log));
 });
 
-test('SIGHUP reloads x3: the claim is retained while its worker drains, free once the worker exits', function () {
+test('SIGHUP reloads x3: a request holding a claim gets a 503, and the claim is free once the new workers serve', function () {
     [$process, $addr, $log] = swerve_start(workers: 2);
     try {
         worker_pids($addr, 2, 10);
-        $dir = cache_call($addr, '/claim-dir')[1];
-        $holders = [];
         for ($round = 1; $round <= 3; ++$round) {
-            // A connection that stays with the holding worker, and a request on it that keeps the worker draining
-            $deadline = microtime(true) + 15;
-            do {
-                $conn = native_connect($addr);
-                fwrite($conn, "GET /claim?n=job HTTP/1.1\r\nHost: t\r\n\r\n");
-                [$holder, $got] = json_decode(native_read_response($conn)['body'], true);
-                if (!$got) {
-                    fclose($conn);
-                    usleep(50_000);
-                }
-            } while (!$got && microtime(true) < $deadline);
-            expect($got)->toBeTrue("round $round");
-            expect($holders)->not->toContain($holder);
-            $holders[] = $holder;
-            fwrite($conn, "GET /claim-hold?n=pin$round&ms=1500 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
-            usleep(100_000);
+            $conn = native_connect($addr);
+            fwrite($conn, "GET /claim-hold?n=job&ms=5000 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+            $deadline = microtime(true) + 5;
+            while (cache_call($addr, '/available?n=job')[1]) { // until that request holds it
+                expect(microtime(true))->toBeLessThan($deadline);
+                usleep(20_000);
+            }
 
             swerve_signal($process, SIGHUP);
+            expect(native_read_response($conn)['status'] ?? null)->toBe(503);
             log_wait_count($log, '/Reload complete/', $round, 15);
-            for ($i = 0; $i < 10; ++$i) { // the new workers cannot take what the draining one still holds
-                [$pid, $got] = cache_call($addr, '/claim?n=job');
-                expect([$pid !== $holder, $got])->toBe([true, false]);
-            }
-            expect(cache_call($addr, '/available?n=job')[1])->toBeFalse();
-            expect(native_read_response($conn)['status'] ?? null)->toBe(200);
-            log_wait_count($log, '/exited after draining/', 2 * $round, 15);
-            expect(is_dir($dir))->toBeTrue(); // the workers never remove the master's directory
+            worker_pids($addr, 2, 10);
+            expect(cache_call($addr, '/available?n=job')[1])->toBeTrue();
         }
     } finally {
         native_stop($process);

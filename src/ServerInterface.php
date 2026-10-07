@@ -36,10 +36,10 @@ interface ServerInterface
     /**
      * Stop accepting and let the requests in flight finish; {@see ServerInterface::run()} then returns.
      *
-     * With `$linger`, a server that has upgraded connections keeps them until they
-     * close; calling `drain()` again, without `$linger`, ends them.
+     * Upgraded connections stay until they close, or until the worker's stop ends their
+     * coroutines.
      *
-     * @param bool $linger keep the upgraded connections for now
+     * @param bool $linger a recycle: the worker keeps its upgraded connections for now
      */
     public function drain(bool $linger = false): void;
 }

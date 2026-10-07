@@ -46,11 +46,8 @@ are in [WebSockets and Server-Sent Events](websocket.md#server-sent-events). Wit
 - Swerve has no message history to resume from after a `Last-Event-ID`
   (`$sse->lastEventId()`), so a reconnecting client catches up from your storage.
 - **On a reload or shutdown** (and at the end of the lingering of a recycled worker, see
-  [Production](production.md)), the worker drains: every subscription's loop ends, so a
-  handler like the one above returns at once, and the browser reconnects to another worker.
-  A long response that is not fed by a subscription (long polling, a slow download) runs until
-  the drain deadline, a second before `--grace` (30 s); check `Swerve::draining()` in its loop
-  to end it sooner.
+  [Production](production.md)), every handler gets a `Swerve\WorkerStoppingException` at its
+  wait, at once, and the browser reconnects to another worker.
 - Behind a proxy, buffering must be off (nginx: `proxy_buffering off`).
 
 ## Raw connections
@@ -67,8 +64,9 @@ returns what the client sends (first, any bytes it sent right behind its Upgrade
 `write()` sends bytes as given, with no HTTP framing, timeouts or size limits. A protocol can be
 spoken over it with `read()` and `write()`; a client that stops reading is dropped with `close()`.
 
-- `read()` waits for the client and returns `''` when the client closes its side, or when the worker
-  drains (a shutdown or reload): say goodbye in your protocol, and return.
+- `read()` waits for the client and returns `''` when the client closes its side: say goodbye in
+  your protocol, and return. When the worker stops, it throws a `Swerve\WorkerStoppingException`;
+  a goodbye then is written inside `phasync::shielded()`, since every later wait throws it too.
 - When the handler returns, the connection closes, after reading the client's last bytes for up to
   2 s so that your goodbye arrives.
 - A recycled worker keeps its upgraded connections up to `--linger` seconds instead of draining

@@ -6,7 +6,9 @@
 
 use Swerve\ClientRequest;
 use Swerve\RequestHandler;
+use Swerve\StopReason;
 use Swerve\Swerve;
+use Swerve\WorkerStoppingException;
 
 /*
  * Supervision tests control how the application loads through the directory in
@@ -183,6 +185,11 @@ function fx_ws_echo(ClientRequest $r, bool $bye): void
         }
     } catch (\phasync\IOException) {
         // The client reset the connection: nobody to say goodbye to
+    } catch (WorkerStoppingException $e) {
+        // Shielded: the exception is sticky, an unshielded write would get it too
+        $bye || \phasync::shielded(fn () => $r->write(fx_ws_frame(8, \pack('n', StopReason::Reload === $e->reason ? 1012 : 1001))));
+
+        throw $e;
     }
 }
 
@@ -231,6 +238,19 @@ return new RequestHandler((new class($version) {
         switch ($path) {
             case '/hello':
                 fx_send($r, 200, ['Content-Type' => 'text/plain'], 'Hello');
+
+                return;
+            case '/save-on-stop':
+                // A coroutine that outlives its request and saves its work when stopped, with cleanup that waits
+                $file = (string) $query['file'];
+                phasync::go(static function () use ($file) {
+                    phasync::finally(static function () use ($file) {
+                        phasync::sleep(0.2);
+                        \file_put_contents($file, 'saved');
+                    });
+                    phasync::sleep(100);
+                });
+                fx_send($r, 200, ['Content-Type' => 'text/plain'], 'started');
 
                 return;
             case '/background':
@@ -505,6 +525,12 @@ return new RequestHandler((new class($version) {
             case '/sleep':
                 phasync::sleep(((int) $query['ms']) / 1000);
                 fx_send($r, 200, ['Content-Type' => 'text/plain'], 'slept ' . $query['id']);
+
+                return;
+            // A request no stop can end: it sleeps shielded
+            case '/stubborn':
+                phasync::shielded(static fn () => phasync::sleep(((int) $query['ms']) / 1000));
+                fx_send($r, 200, ['Content-Type' => 'text/plain'], 'slept');
 
                 return;
             case '/params':

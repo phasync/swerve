@@ -453,7 +453,7 @@ test('an application exception is logged with its request', function () {
     native_stop($process);
 });
 
-test('a log that can\'t be written, under an application error handler that throws, neither ends the worker nor cuts its drain short', function () {
+test('a log that can\'t be written, under an application error handler that throws, neither ends the worker nor keeps it from stopping cleanly', function () {
     // /dev/full fails every write as a full disk does
     $addr     = free_address();
     $process  = swerve_spawn(["--http=$addr", '--workers=1', '--grace=5', '--log=/dev/full', '-vv'], 'strict.php');
@@ -471,7 +471,7 @@ test('a log that can\'t be written, under an application error handler that thro
     $conn = send_get($addr, '/sleep?ms=1000&id=a');
     usleep(300_000);
     swerve_signal($process, SIGTERM);
-    expect(native_read_response($conn)['body'])->toBe('slept a');
+    expect(native_read_response($conn)['status'])->toBe(503);
     [$code] = swerve_wait($process, 3);
     expect($code)->toBe(0);
 });
@@ -761,7 +761,7 @@ test('a --max-memory at or above memory_limit is said to be no limit, and a size
  * Shutdown
  */
 
-test('SIGTERM lets requests in flight finish, stops accepting, and exits', function () {
+test('SIGTERM stops at once: requests in flight are answered 503, nothing more is accepted, and swerve exits', function () {
     [$process, $addr, , $pid] = swerve_start();
     $conns                    = [];
     for ($i = 0; $i < 3; ++$i) {
@@ -773,15 +773,12 @@ test('SIGTERM lets requests in flight finish, stops accepting, and exits', funct
     usleep(400_000);
     expect(probe($addr, '/hello', 0.5))->toBeNull(); // refused
 
-    foreach ($conns as $i => $conn) {
-        $response = native_read_response($conn);
-        expect($response['status'])->toBe(200);
-        expect($response['body'])->toBe("slept $i");
-        expect($response['headers']['connection'] ?? null)->toBe('close');
+    foreach ($conns as $conn) {
+        expect(native_read_response($conn)['status'])->toBe(503); // the worker stopped them
     }
     [$code, $seconds] = swerve_wait($process, 3);
     expect($code)->toBe(0);
-    expect(microtime(true) - $start)->toBeLessThan(2.5);
+    expect(microtime(true) - $start)->toBeLessThan(1.5); // not the 1.5 s the requests would have taken
     expect(group_gone($pid))->toBeTrue();
 });
 
@@ -813,7 +810,7 @@ test('shutdown never takes longer than the grace period', function () {
 
 test('a second signal kills the workers at once', function () {
     [$process, $addr, $log] = swerve_start(['--grace=10']);
-    $sleep                  = send_get($addr, '/sleep?ms=10000&id=x');
+    $sleep                  = send_get($addr, '/stubborn?ms=10000');
     usleep(100_000);
     $start = microtime(true);
     swerve_signal($process, SIGTERM);
@@ -825,25 +822,25 @@ test('a second signal kills the workers at once', function () {
     expect(file_get_contents($log))->toContain('Second signal');
 });
 
-test('Ctrl+C to the process group drains gracefully: the workers leave it to the master', function () {
+test('Ctrl+C to the process group stops gracefully: the workers leave it to the master', function () {
     [$process, $addr, , $pid] = swerve_start();
     $conn                     = send_get($addr, '/sleep?ms=1000&id=c');
     usleep(100_000);
     posix_kill(-$pid, SIGINT);
 
-    expect(native_read_response($conn)['body'])->toBe('slept c');
+    expect(native_read_response($conn)['status'])->toBe(503);
     [$code] = swerve_wait($process, 3);
     expect($code)->toBe(0);
 });
 
-test('workers drain and exit when the master is killed', function () {
+test('workers stop and exit when the master is killed', function () {
     [$process, $addr, $log, $pid] = swerve_start();
     $conn                         = send_get($addr, '/sleep?ms=500&id=k');
     usleep(100_000);
     posix_kill($pid, SIGKILL);
 
-    expect(native_read_response($conn)['body'])->toBe('slept k');
-    fclose($conn); // else the worker lingers for the client's end until its drain deadline
+    expect(native_read_response($conn)['status'])->toBe(503);
+    fclose($conn);
     expect(group_gone($pid))->toBeTrue();
     expect(file_get_contents($log))->toContain('Master process died');
     proc_close($process);
@@ -911,14 +908,15 @@ test('drain answers a request that reached an idle keep-alive connection before 
     expect($rest)->toStartWith('HTTP/1.1 200')->toContain("\r\nConnection: close\r\n")->toEndWith('Hello');
 });
 
-test('a drain that runs out of time ends the worker without a PHP fatal error', function () {
+test('a stop ends a streaming response at once, without a PHP fatal error', function () {
     [$process, $addr, $log] = swerve_start(['--grace=2'], workers: 1);
     $conn                   = send_get($addr, '/stream?n=1000&ms=100');
     usleep(300_000);
     swerve_signal($process, SIGTERM);
-    swerve_wait($process, 4);
+    [$code, $seconds] = swerve_wait($process, 4);
 
-    expect(file_get_contents($log))->toContain('Drain deadline reached')->not->toContain('Fatal error')->not->toContain('exit 255');
+    expect([$code, $seconds < 1.0])->toBe([0, true]);
+    expect(file_get_contents($log))->not->toContain('Fatal error')->not->toContain('exit 255');
 });
 
 test('a log reader that stops reading stops neither the server nor its shutdown', function () {
@@ -1003,7 +1001,7 @@ test('SIGUSR1 reopens the log, SIGUSR2 reloads and SIGQUIT stops gracefully, as 
     $conn = send_get($addr, '/sleep?ms=500&id=q');
     usleep(100_000);
     swerve_signal($process, SIGQUIT);
-    expect(native_read_response($conn)['body'])->toBe('slept q');
+    expect(native_read_response($conn)['status'])->toBe(503); // a stop ends the requests in flight
     [$code] = swerve_wait($process, 3);
     expect($code)->toBe(0);
 });
@@ -1305,22 +1303,22 @@ test('faults under concurrent load: the others serve on, and the workers are rep
     native_stop($process);
 })->skip(fn () => (int) shell_exec('nproc') < 2, 'needs 2 cores');
 
-test('a drain waits for the coroutines a request started after its response, up to the deadline', function () {
+test('a stop ends the coroutines a request started after its response at once, dropping their work', function () {
     $dir                    = test_dir(null);
     [$process, $addr, $log] = swerve_start(['--grace=2'], workers: 1, env: ['SWERVE_TEST_DIR' => $dir]);
-    expect(probe($addr, '/after-response?ms=500'))->toBe('ok');
-    swerve_signal($process, SIGTERM);
-    [$code] = swerve_wait($process, 5);
-    expect([$code, @file_get_contents("$dir/after-response")])->toBe([0, 'done']);
-
-    // Past the drain deadline (a second before the grace period ends) the work is dropped, and said so
-    [$process, $addr, $log] = swerve_start(['--grace=2'], workers: 1, env: ['SWERVE_TEST_DIR' => $dir]);
-    unlink("$dir/after-response");
-    expect(probe($addr, '/after-response?ms=5000'))->toBe('ok');
+    expect(probe($addr, '/after-response?ms=1000'))->toBe('ok');
     swerve_signal($process, SIGTERM);
     [$code, $took] = swerve_wait($process, 5);
-    expect([$code, file_exists("$dir/after-response"), $took < 2])->toBe([0, false, true]);
-    log_wait($log, '/Drain deadline reached .* the coroutines requests started/');
+    expect([$code, file_exists("$dir/after-response"), $took < 1])->toBe([0, false, true]);
+});
+
+test('a stop lets a coroutine save its work: cleanup in phasync::finally() completes, waits included', function () {
+    [$process, $addr] = swerve_start(['--grace=3'], workers: 1);
+    $file             = temp_path();
+    expect(probe($addr, '/save-on-stop?file=' . urlencode($file)))->toBe('started');
+    swerve_signal($process, SIGTERM);
+    [$code] = swerve_wait($process, 5);
+    expect([$code, @file_get_contents($file)])->toBe([0, 'saved']);
 });
 
 test('on a machine with several NUMA nodes, the workers are pinned to them in turn', function () {
@@ -1492,7 +1490,7 @@ test('-q --log writes nothing to the terminal and everything to the file', funct
  * the drain deadline
  */
 
-test('SIGTERM with a WebSocket open: the application sees its input end, says goodbye, and the worker drains in time', function () {
+test('SIGTERM with a WebSocket open: the worker says goodbye (1001) at once and stops in time', function () {
     [$process, $addr, $log, $pid] = swerve_start(['--grace=3'], workers: 1);
     $conn                         = ws_connect($addr, '/ws');
     ws_send($conn, 1, 'hello');
@@ -1512,7 +1510,7 @@ test('SIGTERM with a WebSocket open: the application sees its input end, says go
     expect(group_gone($pid))->toBeTrue();
 });
 
-test('a reload with a WebSocket open: the old worker says goodbye and drains, a new one serves new WebSockets', function () {
+test('a reload with a WebSocket open: the old worker says goodbye (1012, come back), a new one serves new WebSockets', function () {
     [$process, $addr, $log] = swerve_start(workers: 1, env: ['SWERVE_TEST_DIR' => test_dir()]);
     $old                    = (int) probe($addr, '/pid');
     $conn                   = ws_connect($addr, '/ws');
@@ -1520,7 +1518,7 @@ test('a reload with a WebSocket open: the old worker says goodbye and drains, a 
     expect(ws_read($conn))->toBe([1, 'hello']);
     swerve_signal($process, SIGHUP);
 
-    expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
+    expect(ws_read($conn))->toBe([8, pack('n', 1012)]);
     expect(ws_read($conn))->toBeNull();
     fclose($conn);
     log_wait($log, '/Drained in/', 3);
@@ -1536,7 +1534,7 @@ test('a reload with a WebSocket open: the old worker says goodbye and drains, a 
     native_stop($process);
 });
 
-test('a tunnel whose application ignores the end of its input is dropped at the drain deadline, logged', function () {
+test('a stop ends a tunnel at once, even one whose application ignores the end of its input', function () {
     [$process, $addr, $log, $pid] = swerve_start(['--grace=3'], workers: 1);
     $conn                         = native_connect($addr);
     fwrite($conn, "GET /upgrade-upper?ignore-eof=1 HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: upper\r\n\r\n");
@@ -1547,11 +1545,11 @@ test('a tunnel whose application ignores the end of its input is dropped at the 
     swerve_signal($process, SIGTERM);
 
     expect(native_closed($conn))->toBeTrue();
-    expect(microtime(true) - $start)->toBeGreaterThan(1.8)->toBeLessThan(2.6); // max(grace - 1, grace / 2)
+    expect(microtime(true) - $start)->toBeLessThan(1.0);
     [$code] = swerve_wait($process, 2);
     expect($code)->toBe(0);
     expect(group_gone($pid, 1))->toBeTrue();
-    log_wait($log, '/Drain deadline reached/', 1);
+    log_wait($log, '/Drained in/', 1);
     expect(log_count($log, '/FiberError/'))->toBe(0, file_get_contents($log));
 });
 
@@ -1574,36 +1572,31 @@ function upper_tunnel(string $addr, ?int $rcvbuf = null)
     return $conn;
 }
 
-test('a tunnel whose client keeps sending during a drain still sees its input end, says goodbye, and closes cleanly', function () {
+test('a stop closes a tunnel whose client keeps sending at once', function () {
     [$process, $addr, $log] = swerve_start(['--grace=6'], workers: 1);
     $conn                   = upper_tunnel($addr);
-    // Flat out, reading all the while, until the goodbye arrives
-    $received = '';
-    $signal   = null;
-    $start    = microtime(true);
-    while (!str_ends_with($received, "EOF\n") && microtime(true) - $start < 8) {
+    // Flat out, reading all the while, until the worker closes
+    $signal = null;
+    $start  = microtime(true);
+    while (microtime(true) - $start < 8) {
         if (null === $signal && microtime(true) - $start > 1) {
             swerve_signal($process, SIGTERM);
             $signal = microtime(true);
         }
-        expect(@fwrite($conn, str_repeat('a', 16384)))->not->toBeFalse();
-        $received .= (string) @fread($conn, 65536);
+        if (false === @fwrite($conn, str_repeat('a', 16384)) || (false === @fread($conn, 65536) || feof($conn))) {
+            break;
+        }
     }
-    $seconds = microtime(true) - $signal;
-    stream_socket_shutdown($conn, STREAM_SHUT_WR);
-    [, $reset] = read_to_end($conn);
 
-    expect(str_ends_with($received, "EOF\n"))->toBeTrue();
-    expect($seconds)->toBeLessThan(1.0);
-    expect($reset)->toBeFalse();
+    expect(microtime(true) - $signal)->toBeLessThan(1.0);
     [$code] = swerve_wait($process, 4);
     expect($code)->toBe(0);
     expect(log_count($log, '/Drain deadline reached/'))->toBe(0);
 });
 
-test('a drained tunnel whose client still sends gets everything the application wrote, its goodbye included, without a reset', function () {
-    [$process, $addr] = swerve_start(['--grace=6'], workers: 1);
-    $conn             = upper_tunnel($addr, 65536);
+test('a stop ends a tunnel whose writes are stalled by a client that doesn\'t read, at once', function () {
+    [$process, $addr, $log] = swerve_start(['--grace=6'], workers: 1);
+    $conn                   = upper_tunnel($addr, 65536);
     // 1 MiB without reading: the echo waits in the buffers, the worker's writes stall
     $sent  = 0;
     $start = microtime(true);
@@ -1614,39 +1607,14 @@ test('a drained tunnel whose client still sends gets everything the application 
             usleep(10_000);
         }
     }
-    usleep(1_000_000);
-    // Still sending during the drain, then reading everything
-    $start = microtime(true);
-    while (microtime(true) - $start < 0.8) {
-        if (!isset($signal) && microtime(true) - $start > 0.3) {
-            swerve_signal($process, SIGTERM);
-            $signal = true;
-        }
-        fwrite($conn, str_repeat('a', 1024));
-        usleep(10_000);
-    }
-    [$received, $reset] = read_to_end($conn);
-
-    expect($reset)->toBeFalse();
-    expect(str_ends_with($received, "EOF\n"))->toBeTrue();
-    expect(trim($received, "A\n"))->toBe('EOF');
-    swerve_wait($process, 6);
-})->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
-
-test('a 101 decided during a drain is sent, and its input ends at once', function () {
-    [$process, $addr, $log] = swerve_start(['--grace=3'], workers: 1);
-    $conn                   = native_connect($addr);
-    fwrite($conn, "GET /upgrade-upper?delay=500 HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: upper\r\n\r\n");
-    usleep(100_000);
+    usleep(500_000);
     swerve_signal($process, SIGTERM);
 
-    expect(native_read_head($conn)['status'])->toBe(101);
-    expect(stream_get_contents($conn))->toBe("EOF\n");
-    fclose($conn);
-    [$code] = swerve_wait($process, 3);
+    [$code, $seconds] = swerve_wait($process, 6);
     expect($code)->toBe(0);
-    log_wait($log, '/Drained in/', 1);
-});
+    expect($seconds)->toBeLessThan(1.0);
+    expect(log_count($log, '/Drain deadline reached/'))->toBe(0);
+})->skip(!function_exists('socket_create'), 'the test uses ext-sockets');
 
 test('options take their value attached or as the next word, and addresses may be a port, :port or host:port', function (array $args, string $listening) {
     $log     = temp_path();

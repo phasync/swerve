@@ -208,7 +208,7 @@ final class Swerve
     }
 
     /**
-     * Whether this worker drains: it is shutting down, reloading or being recycled, and finishes the requests in flight.
+     * Whether this worker drains: it is shutting down, reloading or being recycled.
      *
      * An early hint: it turns true when the drain begins, also for a recycled worker, which then
      * keeps its upgraded connections (and long SSE responses) for up to `--linger` seconds. What tells
@@ -238,7 +238,8 @@ final class Swerve
      * by a recycle (which keeps its upgraded connections for up to `--linger` seconds), at the end
      * of that time. The callback runs in a coroutine of its own, so a slow one delays no other
      * and one that throws, which is logged, stops none; it runs at once when that moment has
-     * passed already.
+     * passed already. Its waits get the worker's {@see WorkerStoppingException} too: write a
+     * goodbye inside `phasync::shielded()`.
      *
      * The callback belongs to the request (or coroutine context) that registered it, and goes
      * when that request ends, without running: swerve holds no reference to the request. phasync
@@ -247,7 +248,7 @@ final class Swerve
      *
      * ```php
      * YourProtocol::from($request, function (YourProtocol $conn) {
-     *     Swerve::onShutdown(fn () => $conn->end('restarting'));
+     *     Swerve::onShutdown(fn () => phasync::shielded(fn () => $conn->end('restarting')));
      *     foreach ($conn as $message) {
      *         $conn->send(handle($message));
      *     }

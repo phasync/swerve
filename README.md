@@ -210,7 +210,7 @@ Logging (to the terminal, or with --log to a file):
 
 Limits:
   --max-body=<bytes>               HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
-  --grace=<seconds>                Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL (default: 30)
+  --grace=<seconds>                Seconds workers get to clean up on shutdown, reload and recycle before SIGKILL (default: 30)
   --linger=<seconds>               Seconds a recycled worker may keep serving its upgraded connections (101) after its replacement took over; 0 = not at all (default: 1800)
   --watchdog=<seconds>             Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
   --max-memory=<size|P%>           Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
@@ -356,33 +356,30 @@ body (`''` only at its end) and `write()` sends the response body. The module do
 
 ## Long-lived connections
 
-- **Shutdown and reload.** A request in flight is answered with `Connection: close`. A
-  `Swerve::subscribe()` loop ends, so a response fed by one ends too, and the client reconnects to
-  another worker. Another long response (long polling, a slow download) runs until the drain
-  deadline, a second before `--grace`: check `Swerve::draining()` in its loop to end it sooner. After a
-  `101`, the connection's `read()` returns `''`, as if the client had closed its side, however
-  much more it sends: end your side then. Past the deadline the worker exits and drops the
-  connection, which is logged.
+- **Shutdown and reload.** The worker stops accepting, and every coroutine, requests in flight
+  included, gets a `Swerve\WorkerStoppingException` at its wait at once: a phasync
+  `ShutdownException`, so a `CancelledException`. swerve ends what it owns: a request whose
+  response has not started gets a `503`, a started response is cut, a `Swerve\WebSocket` closes
+  with 1001 (Going Away, or 1012, Service Restart, on a reload), idle connections close. Clients
+  retry and reconnect, as they must when any server dies. Save or undo partial work in
+  `phasync::finally()` or `phasync::shielded()`; the exception reaches every later wait too, so
+  a goodbye of your own (on a raw `101` tunnel, say) is written shielded. `$e->reason`
+  (`Shutdown`, `Reload`, `Recycle`) says what happens next. The worker exits once every
+  coroutine has ended, a second before `--grace` at most, whatever is left, which is logged.
 - **Recycle: lingering.** A worker replaced by a recycle (`--max-memory`, `--max-requests`)
   keeps its upgraded connections instead of draining them: it stops accepting, finishes its
   plain requests and stays until the last client has left, or `--linger` seconds (1800) have
-  passed, which then ends it like a drain. Subscriptions, the cache and claims keep working
+  passed, which then ends it like a shutdown. Subscriptions, the cache and claims keep working
   meanwhile. A slot has at most three lingering workers; a recycle that would make a fourth waits
   until one exits. A reload or shutdown ends the lingering with `--grace`. `--linger=0` drains a
   recycled worker at once.
 - **Saying goodbye.** `Swerve::onShutdown($callback)` runs the callback in a coroutine when the
-  worker closes its connections (for a recycle, at the end of the lingering; `Swerve::draining()`
-  turns true when it begins), for example to send a protocol-level goodbye from a place that
-  holds no request. Callbacks are held weakly by the registering coroutine's context: one
+  worker stops (for a recycle, at the end of the lingering; `Swerve::draining()` turns true when
+  it begins), for example to send a protocol-level goodbye from a place that holds no request.
+  Its waits get the `WorkerStoppingException` too: write the goodbye shielded. Callbacks are held weakly by the registering coroutine's context: one
   whose request has ended is dropped (it relies on phasync's garbage collection, about half a
   second after a coroutine ends) and never runs. An exception in a callback is logged and
   stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
-- **Coroutines still running when the worker stops** (once its requests finished, or its
-  `--grace` ran out) get a `Swerve\WorkerStoppingException` at their wait, a phasync
-  `ShutdownException`, so a `CancelledException`: clean up at once; the worker exits as soon as
-  they have, and after a second at most, whatever is left. `$e->reason` (`Shutdown`, `Reload`,
-  `Recycle`) says what happens next, for example to close a WebSocket with 1012 (Service Restart)
-  on a reload.
 - **Many connections.** Without phasync-ext a worker serves at most 512 connections, whatever
   `ulimit -n` says: add workers or install the extension for many of them.
 - **Server-Sent Events and WebSockets** are in core: `Swerve\ServerSentEvents` and `Swerve\WebSocket`,
@@ -473,9 +470,7 @@ function nightlyReport(): void
   already, it returns the handle. `held()` tells whether this handle holds it. `release()` gives
   it up.
 - A claim has no TTL: it is held until released, destroyed, or its worker exits or dies (the
-  master clears a dead worker's claims). Draining does not release it: a long-lived holder
-  should release it itself when `Swerve::draining()`, so that a reload is not held up. Names are
-  apart from the cache's keys.
+  master clears a dead worker's claims). Names are apart from the cache's keys.
 - A claim is a file in a temporary directory (under `$SWERVE_TMPDIR`) that the master creates and removes: a hard link
   to a file with its holder's pid in it. Linking is atomic, and fails while the name is held.
   Without the master it works the same, in a directory of the process that dies with it.
@@ -487,8 +482,8 @@ itself: each worker loads it after starting, so a reload runs the current code.
 
 | Signal to the master | Effect |
 |---|---|
-| `SIGTERM`, `SIGINT` (Ctrl+C), `SIGQUIT` | Graceful shutdown: the workers stop accepting, finish the requests in flight (answered with `Connection: close`), close idle keep-alive connections and exit. What is left after `--grace` seconds is killed. A second signal kills at once. |
-| `SIGHUP`, `SIGUSR2` | Reload: every worker drains (requests in flight finish), then the master restarts swerve in place (same PID, same command line), so the application, swerve, phasync, `php.ini` and opcache are all fresh, and old and new code never run side by side. The cache starts empty. Connections arriving while swerve restarts are refused. The `--log` file is reopened first, by the master and the workers, so `logrotate` can rename it and send `SIGHUP`. |
+| `SIGTERM`, `SIGINT` (Ctrl+C), `SIGQUIT` | Shutdown: the workers stop accepting, end their coroutines with a `WorkerStoppingException` (requests in flight get a `503`, or are cut) and exit once these have cleaned up. What is left after `--grace` seconds is killed. A second signal kills at once. |
+| `SIGHUP`, `SIGUSR2` | Reload: every worker stops as on a shutdown, then the master restarts swerve in place (same PID, same command line), so the application, swerve, phasync, `php.ini` and opcache are all fresh, and old and new code never run side by side. The cache starts empty. Connections arriving while swerve restarts are refused. The `--log` file is reopened first, by the master and the workers, so `logrotate` can rename it and send `SIGHUP`. |
 | `SIGUSR1` | Reopen the `--log` file only. |
 
 `SIGQUIT`, `SIGUSR1` and `SIGUSR2` mean what they mean to php-fpm, so its deploy and
@@ -566,8 +561,8 @@ Operating notes:
 - Give the process manager more time than `--grace`: `docker stop -t 35`, Compose
   `stop_grace_period: 35s` or systemd `TimeoutStopSec=35` for the default 30 seconds. During a
   handover a slot briefly has two workers, so budget for one worker's memory more.
-- Long responses such as Server-Sent Events or long polling are cut at the end of the grace
-  period, on a reload or shutdown; a recycled worker keeps them up to `--linger` seconds. A slot
+- Long responses such as Server-Sent Events or long polling are cut at once on a reload or
+  shutdown; a recycled worker keeps them up to `--linger` seconds. A slot
   may then have up to three lingering workers beside the serving one: budget their memory too.
 - Without `-v` the log has notices and up: reloads, recycles, every worker exit, the pid of
   each worker started after the first ones, and shutdown. `-v` adds the first starts and each

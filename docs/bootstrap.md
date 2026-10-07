@@ -24,15 +24,11 @@ phasync::go(function () use ($app) {                          // drops what othe
 
 phasync::go(function () use ($app) {                          // one worker at a time runs the job
     while (!($claim = Swerve::claim('cleanup')->acquire(timeout: 5))) {
-        if (Swerve::draining()) {
-            return;
-        }
     }
-    while (!Swerve::draining()) {
+    while (true) {                                            // a stop ends it at a wait
         $app->cleanup();
         phasync::sleep(5);
     }
-    $claim->release();
 });
 
 (new MemcachedServer(11211))->start();                        // a server of your own
@@ -75,14 +71,13 @@ listen only while you hold it.
 
 ## Restarts and reloads
 
-- A worker exits once its HTTP servers have drained. That ends the coroutines you started and
-  closes your servers' connections at once: your server does not hold up a reload, and its
-  clients reconnect, as they do after a crash or a recycle.
-- `Swerve::draining()` turns true when the worker starts to drain. Stop accepting then, and
-  finish the work in progress.
-- Draining does not release a claim. A job that holds one releases it when
-  `Swerve::draining()`, so that its successor is not kept waiting. A worker that exits or dies
-  loses its claims.
+- When the worker stops, every coroutine you started gets a `Swerve\WorkerStoppingException`
+  at its wait, at once, and the worker exits once they have ended: your server does not hold up
+  a reload, and its clients reconnect, as they do after a crash or a recycle. Save or undo
+  partial work in `phasync::finally()` or `phasync::shielded()`.
+- `Swerve::draining()` turns true when the worker starts to stop.
+- A claim is released as its handle goes, when the exception unwinds the job; a worker that
+  exits or dies loses its claims.
 - A reload stops every worker before starting new ones, so old and new code never run at the
   same time.
 

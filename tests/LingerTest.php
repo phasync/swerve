@@ -20,12 +20,19 @@ function linger_ws(string $addr, string $path = '/websocket-shutdown'): array
 
 /**
  * Ask /pid until a worker other than $pid answers: $pid was recycled, and its replacement serves.
+ * Then wait until $pid drains too: until then, both accept.
  */
-function linger_until_replaced(string $addr, int $pid, float $timeout = 10): int
+function linger_until_replaced(string $addr, int $pid, string $log, float $timeout = 10): int
 {
     for ($until = microtime(true) + $timeout; microtime(true) < $until; usleep(5000)) {
         $answer = probe($addr, '/pid');
         if (null !== $answer && (int) $answer !== $pid) {
+            // The master's "took over, draining $pid", then the worker's own "Draining" as it closes its listener
+            while (!log_count($log, "/took over, draining $pid\\b/") || log_count($log, '/ \\d+ Draining/') < log_count($log, '/took over, draining/')) {
+                expect(microtime(true))->toBeLessThan($until);
+                usleep(5000);
+            }
+
             return (int) $answer;
         }
     }
@@ -48,7 +55,7 @@ test('a recycled worker keeps its WebSocket, past the grace period, and exits on
     [$process, $addr, $log] = swerve_start(['--max-requests=5', '--grace=1'], workers: 1);
     try {
         [$conn, $old] = linger_ws($addr);
-        $new          = linger_until_replaced($addr, $old);
+        $new          = linger_until_replaced($addr, $old, $log);
         expect($new)->not->toBe($old);
         log_wait($log, "/took over, draining $old \\(recycle\\)/");
 
@@ -70,7 +77,7 @@ test('a lingering worker accepts no new connections and finishes its plain reque
     [$process, $addr, $log] = swerve_start(['--max-requests=5'], workers: 1);
     try {
         [$conn, $old] = linger_ws($addr);
-        linger_until_replaced($addr, $old);
+        linger_until_replaced($addr, $old, $log);
         for ($i = 0; $i < 4; ++$i) {
             expect((int) probe($addr, '/pid'))->not->toBe($old);
         }
@@ -88,7 +95,7 @@ test('--linger ends the lingering: the callback of Swerve::onShutdown() runs the
     [$process, $addr, $log] = swerve_start(['--max-requests=5', '--linger=1.5'], workers: 1);
     try {
         [$conn, $old] = linger_ws($addr);
-        linger_until_replaced($addr, $old);
+        linger_until_replaced($addr, $old, $log);
         $recycled = microtime(true);
         expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
         expect(microtime(true) - $recycled)->toBeGreaterThan(1.0);
@@ -107,7 +114,7 @@ test('--linger=0 drains a recycled worker as before: its WebSocket is closed at 
     [$process, $addr, $log] = swerve_start(['--max-requests=5', '--linger=0'], workers: 1);
     try {
         [$conn, $old] = linger_ws($addr);
-        linger_until_replaced($addr, $old);
+        linger_until_replaced($addr, $old, $log);
         $recycled = microtime(true);
         expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
         expect(microtime(true) - $recycled)->toBeLessThan(1.0);
@@ -119,7 +126,7 @@ test('--linger=0 drains a recycled worker as before: its WebSocket is closed at 
 test('a shutdown ends the lingering with the grace period: the WebSocket is told, and swerve stops long before --linger', function () {
     [$process, $addr, $log] = swerve_start(['--max-requests=5', '--linger=600'], workers: 1);
     [$conn, $old]           = linger_ws($addr);
-    linger_until_replaced($addr, $old);
+    linger_until_replaced($addr, $old, $log);
     $start = microtime(true);
     swerve_signal($process, SIGTERM);
     expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
@@ -134,7 +141,7 @@ test('a reload ends the lingering too', function () {
     [$process, $addr, $log] = swerve_start(['--max-requests=5', '--linger=600'], workers: 1);
     try {
         [$conn, $old] = linger_ws($addr);
-        linger_until_replaced($addr, $old);
+        linger_until_replaced($addr, $old, $log);
         swerve_signal($process, SIGHUP);
         expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
         log_wait($log, "/Worker $old \\(slot 0\\) exited after draining/", 4);
@@ -151,7 +158,7 @@ test('a lingering worker keeps its subscriptions: what is published still reache
         for ($until = microtime(true) + 5; 1 !== (json_decode(probe($addr, '/news-live') ?? '[]')[1] ?? null) && microtime(true) < $until; usleep(10000)) {
         }
         $old = (int) json_decode(probe($addr, '/news-live'))[0];
-        linger_until_replaced($addr, $old);
+        linger_until_replaced($addr, $old, $log);
         expect(probe($addr, '/publish?topic=news&m=hello'))->toBe('published');
         expect(ws_read($conn))->toBe([1, 'hello']);
         expect(linger_alive($old))->toBeTrue();
@@ -167,7 +174,7 @@ test('a slot keeps at most 3 lingering workers: the next recycle waits, is logge
         $pids        = [];
         for ($i = 0; $i < 3; ++$i) {
             [$connections[$i], $pids[$i]] = linger_ws($addr);
-            linger_until_replaced($addr, $pids[$i]);
+            linger_until_replaced($addr, $pids[$i], $log);
         }
         expect(count(array_unique($pids)))->toBe(3);
         // The fourth worker, serving, wants a recycle too
@@ -183,7 +190,7 @@ test('a slot keeps at most 3 lingering workers: the next recycle waits, is logge
         expect(log_count($log, '/waiting for a draining worker to exit before starting another/'))->toBe(0);
 
         linger_close($connections[0]); // the oldest leaves: the recycle goes on
-        $fifth = linger_until_replaced($addr, $pids[3]);
+        $fifth = linger_until_replaced($addr, $pids[3], $log);
         expect($fifth)->not->toBeIn($pids);
         expect(linger_alive($pids[1]) && linger_alive($pids[2]) && linger_alive($pids[3]))->toBeTrue();
     } finally {
@@ -198,7 +205,7 @@ test('a reload while a slot has 3 lingering workers does not wait for them', fun
         $pids        = [];
         for ($i = 0; $i < 3; ++$i) {
             [$connections[$i], $pids[$i]] = linger_ws($addr);
-            linger_until_replaced($addr, $pids[$i]);
+            linger_until_replaced($addr, $pids[$i], $log);
         }
         swerve_signal($process, SIGHUP);
         foreach ($connections as $conn) {

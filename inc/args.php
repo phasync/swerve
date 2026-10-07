@@ -113,7 +113,7 @@ return (function () {
         validator: fn ($value) => \ctype_digit((string) $value) ? null : 'A number of bytes required',
     ));
     $args->add('grace', new Option(
-        '', 'grace', 'Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL',
+        '', 'grace', 'Seconds workers get to clean up on shutdown, reload and recycle before SIGKILL',
         default: '30',
         placeholder: 'seconds',
         validator: $seconds,

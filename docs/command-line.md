@@ -27,7 +27,7 @@ Logging (to the terminal, or with --log to a file):
 
 Limits:
   --max-body=<bytes>               HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
-  --grace=<seconds>                Seconds workers get to finish their requests on shutdown, reload and recycle before SIGKILL (default: 30)
+  --grace=<seconds>                Seconds workers get to clean up on shutdown, reload and recycle before SIGKILL (default: 30)
   --linger=<seconds>               Seconds a recycled worker may keep serving its upgraded connections (101) after its replacement took over; 0 = not at all (default: 1800)
   --watchdog=<seconds>             Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
   --max-memory=<size|P%>           Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)

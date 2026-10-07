@@ -3,6 +3,7 @@
 namespace Swerve\Util;
 
 use phasync;
+use phasync\ShutdownException;
 use phasync\TimeoutException;
 use Swerve\Swerve;
 
@@ -74,6 +75,8 @@ final class Shutdown
         phasync::go(static function () use ($callback) {
             try {
                 $callback();
+            } catch (ShutdownException) {
+                // The worker's stop reached a wait of the callback's: the end it expects
             } catch (\Throwable $e) {
                 Swerve::log()->error('A Swerve::onShutdown() callback failed: {exception}', ['exception' => $e]);
             }
