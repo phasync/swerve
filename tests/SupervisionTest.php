@@ -1026,66 +1026,56 @@ test('a worker still loading the application when the master dies ends itself', 
  * Reload
  */
 
-test('SIGHUP replaces the workers one at a time with ones running the new code', function () {
+test('SIGHUP stops every worker, then starts new ones running the new code, with opcache on', function () {
     $dir                          = test_dir();
-    [$process, $addr, $log, $pid] = swerve_start(env: ['SWERVE_TEST_DIR' => $dir]);
+    [$process, $addr, $log, $pid] = swerve_start(php: ['-d', 'opcache.enable_cli=1'], env: ['SWERVE_TEST_DIR' => $dir]);
     $old                          = worker_pids($addr, 2);
     expect(probe($addr, '/version'))->toBe('v1');
     write_version($dir, 'v2');
     swerve_signal($process, SIGHUP);
 
-    $deadline = microtime(true) + 3;
-    do {
-        expect(microtime(true))->toBeLessThan($deadline);
-        usleep(50_000);
-        $versions = [];
-        for ($i = 0; $i < 10; ++$i) {
-            $versions[] = probe($addr, '/version');
-        }
-    } while (['v2'] !== array_values(array_unique($versions)) || is_alive($old[0]) || is_alive($old[1]));
-    expect(proc_get_status($process)['running'])->toBeTrue();
+    log_wait($log, '/Reload complete/', 5);
+    expect(is_alive($old[0]) || is_alive($old[1]))->toBeFalse();
+    for ($i = 0; $i < 10; ++$i) {
+        expect(probe($addr, '/version'))->toBe('v2'); // opcache's copy of version.php was invalidated
+    }
     expect_log_order($log, [
-        '/Started worker (\d+) in slot 0 \(generation 1\), replacing/', '/Worker \d+ \(slot 0\) ready/', '/Slot 0: worker \d+ took over, draining \d+ \(reload\)/',
-        '/Started worker (\d+) in slot 1 \(generation 1\), replacing/', '/Worker \d+ \(slot 1\) ready/', '/Slot 1: worker \d+ took over, draining \d+ \(reload\)/',
+        '/Reload requested \(SIGHUP\): stopping 2 workers, then starting new ones/',
+        '/exited after draining/', '/exited after draining/',
+        '/Started worker \d+ in slot \d \(generation 1\)/', '/Started worker \d+ in slot \d \(generation 1\)/',
         '/Reload complete/',
     ]);
     native_stop($process);
 });
 
-test('a reload whose new code fails to load is held up; the old workers serve on', function () {
+test('a reload whose new code fails to load leaves its slots crash-looping until a fixed reload', function () {
     $dir                    = test_dir();
     [$process, $addr, $log] = swerve_start(env: ['SWERVE_TEST_DIR' => $dir]);
     file_put_contents("$dir/version.php", "<?php return 'v2' +;\n");
     swerve_signal($process, SIGHUP);
 
-    log_wait($log, '/Reload held up: new worker for slot 0 exit 2 before becoming ready/');
-    $until = microtime(true) + 2;
-    while (microtime(true) < $until) {
-        expect(probe($addr, '/version'))->toBe('v1');
-    }
+    log_wait($log, '/Worker \d+ \(slot 0\) died: exit 2/', 5);
     write_version($dir, 'v3');
     swerve_signal($process, SIGHUP);
-    log_wait($log, '/Reload complete/', 3);
+    log_wait($log, '/Reload complete/', 5);
     wait_version($addr, 'v3', 1);
     native_stop($process);
 });
 
-test('a SIGHUP during a reload replaces every worker again', function () {
+test('a SIGHUP during a reload starts every worker again', function () {
     $dir                    = test_dir();
     [$process, $addr, $log] = swerve_start(env: ['SWERVE_TEST_DIR' => $dir]);
-    file_put_contents("$dir/load-ms", '300'); // the second SIGHUP comes while slot 0 starts
+    file_put_contents("$dir/load-ms", '300'); // the second SIGHUP comes while the new workers load
     write_version($dir, 'v2');
     swerve_signal($process, SIGHUP);
-    usleep(50_000);
+    usleep(150_000);
     swerve_signal($process, SIGHUP);
 
-    $failed   = 0;
-    $deadline = microtime(true) + 4;
+    $deadline = microtime(true) + 6;
     while (!log_count($log, '/Reload complete/')) {
         expect(microtime(true))->toBeLessThan($deadline);
-        $failed += (int) (null === probe($addr, '/hello'));
+        usleep(50_000);
     }
-    expect($failed)->toBeLessThanOrEqual(resets_allowed());
     expect(log_count($log, '/Reload requested/'))->toBe(2);
     expect(log_count($log, '/Reload complete/'))->toBe(1);
     $serving = [];
@@ -1142,13 +1132,13 @@ test('a worker started by a reload that dies later is restarted as a crash, not 
     native_stop($process);
 });
 
-test('a new worker dying during a reload, after it took over, does not stop the reload', function () {
+test('a new worker dying during a reload does not stop the reload', function () {
     $dir                    = test_dir();
     [$process, $addr, $log] = swerve_start(workers: 4, env: ['SWERVE_TEST_DIR' => $dir]);
     file_put_contents("$dir/load-ms", '300');
     write_version($dir, 'v2');
     swerve_signal($process, SIGHUP);
-    $match = log_wait($log, '/Slot 0: worker (\d+) took over/');
+    $match = log_wait($log, '/Started worker (\d+) in slot 0 \(generation 1\)/');
     posix_kill((int) $match[0][1], SIGKILL);
 
     log_wait($log, '/Reload complete/', 5);
@@ -1238,28 +1228,12 @@ test('a reload whose new worker fails to start is retried, so a passing failure 
     write_version($dir, 'v2');
     touch("$dir/crash"); // a database away for a moment
     swerve_signal($process, SIGHUP);
-    log_wait($log, '/new worker for slot 0 exit 3 before becoming ready/');
+    log_wait($log, '/Worker \d+ \(slot 0\) died: exit 3/');
     unlink("$dir/crash");
 
     log_wait($log, '/Reload complete/', 4);
     wait_version($addr, 'v2', 1);
     expect(log_count($log, '/recovered/'))->toBe(0);
-    native_stop($process);
-});
-
-test('after log rotation, workers a failed reload leaves serving log to the new file', function () {
-    $dir                    = test_dir();
-    [$process, $addr, $log] = swerve_start(env: ['SWERVE_TEST_DIR' => $dir]);
-    file_put_contents("$dir/version.php", "<?php return 'v2' +;\n");
-    rename($log, "$log.1");
-    $GLOBALS['swerve_temp'][] = "$log.1";
-    swerve_signal($process, SIGHUP);
-    log_wait($log, '/new worker for slot 0 exit 2 before becoming ready/');
-    for ($i = 0; $i < 4; ++$i) {
-        probe($addr, "/throw?after=rotate$i");
-    }
-    expect(log_wait($log, '/after=rotate\d failed/'))->toHaveCount(4);
-    expect(log_count("$log.1", '/after=rotate/'))->toBe(0);
     native_stop($process);
 });
 
@@ -1408,7 +1382,7 @@ test('without -v, the log tells of reloads and shutdown, not of each worker drai
     swerve_signal($process, SIGTERM);
     swerve_wait($process, 3);
 
-    expect_log_order($log, ['/Reload requested/', '/took over, draining/', '/Reload complete/', '/Shutting down/', '/Stopped in/']);
+    expect_log_order($log, ['/Reload requested/', '/Reload complete/', '/Shutting down/', '/Stopped in/']);
     expect(log_count($log, '/exited after draining|Draining \(the master asked\)/'))->toBe(0);
 });
 

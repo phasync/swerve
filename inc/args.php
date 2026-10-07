@@ -78,7 +78,7 @@ return (function () {
 
     $args->section('Development');
     $args->add('watch', new Flag(
-        '', 'watch', "Reload the workers, one at a time, when a PHP file of the application changes"
+        '', 'watch', "Restart all workers when a PHP file of the application changes"
     ));
 
     $args->section('Logging (to the terminal, or with --log to a file)');

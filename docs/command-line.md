@@ -17,7 +17,7 @@ Extension:
   --ext                            Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot
 
 Development:
-  --watch                          Reload the workers, one at a time, when a PHP file of the application changes
+  --watch                          Restart all workers when a PHP file of the application changes
 
 Logging (to the terminal, or with --log to a file):
   -v, --verbose                    Log more: -v also what swerve does (workers starting, draining), -vv also debug
@@ -75,7 +75,7 @@ Information:
 | | |
 |---|---|
 | `SIGTERM`, `SIGINT` (Ctrl+C), `SIGQUIT` | stop: workers finish their requests within `--grace`, then are killed (workers lingering after a recycle too); a second signal kills at once |
-| `SIGHUP`, `SIGUSR2` | reopen the log file, and reload: replace the workers one at a time with ones running the current code |
+| `SIGHUP`, `SIGUSR2` | reopen the log file, and reload: stop every worker, then start new ones running the current code |
 | `SIGUSR1` | reopen the log file (after log rotation) |
 
 Next: [Production](production.md).

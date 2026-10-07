@@ -83,7 +83,7 @@ listen only while you hold it.
 - Draining does not release a claim. A job that holds one releases it when
   `Swerve::draining()`, so that its successor is not kept waiting. A worker that exits or dies
   loses its claims.
-- During a rolling reload, a worker with the old code and one with the new run at the same
-  time: two copies of a job, both listening on the port.
+- A reload stops every worker before starting new ones, so old and new code never run at the
+  same time.
 
 Next: [Requests and responses](requests-and-responses.md).

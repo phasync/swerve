@@ -5,7 +5,7 @@
 `vendor/bin/swerve` starts a **master process**, which starts the **workers**: one per CPU
 core by default (`--workers`). The master never loads your application; it supervises:
 it restarts a worker that dies, replaces a stuck one (the watchdog) or one that uses too
-much memory (recycling), and does rolling reloads.
+much memory (recycling), and reloads by restarting all workers.
 
 Every worker loads your application file once, inside its event loop. The file is the
 application's bootstrap: it sets things up, may start coroutines that run for the worker's

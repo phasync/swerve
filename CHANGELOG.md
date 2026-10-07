@@ -5,8 +5,11 @@
 ### Changed
 
 - Workers no longer stat-check source files: swerve turns off `opcache.validate_timestamps` at
-  startup, so changed code arrives only through a reload (`--watch`, `SIGHUP`), which resets
-  opcache for every worker.
+  startup, so changed code arrives only through a reload (`--watch`, `SIGHUP`).
+- A reload (`--watch`, `SIGHUP`, `SIGUSR2`) stops every worker, makes opcache forget every script
+  (`opcache_invalidate()`), then starts a new set: old and new code never run side by side.
+  Rolling reloads are gone. The previous `opcache_reset()` never took effect under swerve: it
+  waits for a request boundary the master never reaches, and meanwhile stops caching.
 
 ### Added
 

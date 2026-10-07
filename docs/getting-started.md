@@ -97,8 +97,8 @@ vendor/bin/swerve --watch --public=public # also serve the files in public/
 vendor/bin/swerve -w 1 -v                 # one worker, and more log
 ```
 
-`--watch` reloads the workers one at a time: requests in flight finish on the old code, and
-new ones go to the new code. A syntax error in a changed file is logged, and the old workers
-go on serving until it is fixed.
+`--watch` restarts all workers when a file changes: requests in flight finish on the old code,
+then new workers start on the new code. A syntax error in a changed file is logged, and the
+workers keep failing to start until it is fixed.
 
 Next: [How swerve runs your application](how-it-runs.md).

@@ -427,10 +427,12 @@ final class Cluster
             ]);
         }
         if (null !== $this->reloadStarted) {
+            $serving = 0;
             foreach ($this->workers as $other) {
-                if (WorkerProcess::DRAINING !== $other->state && $other->generation < $this->generation) {
-                    return;
-                }
+                $serving += (int) (WorkerProcess::SERVING === $other->state && $other->generation === $this->generation);
+            }
+            if ($serving < $this->numWorkers) {
+                return;
             }
             $this->logger->notice('Reload complete in {s} s', ['s' => \round($now - $this->reloadStarted, 2)]);
             $this->reloadStarted = null;
@@ -627,28 +629,28 @@ final class Cluster
     }
 
     /**
-     * Start a rolling reload: every worker running is replaced by one of the new generation,
-     * see handover(). A reload during a reload just replaces the workers again.
+     * Reload: stop every worker, invalidate every script opcache holds, and let fill() start a
+     * new set, so no worker ever runs old and new code side by side. opcache_reset() would wait
+     * for a request boundary that a swerve master never reaches; opcache_invalidate() acts at
+     * once. A reload during a reload stops the starting workers and starts them again.
      */
     private function reload(string $why): void
     {
-        ++$this->generation;
         $this->reloadStarted = self::now();
         $this->reopenLog(); // logrotate renamed it, then sent SIGHUP
+        $this->logger->notice('Reload requested ({why}): stopping {n} workers, then starting new ones', ['why' => $why, 'n' => \count($this->workers)]);
+        $this->drainAll('reload');
+        if (\function_exists('opcache_get_status') && \is_array($status = \opcache_get_status(true))) {
+            foreach ($status['scripts'] ?? [] as $script => $_) {
+                \opcache_invalidate($script, true);
+            }
+        }
         // A fixed deploy starts crash-looping slots at once
         foreach ($this->failures as $slot => $_) {
             $this->failures[$slot]  = 0;
             $this->nextStart[$slot] = 0.0;
         }
-        if (\function_exists('opcache_reset')) {
-            \opcache_reset();
-        }
-        foreach ($this->workers as $w) {
-            if ($w->lingering) {
-                $this->endLinger($w);
-            }
-        }
-        $this->logger->notice('Reload requested ({why}): replacing {n} workers one at a time', ['why' => $why, 'n' => $this->numWorkers]);
+        ++$this->generation;
     }
 
     /**
@@ -745,6 +747,19 @@ final class Cluster
     {
         $start = self::now();
         $this->logger->notice('Shutting down: draining {n} workers (grace {g} s)', ['n' => \count($this->workers), 'g' => self::seconds($this->grace)]);
+        $this->drainAll('shutdown');
+        $this->logger->notice('Stopped in {s} s', ['s' => \round(self::now() - $start, 2)]);
+
+        return $code;
+    }
+
+    /**
+     * Drain every worker within the grace period, then SIGKILL what remains. A second stop
+     * signal kills them at once.
+     */
+    private function drainAll(string $why): void
+    {
+        $start = self::now();
         foreach ($this->workers as $w) {
             if ($w->lingering) {
                 $this->endLinger($w);
@@ -766,7 +781,7 @@ final class Cluster
         if ($this->workers) {
             $this->logger->warning('Grace expired: killing {pids}', ['pids' => \implode(', ', \array_keys($this->workers))]);
             foreach ($this->workers as $w) {
-                $w->killReason ??= 'shutdown grace expired';
+                $w->killReason ??= "$why grace expired";
                 \posix_kill($w->pid, \SIGKILL);
             }
             $until = self::now() + self::KILL_WAIT;
@@ -778,9 +793,6 @@ final class Cluster
                 $this->logger->emergency('Processes {pids} did not die after SIGKILL', ['pids' => \implode(', ', \array_keys($this->workers))]);
             }
         }
-        $this->logger->notice('Stopped in {s} s', ['s' => \round(self::now() - $start, 2)]);
-
-        return $code;
     }
 
     /**
