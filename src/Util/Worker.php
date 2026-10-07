@@ -5,8 +5,11 @@ namespace Swerve\Util;
 use Closure;
 use Composer\Autoload\ClassLoader;
 use phasync;
+use phasync\ShutdownException;
 use Psr\Log\LoggerInterface;
 use Swerve\Cache;
+use Swerve\StopReason;
+use Swerve\WorkerStoppingException;
 
 /**
  * A worker process's side of the supervision, see Cluster: tells the master it is alive
@@ -57,6 +60,15 @@ final class Worker
      *
      * @var array<int, Closure(): string>
      */
+    /** stop() has begun. */
+    private bool $stopping = false;
+
+    /** Why this worker stops, for the WorkerStoppingException its coroutines get. */
+    private StopReason $stopReason = StopReason::Shutdown;
+
+    /** Seconds the coroutines still running get to clean up once the worker stops. */
+    public const STOP_WINDOW = 1.0;
+
     private array $inFlight = [];
     /** The event loop's last heartbeat; 0 before the first (which then always goes out). */
     private float $lastTick = 0.0;
@@ -228,6 +240,8 @@ final class Worker
         phasync::go(function () use ($run) {
             try {
                 $run();
+            } catch (ShutdownException) {
+                return; // stop() ends the servers too; the worker exits there
             } catch (\Throwable $e) {
                 $this->logger->critical('{exception}', ['exception' => $e]);
                 exit(1);
@@ -238,7 +252,7 @@ final class Worker
             }
             if (0 === --$this->running) {
                 $this->logger->info('Drained in {s} s, exiting', ['s' => \round(\microtime(true) - $this->drainStarted, 2)]);
-                exit(0);
+                $this->stop();
             }
         });
         if (!$this->ticking) {
@@ -251,6 +265,26 @@ final class Worker
             phasync::go($this->awaitMaster(...));
             phasync::go($this->awaitInbox(...));
         }
+    }
+
+    /**
+     * Exit, once the coroutines still running had their chance: each gets a
+     * WorkerStoppingException with the reason, and the worker waits for them for at most
+     * STOP_WINDOW seconds (not longer than the last one takes), then exits, whatever is left.
+     * Once: a second caller (the drain deadline after the last server ended) returns, and its
+     * coroutine, cancelled by the first, ends.
+     */
+    private function stop(): void
+    {
+        if ($this->stopping) {
+            return;
+        }
+        $this->stopping = true;
+        $left = phasync::shutdown(self::STOP_WINDOW, new WorkerStoppingException($this->stopReason));
+        if ($left > 0) {
+            $this->logger->warning('{n} coroutines still running after {s} s; exiting', ['n' => $left, 's' => self::STOP_WINDOW]);
+        }
+        exit(0);
     }
 
     /** Tell the master this worker listens: it may now retire the worker this one replaces. */
@@ -349,7 +383,7 @@ final class Worker
                 $this->logger->warning('Drain deadline reached after {s} s; dropping open connections and the coroutines requests started', [
                     's' => \round($now - $this->drainStarted, 2),
                 ]);
-                exit(0);
+                $this->stop();
             }
             phasync::sleep(self::TICK);
         }
@@ -400,9 +434,13 @@ final class Worker
                 $this->logger->reopen();
             }
             if (\str_contains($status, 'G') && !$this->draining) {
+                $this->stopReason = StopReason::Recycle;
                 $this->drain('the master asked', true);
             }
-            if (\str_contains($status, 'T')) {
+            if (\str_contains($status, 'T') || \str_contains($status, 'X')) {
+                if (!$this->draining) {
+                    $this->stopReason = \str_contains($status, 'X') ? StopReason::Shutdown : ($this->recycleSent ? StopReason::Recycle : StopReason::Reload);
+                }
                 $this->draining ? $this->stopLingering('the master asked') : $this->drain('the master asked');
             }
         }

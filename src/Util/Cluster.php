@@ -680,9 +680,9 @@ final class Cluster
      * Ask a worker to drain: by a byte, see the class's docblock. A lingering one ('G') stops
      * accepting, but keeps its upgraded connections and its inbox, until endLinger().
      */
-    private function drain(WorkerProcess $w, bool $linger = false): void
+    private function drain(WorkerProcess $w, bool $linger = false, string $byte = 'T'): void
     {
-        $this->send($w, $linger ? 'G' : 'T');
+        $this->send($w, $linger ? 'G' : $byte); // 'X': swerve stops, 'T': a reload or recycle
         $w->state         = WorkerProcess::DRAINING;
         $w->drainingSince = self::now();
         $w->lingering     = $linger;
@@ -773,7 +773,7 @@ final class Cluster
             if ($w->lingering) {
                 $this->endLinger($w);
             } elseif (WorkerProcess::DRAINING !== $w->state) {
-                $this->drain($w);
+                $this->drain($w, false, 'shutdown' === $why ? 'X' : 'T');
             }
         }
         $deadline = $start + $this->grace;

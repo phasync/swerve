@@ -24,6 +24,11 @@
 
 ### Added
 
+- `Swerve\WorkerStoppingException` (a phasync `ShutdownException`) with `StopReason` (`Shutdown`,
+  `Reload`, `Recycle`): coroutines still running when a worker stops get it at their wait, and
+  the worker exits as soon as they have ended, after a second at most, instead of dropping them
+  silently.
+
 - `Swerve::ini()` and `Swerve::onWorkerStart()`: a package integrates with swerve from a file in its
   composer.json `files`, loaded as the master starts. `ini()` sets php.ini settings for every swerve
   process (applied by the startup restart; an explicit `-d` still wins); `onWorkerStart()` runs code

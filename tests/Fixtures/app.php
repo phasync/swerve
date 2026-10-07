@@ -233,6 +233,19 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 200, ['Content-Type' => 'text/plain'], 'Hello');
 
                 return;
+            case '/background':
+                // A coroutine that outlives its request, and says why it was stopped
+                $file = (string) $query['file'];
+                phasync::go(static function () use ($file) {
+                    try {
+                        phasync::sleep(100);
+                    } catch (\Swerve\WorkerStoppingException $e) {
+                        \file_put_contents($file, $e->reason->name);
+                    }
+                });
+                fx_send($r, 200, ['Content-Type' => 'text/plain'], 'started');
+
+                return;
             case '/global':
                 fx_send($r, 200, ['Content-Type' => 'text/plain'], (string) ($GLOBALS[(string) $query['k']] ?? ''));
 

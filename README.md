@@ -377,6 +377,12 @@ body (`''` only at its end) and `write()` sends the response body. The module do
   whose request has ended is dropped (it relies on phasync's garbage collection, about half a
   second after a coroutine ends) and never runs. An exception in a callback is logged and
   stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
+- **Coroutines still running when the worker stops** (once its requests finished, or its
+  `--grace` ran out) get a `Swerve\WorkerStoppingException` at their wait, a phasync
+  `ShutdownException`, so a `CancelledException`: clean up at once; the worker exits as soon as
+  they have, and after a second at most, whatever is left. `$e->reason` (`Shutdown`, `Reload`,
+  `Recycle`) says what happens next, for example to close a WebSocket with 1012 (Service Restart)
+  on a reload.
 - **Many connections.** Without phasync-ext a worker serves at most 512 connections, whatever
   `ulimit -n` says: add workers or install the extension for many of them.
 - **Server-Sent Events and WebSockets** are in core: `Swerve\ServerSentEvents` and `Swerve\WebSocket`,
