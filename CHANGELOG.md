@@ -17,6 +17,11 @@
 
 ### Added
 
+- `Swerve::ini()` and `Swerve::onWorkerStart()`: a package integrates with swerve from a file in its
+  composer.json `files`, loaded as the master starts. `ini()` sets php.ini settings for every swerve
+  process (applied by the startup restart; an explicit `-d` still wins); `onWorkerStart()` runs code
+  in every worker before the application loads. Calls after startup change nothing.
+
 - `Swerve::onRequestSwitch(resume, suspend)`: a framework running requests as coroutines of one
   worker can keep process-wide PHP state (`setlocale()`, `date_default_timezone_set()`,
   `mb_internal_encoding()`, ...) as each request's own. `resume($request)` runs just before a

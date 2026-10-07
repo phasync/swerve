@@ -36,6 +36,15 @@ final class Swerve
     /** The log of this process, see log(). */
     private static ?LoggerInterface $log = null;
 
+    /** @var array<string, string> the php.ini settings packages registered with ini() */
+    private static array $ini = [];
+
+    /** @var list<\Closure> the onWorkerStart() callbacks */
+    private static array $workerStart = [];
+
+    /** Startup is over: later registrations change nothing */
+    private static bool $started = false;
+
     /**
      * The log of this process: swerve's own PSR-3 logger, in its format (the time, this worker's slot).
      *
@@ -321,6 +330,68 @@ final class Swerve
     public static function onRequestSwitch(\Closure $resume, \Closure $suspend): void
     {
         RequestSwitch::listen($resume, $suspend);
+    }
+
+    /**
+     * php.ini settings a package needs in every swerve process. Call it from a file listed in
+     * your package's composer.json `files`: Composer loads it after swerve's own, as the master
+     * starts. swerve applies the settings with its startup restart, over its own settings; an
+     * explicit `-d` on the command line still wins.
+     *
+     * Calls after startup change nothing, so the file may run again: an application that
+     * includes Composer's autoloader in every request (under `virtualize()`) includes it again.
+     *
+     * ```php
+     * Swerve::ini(['phasync.virtualize' => true]);
+     * ```
+     *
+     * @param array<string, string|int|float|bool> $settings
+     */
+    public static function ini(array $settings): void
+    {
+        if (self::$started) {
+            return;
+        }
+        foreach ($settings as $name => $value) {
+            self::$ini[$name] = \is_bool($value) ? ($value ? '1' : '0') : (string) $value;
+        }
+    }
+
+    /**
+     * Run $callback in every worker as it starts, before the application loads, inside the
+     * worker's event loop, so it may start coroutines that run for the worker's life. Register it
+     * the way {@see Swerve::ini()} says; calls after startup change nothing. A callback that
+     * throws stops the worker, as an application that fails to load does.
+     *
+     * @param \Closure():void $callback
+     */
+    public static function onWorkerStart(\Closure $callback): void
+    {
+        if (self::$started) {
+            return;
+        }
+        self::$workerStart[] = $callback;
+    }
+
+    /**
+     * @internal the settings ini() registered, for swerve's startup restart
+     *
+     * @return array<string, string>
+     */
+    public static function registeredIni(): array
+    {
+        return self::$ini;
+    }
+
+    /**
+     * @internal end startup in this worker, and run the onWorkerStart() callbacks
+     */
+    public static function startWorker(): void
+    {
+        self::$started = true;
+        foreach (self::$workerStart as $callback) {
+            $callback();
+        }
     }
 
     /**

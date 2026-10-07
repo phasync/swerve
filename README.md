@@ -249,7 +249,7 @@ declares itself in its own `composer.json`:
 `entry` names a function that each worker calls once, after the fork and after `vendor/autoload.php`
 is loaded, with the application directory; it returns a `Swerve\RequestHandler`, as `swerve.php`
 does, and anything else stops swerve with exit code 2. The master only reads
-`vendor/composer/installed.json` to find adapters, and loads none of their code.
+`vendor/composer/installed.json` to find adapters, and doesn't call their entry.
 
 The adapter is the first of: `--adapter=<name>`; `"extra": {"swerve": {"adapter": "<name>"}}` in the
 application's own `composer.json`; the only installed adapter; `swerve`, the built-in one, which
@@ -257,6 +257,28 @@ loads `swerve.php` (always available as `--adapter=swerve`). Several installed a
 choice, or a name that is not installed, stops swerve at start. With an adapter other than `swerve`,
 a `swerve.php` in the application directory is ignored (logged once), and giving one on the command
 line is an error. The application directory is the directory of that argument, else the current one.
+
+### Integrating a package with swerve
+
+A package configures swerve from a file in its `composer.json` `files`, which Composer loads after
+swerve's own, when the master loads the autoloader at startup:
+
+```json
+{"autoload": {"files": ["integrate-with-swerve.php"]}}
+```
+
+```php
+use Swerve\Swerve;
+
+Swerve::ini(['phasync.virtualize' => true]);  // php.ini settings, applied by swerve's startup restart
+Swerve::onWorkerStart(function () {           // in every worker, before the application loads
+    // set up what the worker shares between requests; coroutines started here run for its life
+});
+```
+
+`ini()` wins over swerve's own settings, and an explicit `-d` on the command line wins over it.
+Calls after startup change nothing, so the file may run again when an application includes the
+autoloader in every request.
 
 ## Per-request process state, for framework authors
 

@@ -62,6 +62,7 @@ if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
         'opcache.consistency_checks'           => '0',
         'opcache.protect_memory'               => '0',
         'opcache.preload'                      => '',
+        ...Swerve::registeredIni(), // what installed packages need, see Swerve::ini()
     ];
     $flags = \extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache'];
     foreach ($ini as $name => $value) {
@@ -284,6 +285,12 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $files = '' !== $args->public ? new StaticFiles($args->public) : null;
     $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
     phasync::run(static function () use ($swerveFile, $appDir, $adapter, $entry, $args, $logger, $worker, $http, $files, $proxies) {
+        try {
+            Swerve::startWorker();
+        } catch (\Throwable $e) {
+            $logger->critical('A Swerve::onWorkerStart() callback failed: {exception}', ['exception' => $e]);
+            exit(Worker::EXIT_BAD_APP);
+        }
         try {
             Cache::$loader = phasync::getFiber();
             $app           = null === $entry ? require $swerveFile : $entry($appDir);

@@ -233,6 +233,10 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 200, ['Content-Type' => 'text/plain'], 'Hello');
 
                 return;
+            case '/global':
+                fx_send($r, 200, ['Content-Type' => 'text/plain'], (string) ($GLOBALS[(string) $query['k']] ?? ''));
+
+                return;
             case '/ini':
                 fx_send($r, 200, ['Content-Type' => 'text/plain'], (string) \ini_get((string) $query['k']));
 
