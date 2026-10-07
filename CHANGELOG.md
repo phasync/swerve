@@ -4,9 +4,12 @@
 
 ### Changed
 
-- swerve owns opcache's settings: it restarts itself once at startup with them (opcache and the
-  JIT on for the command line, bigger caches, no timestamp checks: changed code arrives only
-  through a reload). `php.ini` loses; an explicit `-d` still wins. See docs/production.md.
+- swerve overrides `php.ini`'s shared-hosting settings and its opcache configuration, with one
+  restart at startup: no `memory_limit` (bound memory with the container; `--max-memory` now needs
+  a size to recycle workers), no `open_basedir`/`disable_functions`, no `auto_prepend_file` or
+  `opcache.preload`, opcache and the JIT on for the command line with large caches, and no
+  timestamp checks (changed code arrives only through a reload). `php.ini` still loads the
+  extensions; an explicit `-d` still wins. See docs/production.md.
 - A reload (`--watch`, `SIGHUP`, `SIGUSR2`) stops every worker, makes opcache forget every script
   (`opcache_invalidate()`), then starts a new set: old and new code never run side by side.
   Rolling reloads are gone. The previous `opcache_reset()` never took effect under swerve: it

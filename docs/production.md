@@ -34,21 +34,26 @@ With it:
 
 Your application behaves the same with and without it; it only waits better.
 
-## PHP settings swerve sets
+## PHP settings swerve overrides
 
-swerve restarts itself once at startup with its own opcache settings, which win over `php.ini`
-(an explicit `-d` on the command line still wins over them):
+swerve is a long-running process, like Node.js. `php.ini` still loads the extensions and sets
+everything else, but swerve overrides the settings made for shared hosting and its opcache
+configuration, with one restart at startup. An explicit `-d` on the command line still wins.
 
 | Setting | Value | Why |
 |---|---|---|
+| `memory_limit`, `max_execution_time`, `max_input_time` | -1, 0, -1 | no per-process limits: bound memory with the container or cgroup (worker recycling: `--max-memory=<size>`) |
+| `open_basedir`, `disable_functions`, `disable_classes` | empty | shared-hosting fences; swerve itself needs `pcntl_*` and `posix_*` |
+| `auto_prepend_file`, `auto_append_file`, `opcache.preload` | empty | no code injected into the server from outside the application |
+| `realpath_cache_size`, `realpath_cache_ttl` | 64M, 86400 | files only change through a reload, which starts new workers |
 | `opcache.enable_cli` | 1 | the opcode cache is off by default on the command line |
 | `opcache.jit`, `opcache.jit_buffer_size` | tracing, 64M | the JIT is off by default since PHP 8.4 |
-| `opcache.memory_consumption`, `opcache.max_accelerated_files` | 256, 32531 | room for large `vendor/` trees |
-| `opcache.interned_strings_buffer` | 32 | WordPress and Laravel already use 5-6 MB of the default 8 |
+| `opcache.memory_consumption`, `opcache.interned_strings_buffer`, `opcache.max_accelerated_files` | 1024, 64, 100000 | room for any application; shared memory only takes RAM as it fills |
+| `opcache.max_file_size` | 0 | every file is cached, whatever its size |
 | `opcache.validate_timestamps`, `opcache.file_update_protection` | 0, 0 | changed code arrives through a reload, which makes opcache forget every script |
 | `opcache.enable_file_override` | 1 | `file_exists()` and `is_file()` on PHP scripts answer from the cache |
 | `opcache.save_comments` | 1 | attributes and annotations need doc comments |
-| `opcache.file_cache` | "" | shared memory only |
+| `opcache.file_cache`, `opcache.file_cache_consistency_checks`, `opcache.consistency_checks`, `opcache.protect_memory` | off | shared memory only; no debugging checks |
 
 ## Sizing
 

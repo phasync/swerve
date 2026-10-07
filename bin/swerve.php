@@ -28,23 +28,40 @@ use Swerve\Util\Worker;
 require $GLOBALS['_composer_autoload_path']
     ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
 
-// swerve owns opcache's settings, most of which PHP only takes at startup: one restart applies them,
-// and the extension's own restart below keeps them. php.ini loses; an explicit -d on the command
-// line wins, coming after these. Code changes reach the workers only through a reload (--watch,
-// SIGHUP), which invalidates opcache's scripts, so nothing checks timestamps.
+// swerve is a long-running process, like Node.js: php.ini's limits for shared hosting don't apply,
+// and memory is the container's to bound. These settings override php.ini (which still loads the
+// extensions); most only take effect at startup, so one restart applies them, and the extension's
+// own restart below keeps them. An explicit -d on the command line wins, coming after these. Code
+// changes reach the workers only through a reload (--watch, SIGHUP), which invalidates opcache's
+// scripts, so nothing checks timestamps.
 if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
     $ini = [
-        'opcache.enable_cli'              => '1',
-        'opcache.jit'                     => 'tracing',
-        'opcache.jit_buffer_size'         => '64M',
-        'opcache.memory_consumption'      => '256',
-        'opcache.interned_strings_buffer' => '32',
-        'opcache.max_accelerated_files'   => '32531',
-        'opcache.validate_timestamps'     => '0',
-        'opcache.file_update_protection'  => '0',
-        'opcache.enable_file_override'    => '1',
-        'opcache.save_comments'           => '1',
-        'opcache.file_cache'              => '',
+        'memory_limit'                         => '-1',
+        'max_execution_time'                   => '0',
+        'max_input_time'                       => '-1',
+        'open_basedir'                         => '',
+        'disable_functions'                    => '',
+        'disable_classes'                      => '',
+        'auto_prepend_file'                    => '',
+        'auto_append_file'                     => '',
+        'realpath_cache_size'                  => '64M',
+        'realpath_cache_ttl'                   => '86400',
+        'opcache.enable_cli'                   => '1',
+        'opcache.jit'                          => 'tracing',
+        'opcache.jit_buffer_size'              => '64M',
+        'opcache.memory_consumption'           => '1024',
+        'opcache.interned_strings_buffer'      => '64',
+        'opcache.max_accelerated_files'        => '100000',
+        'opcache.max_file_size'                => '0',
+        'opcache.validate_timestamps'          => '0',
+        'opcache.file_update_protection'       => '0',
+        'opcache.enable_file_override'         => '1',
+        'opcache.save_comments'                => '1',
+        'opcache.file_cache'                   => '',
+        'opcache.file_cache_consistency_checks' => '0',
+        'opcache.consistency_checks'           => '0',
+        'opcache.protect_memory'               => '0',
+        'opcache.preload'                      => '',
     ];
     $flags = \extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache'];
     foreach ($ini as $name => $value) {
