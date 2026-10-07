@@ -34,6 +34,22 @@ With it:
 
 Your application behaves the same with and without it; it only waits better.
 
+## PHP settings swerve sets
+
+swerve restarts itself once at startup with its own opcache settings, which win over `php.ini`
+(an explicit `-d` on the command line still wins over them):
+
+| Setting | Value | Why |
+|---|---|---|
+| `opcache.enable_cli` | 1 | the opcode cache is off by default on the command line |
+| `opcache.jit`, `opcache.jit_buffer_size` | tracing, 64M | the JIT is off by default since PHP 8.4 |
+| `opcache.memory_consumption`, `opcache.max_accelerated_files` | 256, 32531 | room for large `vendor/` trees |
+| `opcache.interned_strings_buffer` | 32 | WordPress and Laravel already use 5-6 MB of the default 8 |
+| `opcache.validate_timestamps`, `opcache.file_update_protection` | 0, 0 | changed code arrives through a reload, which makes opcache forget every script |
+| `opcache.enable_file_override` | 1 | `file_exists()` and `is_file()` on PHP scripts answer from the cache |
+| `opcache.save_comments` | 1 | attributes and annotations need doc comments |
+| `opcache.file_cache` | "" | shared memory only |
+
 ## Sizing
 
 **Workers.** `--workers=auto` (the default) is one per CPU (hardware thread). On large machines

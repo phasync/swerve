@@ -28,6 +28,32 @@ use Swerve\Util\Worker;
 require $GLOBALS['_composer_autoload_path']
     ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
 
+// swerve owns opcache's settings, most of which PHP only takes at startup: one restart applies them,
+// and the extension's own restart below keeps them. php.ini loses; an explicit -d on the command
+// line wins, coming after these. Code changes reach the workers only through a reload (--watch,
+// SIGHUP), which invalidates opcache's scripts, so nothing checks timestamps.
+if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
+    $ini = [
+        'opcache.enable_cli'              => '1',
+        'opcache.jit'                     => 'tracing',
+        'opcache.jit_buffer_size'         => '64M',
+        'opcache.memory_consumption'      => '256',
+        'opcache.interned_strings_buffer' => '32',
+        'opcache.max_accelerated_files'   => '32531',
+        'opcache.validate_timestamps'     => '0',
+        'opcache.file_update_protection'  => '0',
+        'opcache.enable_file_override'    => '1',
+        'opcache.save_comments'           => '1',
+        'opcache.file_cache'              => '',
+    ];
+    $flags = \extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache'];
+    foreach ($ini as $name => $value) {
+        \array_push($flags, '-d', "$name=$value");
+    }
+    \putenv('SWERVE_INI_REEXEC=1');
+    \pcntl_exec(\PHP_BINARY, [...$flags, ...phasync\ext\_original_args()]);
+}
+
 // Load phasync-ext (it ships inside phasync): --ext must succeed or swerve stops; composer.json's setting only
 // logs a notice when the extension cannot load. Either may restart this process once.
 $extInComposer = phasync\ext_enabled();
@@ -151,10 +177,6 @@ foreach ([\STDOUT, \STDERR] as $out) {
      * such as memory_limit, PHP still writes its message, where a handler of ours may have no
      * memory left to run.
      */
-    // Workers don't stat-check source files: changed code arrives by a reload (--watch, SIGHUP),
-    // which resets opcache for every worker at once. Set before any application file compiles.
-    \ini_set('opcache.validate_timestamps', '0');
-
     if ($args->log) {
         $file = @\fopen($args->log, 'a');
         if (false === $file) {
