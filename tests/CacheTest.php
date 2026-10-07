@@ -76,14 +76,14 @@ test('many lookups at once from coroutines of one request each get their own ans
     }
 });
 
-test('the cache lives in the master: a rolling reload keeps it', function () {
+test('the cache lives in the master: a reload, which restarts swerve, starts it empty', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);
     try {
         [$old] = cache_call($addr, '/cache-set?k=kept&v=42');
         swerve_signal($process, SIGHUP);
-        log_wait($log, '/Reload complete/');
+        log_wait($log, '/Reload complete/', 8);
         [$pid, $value] = cache_call($addr, '/cache-get?k=kept');
-        expect([$pid !== $old, $value])->toBe([true, 42]);
+        expect([$pid !== $old, $value])->toBe([true, 'missing']);
     } finally {
         native_stop($process);
     }

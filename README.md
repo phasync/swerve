@@ -441,8 +441,8 @@ $cache->set("user:$id", $user, 60);
   worker never keeps a value older than the last write it was told of. A trip to the master
   costs about 0.1 ms, and only the calling coroutine waits.
 - The master evicts the least recently used entries past `--cache-size` (64 MiB). It keeps
-  values serialized and never loads your classes. A reload keeps the contents; a restart
-  of swerve empties them.
+  values serialized and never loads your classes. A reload restarts swerve, so it empties
+  them too.
 - A coroutine that `swerve.php` starts may use it at once: the call waits until the worker serves. Directly in
   `swerve.php` it throws ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
   embedded in your own process), the cache is the process's own.
@@ -482,7 +482,7 @@ itself: each worker loads it after starting, so a reload runs the current code.
 | Signal to the master | Effect |
 |---|---|
 | `SIGTERM`, `SIGINT` (Ctrl+C), `SIGQUIT` | Graceful shutdown: the workers stop accepting, finish the requests in flight (answered with `Connection: close`), close idle keep-alive connections and exit. What is left after `--grace` seconds is killed. A second signal kills at once. |
-| `SIGHUP`, `SIGUSR2` | Reload: every worker drains (requests in flight finish), opcache forgets every script, and a new set starts, so old and new code never run side by side. Connections arriving in the gap are refused. The `--log` file is reopened first, by the master and the workers, so `logrotate` can rename it and send `SIGHUP`. |
+| `SIGHUP`, `SIGUSR2` | Reload: every worker drains (requests in flight finish), then the master restarts swerve in place (same PID, same command line), so the application, swerve, phasync, `php.ini` and opcache are all fresh, and old and new code never run side by side. The cache starts empty. Connections arriving while swerve restarts are refused. The `--log` file is reopened first, by the master and the workers, so `logrotate` can rename it and send `SIGHUP`. |
 | `SIGUSR1` | Reopen the `--log` file only. |
 
 `SIGQUIT`, `SIGUSR1` and `SIGUSR2` mean what they mean to php-fpm, so its deploy and

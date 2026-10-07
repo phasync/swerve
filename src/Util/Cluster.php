@@ -118,6 +118,9 @@ final class Cluster
     private array $nextStart = [];
     private int $generation = 0;
     private bool $everReady = false;
+
+    /** Started by a reload: workers that fail are retried, never the whole server stopped */
+    private bool $reloaded = false;
     /** Set when the application failed to start: the master stops with this exit code. */
     private ?int $exitCode = null;
     private int $stopSignals = 0;
@@ -154,7 +157,15 @@ final class Cluster
         private readonly string $serving,
         int $cacheBytes = 64 << 20,
         bool $extInComposer = false,
+        private readonly ?\Closure $restart = null,
     ) {
+        // A master started by a reload: it reports the reload complete, and keeps restarting
+        // workers that fail, as a running server does, rather than stopping as at first start
+        if (false !== ($started = \getenv('SWERVE_RELOAD_STARTED'))) {
+            \putenv('SWERVE_RELOAD_STARTED');
+            $this->reloadStarted = self::now() - (\microtime(true) - (float) $started);
+            $this->reloaded      = true;
+        }
         $this->cache = new LruCache(maxBytes: $cacheBytes);
         // A serving worker, its replacement starting, and up to MAX_LINGERING lingering ones per slot
         $this->inboxes = new Inboxes((1 + self::MAX_LINGERING) * $numWorkers);
@@ -184,6 +195,8 @@ final class Cluster
         \pcntl_signal(\SIGHUP, function () { $this->reloadSignal = 'SIGHUP'; });
         \pcntl_signal(\SIGUSR2, function () { $this->reloadSignal = 'SIGUSR2'; });
         \pcntl_signal(\SIGUSR1, function () { $this->reopenSignal = true; });
+        // Signals that came while the previous master replaced itself are delivered now
+        \pcntl_sigprocmask(\SIG_UNBLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
         for ($slot = 0; $slot < $this->numWorkers; ++$slot) {
             $this->failures[$slot]  = 0;
             $this->nextStart[$slot] = 0.0;
@@ -493,7 +506,7 @@ final class Cluster
         $this->nextStart[$w->slot] = $now + $delay;
         $ctx['delay']              = self::seconds($delay);
 
-        if (!$this->everReady && \min($this->failures) > 0) {
+        if (!$this->everReady && !$this->reloaded && \min($this->failures) > 0) {
             $this->logger->critical('The application failed to start: every worker failed (last: {how}); stopping', $ctx);
             $this->exitCode = \pcntl_wifexited($status) ? \max(1, \pcntl_wexitstatus($status)) : 1;
 
@@ -629,28 +642,24 @@ final class Cluster
     }
 
     /**
-     * Reload: stop every worker, invalidate every script opcache holds, and let fill() start a
-     * new set, so no worker ever runs old and new code side by side. opcache_reset() would wait
-     * for a request boundary that a swerve master never reaches; opcache_invalidate() acts at
-     * once. A reload during a reload stops the starting workers and starts them again.
+     * Reload: stop every worker, then replace this master with a fresh swerve process, same PID,
+     * same command line, so that everything is new: the application, swerve, phasync, php.ini,
+     * what the integration files register, opcache. What the master kept in memory, the cache,
+     * starts empty. Signals that arrive meanwhile wait, blocked, until the new master can handle
+     * them. Without $restart (a Cluster run outside bin/swerve.php), the workers restart alone.
      */
     private function reload(string $why): void
     {
-        $this->reloadStarted = self::now();
         $this->reopenLog(); // logrotate renamed it, then sent SIGHUP
-        $this->logger->notice('Reload requested ({why}): stopping {n} workers, then starting new ones', ['why' => $why, 'n' => \count($this->workers)]);
+        $this->logger->notice('Reload requested ({why}): stopping {n} workers, then restarting swerve', ['why' => $why, 'n' => \count($this->workers)]);
+        $start = \microtime(true);
         $this->drainAll('reload');
-        if (\function_exists('opcache_get_status') && \is_array($status = \opcache_get_status(true))) {
-            foreach ($status['scripts'] ?? [] as $script => $_) {
-                \opcache_invalidate($script, true);
-            }
+        if ($this->stopSignals || null === $this->restart) {
+            return; // a stop signal came during the drain: run() stops instead
         }
-        // A fixed deploy starts crash-looping slots at once
-        foreach ($this->failures as $slot => $_) {
-            $this->failures[$slot]  = 0;
-            $this->nextStart[$slot] = 0.0;
-        }
-        ++$this->generation;
+        \pcntl_sigprocmask(\SIG_BLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
+        \putenv("SWERVE_RELOAD_STARTED=$start");
+        ($this->restart)();
     }
 
     /**

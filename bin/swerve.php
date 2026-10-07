@@ -34,6 +34,10 @@ require $GLOBALS['_composer_autoload_path']
 // own restart below keeps them. An explicit -d on the command line wins, coming after these. Code
 // changes reach the workers only through a reload (--watch, SIGHUP), which invalidates opcache's
 // scripts, so nothing checks timestamps.
+// The command line as the operator gave it, for a reload to start over from
+if (false === \getenv('SWERVE_ARGS')) {
+    \putenv('SWERVE_ARGS=' . \json_encode(phasync\ext\_original_args()));
+}
 if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
     $ini = [
         'memory_limit'                         => '-1',
@@ -262,6 +266,16 @@ foreach ([\STDOUT, \STDERR] as $out) {
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
         (int) \ini_parse_quantity($args->cacheSize),
         $extInComposer,
+        static function () use ($logger): void {
+            // A reload: start over as a fresh process, from the operator's command line
+            System::closeListeners();
+            System::cleanup();
+            \putenv('SWERVE_INI_REEXEC');
+            \putenv('PHASYNC_EXT_REEXEC');
+            \pcntl_exec(\PHP_BINARY, \json_decode((string) \getenv('SWERVE_ARGS'), true));
+            $logger->critical('Reload failed: swerve could not restart itself ({error})', ['error' => \pcntl_strerror(\pcntl_get_last_error())]);
+            exit(1);
+        },
     );
     $worker = $cluster->run();
     if (\is_int($worker)) {

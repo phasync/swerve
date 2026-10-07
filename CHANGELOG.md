@@ -10,10 +10,12 @@
   `opcache.preload`, opcache and the JIT on for the command line with large caches, and no
   timestamp checks (changed code arrives only through a reload). `php.ini` still loads the
   extensions; an explicit `-d` still wins. See docs/production.md.
-- A reload (`--watch`, `SIGHUP`, `SIGUSR2`) stops every worker, makes opcache forget every script
-  (`opcache_invalidate()`), then starts a new set: old and new code never run side by side.
-  Rolling reloads are gone. The previous `opcache_reset()` never took effect under swerve: it
-  waits for a request boundary the master never reaches, and meanwhile stops caching.
+- A reload (`--watch`, `SIGHUP`, `SIGUSR2`) stops every worker, then the master restarts swerve in
+  place (same PID, the operator's command line): the application, swerve, phasync, `php.ini`, what
+  integration files register and opcache are all fresh, and old and new code never run side by
+  side. Rolling reloads are gone; the cache starts empty after a reload. The previous
+  `opcache_reset()` never took effect under swerve: it waits for a request boundary the master
+  never reaches, and meanwhile stops caching.
 
 ### Added
 

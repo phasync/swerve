@@ -75,7 +75,7 @@ Information:
 | | |
 |---|---|
 | `SIGTERM`, `SIGINT` (Ctrl+C), `SIGQUIT` | stop: workers finish their requests within `--grace`, then are killed (workers lingering after a recycle too); a second signal kills at once |
-| `SIGHUP`, `SIGUSR2` | reopen the log file, and reload: stop every worker, then start new ones running the current code |
+| `SIGHUP`, `SIGUSR2` | reopen the log file, and reload: stop every worker, then restart swerve in place (same PID) running the current code |
 | `SIGUSR1` | reopen the log file (after log rotation) |
 
 Next: [Production](production.md).

@@ -21,7 +21,10 @@ final class System {
         $directory = (\getenv('SWERVE_TMPDIR') ?: \sys_get_temp_dir()) . "/$prefix-" . \bin2hex(\random_bytes(8));
         \mkdir($directory, 0700);
         $creator = \getmypid();
-        \register_shutdown_function(static function () use ($directory, $creator, $removed) {
+        if (!self::$cleanups) {
+            \register_shutdown_function(self::cleanup(...));
+        }
+        self::$cleanups[] = static function () use ($directory, $creator, $removed) {
             if (\getmypid() === $creator) {
                 foreach (\glob("$directory/*") as $file) {
                     \unlink($file);
@@ -29,9 +32,34 @@ final class System {
                 \rmdir($directory);
                 $removed && $removed();
             }
-        });
+        };
 
         return $directory;
+    }
+
+    /** @var list<\Closure> removing the temporary directories this process created */
+    private static array $cleanups = [];
+
+    /**
+     * Remove the temporary directories this process created: at exit, or before the master
+     * replaces itself for a reload, when no shutdown function runs.
+     */
+    public static function cleanup(): void
+    {
+        foreach (self::$cleanups as $cleanup) {
+            $cleanup();
+        }
+        self::$cleanups = [];
+    }
+
+    /** Close every unix: listener and remove its socket file, before the master replaces itself. */
+    public static function closeListeners(): void
+    {
+        foreach (self::$unixListeners as $address => $listener) {
+            \fclose($listener);
+            self::unlinkSocket($address);
+        }
+        self::$unixListeners = [];
     }
 
     public static function getCPUCount(): int {

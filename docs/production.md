@@ -134,8 +134,9 @@ TimeoutStopSec=40
 WantedBy=multi-user.target
 ```
 
-`systemctl reload myapp` stops every worker (requests in flight finish) and starts new ones running
-the current code: deploy the new code, then reload. Connections arriving in the short gap are refused. Logs go to the journal
+`systemctl reload myapp` stops every worker (requests in flight finish), then restarts swerve in
+place, same PID, running the current code, swerve and `php.ini`: deploy, then reload. Connections
+arriving while it restarts are refused, and the cache starts empty. Logs go to the journal
 (`journalctl -u myapp`).
 
 ## Docker
