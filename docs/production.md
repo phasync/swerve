@@ -48,7 +48,7 @@ configuration, with one restart at startup. An explicit `-d` on the command line
 | `realpath_cache_size`, `realpath_cache_ttl` | 64M, 86400 | files only change through a reload, which starts new workers |
 | `opcache.enable_cli` | 1 | the opcode cache is off by default on the command line |
 | `opcache.jit`, `opcache.jit_buffer_size` | tracing, 64M | the JIT is off by default since PHP 8.4 |
-| `opcache.memory_consumption`, `opcache.interned_strings_buffer`, `opcache.max_accelerated_files` | 1024, 64, 100000 | room for any application; shared memory only takes RAM as it fills |
+| `opcache.memory_consumption`, `opcache.interned_strings_buffer`, `opcache.max_accelerated_files` | 4096, 64, 100000 | room for any application: the cache is reserved address space, and only takes RAM as compiled code fills it |
 | `opcache.max_file_size` | 0 | every file is cached, whatever its size |
 | `opcache.validate_timestamps`, `opcache.file_update_protection` | 0, 0 | changed code arrives through a reload, which makes opcache forget every script |
 | `opcache.enable_file_override` | 1 | `file_exists()` and `is_file()` on PHP scripts answer from the cache |

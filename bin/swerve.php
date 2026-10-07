@@ -49,7 +49,7 @@ if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
         'opcache.enable_cli'                   => '1',
         'opcache.jit'                          => 'tracing',
         'opcache.jit_buffer_size'              => '64M',
-        'opcache.memory_consumption'           => '1024',
+        'opcache.memory_consumption'           => '4096',
         'opcache.interned_strings_buffer'      => '64',
         'opcache.max_accelerated_files'        => '100000',
         'opcache.max_file_size'                => '0',
