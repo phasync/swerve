@@ -60,12 +60,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "214e1c829b4c939dea134380b171a13a68bb4cb5"
+                "reference": "5c4613ded72bfe46d41c0d338e888c97e6247825"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/214e1c829b4c939dea134380b171a13a68bb4cb5",
-                "reference": "214e1c829b4c939dea134380b171a13a68bb4cb5",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/5c4613ded72bfe46d41c0d338e888c97e6247825",
+                "reference": "5c4613ded72bfe46d41c0d338e888c97e6247825",
                 "shasum": ""
             },
             "require": {
@@ -123,7 +123,7 @@
                 "issues": "https://github.com/phasync/phasync/issues",
                 "source": "https://github.com/phasync/phasync/tree/main"
             },
-            "time": "2026-10-07T16:18:52+00:00"
+            "time": "2026-10-07T16:26:04+00:00"
         },
         {
             "name": "psr/http-factory",

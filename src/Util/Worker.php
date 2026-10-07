@@ -94,9 +94,11 @@ final class Worker
         \pcntl_signal(\SIGUSR2, \SIG_DFL);
         // The watchdog sends SIGQUIT before its SIGKILL, so that the log says what the worker was
         // stuck in: async handlers run during a busy loop, and a blocking call ends early
-        \pcntl_signal(\SIGQUIT, function () {
+        // In phasync's handler, so a coroutine may wait for SIGQUIT too (phasync::signal())
+        phasync::onSignal(\SIGQUIT, function () {
             $at = [];
-            foreach (\array_slice(\debug_backtrace(\DEBUG_BACKTRACE_IGNORE_ARGS), 0, 10) as $frame) {
+            // Frame 0 is phasync's handler calling this one
+            foreach (\array_slice(\debug_backtrace(\DEBUG_BACKTRACE_IGNORE_ARGS), 1, 10) as $frame) {
                 if (isset($frame['file'])) {
                     $at[] = $frame['file'] . ':' . $frame['line'];
                 }
@@ -118,7 +120,7 @@ final class Worker
         // which the master kills a worker not ready: one stuck loading the application (a
         // database connect without a timeout) must not outlive a master that died meanwhile.
         $this->stallCheck = $watchdog > 0 ? (int) \ceil($watchdog) + 1 : 0;
-        \pcntl_signal(\SIGALRM, function () {
+        phasync::onSignal(\SIGALRM, function () {
             if (\posix_getppid() !== $this->masterPid) {
                 if ($this->ticking) {
                     $this->logger->critical('Master process died while the event loop was stuck for {s} s; exiting', ['s' => \round(\microtime(true) - $this->lastTick, 1)]);
