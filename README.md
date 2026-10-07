@@ -520,7 +520,9 @@ is doing: its requests in flight, and where its code runs.
   be noticed.
 
 What a reload picks up: the swerve file and every class autoloaded in the worker, with
-Composer's class map and PSR-4 prefixes read again (`opcache_reset()` is called too). It does
+Composer's class map and PSR-4 prefixes read again (`opcache_reset()` is called too). Workers
+never check source files for changes themselves: swerve turns off `opcache.validate_timestamps`,
+so changed code arrives only through a reload. It does
 not pick up swerve itself, phasync, Composer `files` autoloads, `php.ini` or the command line
 options; restart for those. The swerve file's path is not resolved, so a deploy that points a
 `current` symlink at a new release and sends `SIGHUP` runs the new release; but the class map

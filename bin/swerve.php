@@ -151,6 +151,10 @@ foreach ([\STDOUT, \STDERR] as $out) {
      * such as memory_limit, PHP still writes its message, where a handler of ours may have no
      * memory left to run.
      */
+    // Workers don't stat-check source files: changed code arrives by a reload (--watch, SIGHUP),
+    // which resets opcache for every worker at once. Set before any application file compiles.
+    \ini_set('opcache.validate_timestamps', '0');
+
     if ($args->log) {
         $file = @\fopen($args->log, 'a');
         if (false === $file) {

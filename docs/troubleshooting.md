@@ -11,7 +11,8 @@ worker stuck for 30 s is replaced, and the log says which request it was stuck i
 swerve's event loop, such as in a script run on its own. Inside swerve (your application file,
 its handlers) coroutines work.
 
-**Changes to the code don't show.** Workers load the application once. Use `--watch` during
+**Changes to the code don't show.** Workers load the application once and don't check files
+for changes (swerve turns off `opcache.validate_timestamps`). Use `--watch` during
 development, or reload (`kill -HUP <master pid>`, `systemctl reload`).
 
 **Data is different from one request to the next.** Each worker has its own memory, and

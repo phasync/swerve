@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- Workers no longer stat-check source files: swerve turns off `opcache.validate_timestamps` at
+  startup, so changed code arrives only through a reload (`--watch`, `SIGHUP`), which resets
+  opcache for every worker.
+
 ### Added
 
 - `Swerve::onRequestSwitch(resume, suspend)`: a framework running requests as coroutines of one
