@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "44f813468db70121645dc834eb656f8b",
+    "content-hash": "4a87a87cbb4ff4df1ed677a9fb6c452f",
     "packages": [
         {
             "name": "phasync/net",
@@ -56,16 +56,16 @@
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.0-beta7",
+            "version": "dev-main",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "1f451848a898b3625350971c52085b20586d5e96"
+                "reference": "214e1c829b4c939dea134380b171a13a68bb4cb5"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/1f451848a898b3625350971c52085b20586d5e96",
-                "reference": "1f451848a898b3625350971c52085b20586d5e96",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/214e1c829b4c939dea134380b171a13a68bb4cb5",
+                "reference": "214e1c829b4c939dea134380b171a13a68bb4cb5",
                 "shasum": ""
             },
             "require": {
@@ -84,10 +84,14 @@
                 "friendsofphp/php-cs-fixer": "^3.58",
                 "pestphp/pest": "^2.34 || ^3.0"
             },
+            "default-branch": true,
             "type": "library",
             "extra": {
                 "discovery": {
                     "psr/http-factory-implementation": "phasync\\Psr\\PsrFactory"
+                },
+                "branch-alias": {
+                    "dev-main": "2.0.x-dev"
                 }
             },
             "autoload": {
@@ -117,9 +121,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0-beta7"
+                "source": "https://github.com/phasync/phasync/tree/main"
             },
-            "time": "2026-10-04T21:05:16+00:00"
+            "time": "2026-10-07T16:18:52+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -5860,7 +5864,7 @@
     "stability-flags": {
         "friendsofphp/php-cs-fixer": 20,
         "phasync/net": 15,
-        "phasync/phasync": 10
+        "phasync/phasync": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,

@@ -36,7 +36,6 @@ final class Worker
     /** Requests after which the worker asks to be recycled, jitter applied; 0 = off. */
     public int $maxRequests = 0;
 
-    private bool $stopRequested = false;
     private bool $draining = false;
     private float $drainStarted = 0.0;
     /** When a lingering worker closes its connections; null when it does not linger. */
@@ -59,10 +58,6 @@ final class Worker
      * @var array<int, Closure(): string>
      */
     private array $inFlight = [];
-    /** @var resource the SIGTERM handler writes to it, see awaitTerm() */
-    private $wakeWrite;
-    /** @var resource awaitTerm() waits on it */
-    private $wake;
     /** The event loop's last heartbeat; 0 before the first (which then always goes out). */
     private float $lastTick = 0.0;
     /** When the worker started: the SIGQUIT dump's silence before the first heartbeat. */
@@ -92,13 +87,6 @@ final class Worker
         array $peers,
     ) {
         $this->startedAt = \microtime(true);
-        [$this->wake, $this->wakeWrite] = System::socketPair();
-        \stream_set_blocking($this->wake, false);
-        \stream_set_blocking($this->wakeWrite, false);
-        \pcntl_signal(\SIGTERM, function () {
-            $this->stopRequested = true;
-            @\fwrite($this->wakeWrite, '!'); // a retired worker must stop accepting now, not a tick later
-        });
         \pcntl_signal(\SIGINT, \SIG_IGN);
         \pcntl_signal(\SIGHUP, \SIG_IGN);
         // The master's meanings of these (log reopen, reload) are not a worker's
@@ -470,18 +458,14 @@ final class Worker
     }
 
     /**
-     * Drain on SIGTERM from outside (an operator, systemd) at once, not a tick later. The
-     * SIGTERM handler can't drain itself: it may run in the middle of anything, the event loop
-     * included.
+     * Drain on SIGTERM from outside (an operator, systemd): phasync wakes this coroutine for it
+     * between coroutines, so it may drain directly.
      */
     private function awaitTerm(): void
     {
         while (!$this->draining || null !== $this->lingerEnd) {
-            phasync::readable($this->wake, \PHP_FLOAT_MAX);
-            \fread($this->wake, 1024);
-            if ($this->stopRequested) {
-                $this->draining ? $this->stopLingering('SIGTERM') : $this->drain('SIGTERM');
-            }
+            phasync::signal(\SIGTERM);
+            $this->draining ? $this->stopLingering('SIGTERM') : $this->drain('SIGTERM');
         }
     }
 

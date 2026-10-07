@@ -4,6 +4,9 @@
 
 ### Changed
 
+- A worker waits for an outside `SIGTERM` with `phasync::signal()` instead of a signal handler and
+  a socket pair of its own. Requires phasync `dev-main` until its next release.
+
 - swerve overrides `php.ini`'s shared-hosting settings and its opcache configuration, with one
   restart at startup: no `memory_limit` (bound memory with the container; `--max-memory` now needs
   a size to recycle workers), no `open_basedir`/`disable_functions`, no `auto_prepend_file` or
