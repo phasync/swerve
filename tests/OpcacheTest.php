@@ -15,7 +15,7 @@ test('workers run with swerve\'s settings: no shared-hosting limits, its opcache
         expect($ini)->toBe([
             'memory_limit'                    => '-1',
             'opcache.enable_cli'              => '1',
-            'opcache.jit'                     => 'tracing',
+            'opcache.jit'                     => '1054', // tracing without register allocation, see bin/swerve.php
             'opcache.interned_strings_buffer' => '64',
             'opcache.validate_timestamps'     => '0',
             'opcache.file_update_protection'  => '0',

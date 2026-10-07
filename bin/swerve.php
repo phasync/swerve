@@ -51,7 +51,13 @@ if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
         'realpath_cache_size'                  => '64M',
         'realpath_cache_ttl'                   => '86400',
         'opcache.enable_cli'                   => '1',
-        'opcache.jit'                          => 'tracing',
+        // The tracing JIT without register allocation (CRTO 1054, not 'tracing' = 1254). With
+        // register allocation, PHP 8.5 (8.5.11 and the PHP-8.5 branch as of 2026-10) can keep a
+        // variable only in a register across traces; when an internal call such as
+        // Fiber::resume() throws into a catch in the same function, the VM finds the variable
+        // undefined. Seen in phasync's event loop as a worker stops. 1054 keeps tracing; go back
+        // to 'tracing' once PHP fixes it.
+        'opcache.jit'                          => '1054',
         'opcache.jit_buffer_size'              => '64M',
         'opcache.memory_consumption'           => '4096',
         'opcache.interned_strings_buffer'      => '64',

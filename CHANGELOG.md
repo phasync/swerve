@@ -4,6 +4,10 @@
 
 ### Changed
 
+- The JIT runs as `opcache.jit=1054`, tracing without register allocation, instead of `tracing`.
+  PHP 8.5's tracing JIT with register allocation can leave a variable undefined after an exception
+  from an internal call (`Fiber::resume()`) is caught in the same function; phasync's event loop
+  hit it as workers stopped. An explicit `-d opcache.jit=` still wins.
 - A worker stops at once: on a shutdown, reload or the end of a recycle's lingering, every
   coroutine, requests in flight included, gets a `Swerve\WorkerStoppingException` at its wait,
   and the worker exits once they have cleaned up (`phasync::finally()`, `phasync::shielded()`),

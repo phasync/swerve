@@ -47,7 +47,7 @@ configuration, with one restart at startup. An explicit `-d` on the command line
 | `auto_prepend_file`, `auto_append_file`, `opcache.preload` | empty | no code injected into the server from outside the application |
 | `realpath_cache_size`, `realpath_cache_ttl` | 64M, 86400 | files only change through a reload, which starts new workers |
 | `opcache.enable_cli` | 1 | the opcode cache is off by default on the command line |
-| `opcache.jit`, `opcache.jit_buffer_size` | tracing, 64M | the JIT is off by default since PHP 8.4 |
+| `opcache.jit`, `opcache.jit_buffer_size` | 1054, 64M | the JIT is off by default since PHP 8.4. 1054 is the tracing JIT without register allocation: with it, PHP 8.5's tracing JIT can leave a variable undefined after an exception thrown by an internal call, such as `Fiber::resume()`, is caught in the same function |
 | `opcache.memory_consumption`, `opcache.interned_strings_buffer`, `opcache.max_accelerated_files` | 4096, 64, 100000 | room for any application: the cache is reserved address space, and only takes RAM as compiled code fills it |
 | `opcache.max_file_size` | 0 | every file is cached, whatever its size |
 | `opcache.validate_timestamps`, `opcache.file_update_protection` | 0, 0 | changed code arrives through a reload, which makes opcache forget every script |
