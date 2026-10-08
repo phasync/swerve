@@ -52,6 +52,12 @@
   context (`phasync\Context\SwitchAwareInterface`), entered eagerly only once something is
   registered - nothing registered costs nothing. See the README, Per-request process state.
 
+### Fixed
+
+- NUMA pinning no longer overrides the CPUs the operator allowed (`taskset`, a cgroup cpuset,
+  `--cpuset-cpus`): a worker pins to its node's share of them, and not at all when they lie on one
+  node. Before, each worker took its whole node, whatever the affinity it inherited (#41).
+
 ## 0.1.0-beta6 (2026-10-06)
 
 ### Added

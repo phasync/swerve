@@ -65,8 +65,10 @@ of your application in memory.
 **Several sockets.** On a machine with more than one NUMA node, worker *i* pins itself to node
 *i* mod the number of nodes, so it stays near the memory it allocated: about a quarter more
 throughput at 10,000 connections on a 2-socket server. It uses FFI when PHP allows it (the CLI
-does by default), else `taskset`; without either, workers stay unpinned. With `-v` the log shows
-each worker's CPUs.
+does by default), else `taskset`; without either, workers stay unpinned. Only CPUs the process
+may already use count: under `taskset`, a cgroup cpuset or `--cpuset-cpus`, a worker pins to its
+node's share of them, and when they all lie on one node, nothing is pinned. With `-v` the log
+shows each worker's CPUs.
 
 **Connections per worker.**
 

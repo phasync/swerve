@@ -86,14 +86,15 @@ function temp_path(bool $dir = false): string
  * @param array<string, string> $env  more environment variables
  * @param array<int, mixed>     $out  descriptors for stdout and stderr
  * @param string|null           $cwd  the working directory; with $fixture null (no swerve.php argument), the application directory
+ * @param string[]              $wrap a command that execs PHP, such as ['taskset', '-c', '0,1']
  *
  * @return resource the process; its pid is the master's, and the process group's
  */
-function swerve_spawn(array $args, ?string $fixture, array $php = [], array $env = [], array $out = [], ?string $cwd = null)
+function swerve_spawn(array $args, ?string $fixture, array $php = [], array $env = [], array $out = [], ?string $cwd = null, array $wrap = [])
 {
     $path    = null === $fixture ? [] : [str_contains($fixture, '/') ? $fixture : __DIR__ . "/Fixtures/$fixture"];
     $process = proc_open(
-        ['setsid', PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args, ...$path],
+        ['setsid', ...$wrap, PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args, ...$path],
         $out + [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
         $cwd,
@@ -423,11 +424,11 @@ function native_serve_packets(Closure $handler, string|array $requests, bool $cl
 
 /**
  * Start swerve with a log file at INFO level, --grace=3 and --watchdog=3 (unless $args sets
- * them), and wait until it answers /hello; with $wait false, don't wait.
+ * them), and wait until it answers /hello; with $wait false, don't wait. $wrap: see swerve_spawn().
  *
  * @return array{0: resource, 1: string, 2: string, 3: int} the process, its address, the log file, the master's pid
  */
-function swerve_start(array $args = [], int $workers = 2, array $php = [], array $env = [], string $fixture = 'app.php', bool $wait = true, ?string $addr = null): array
+function swerve_start(array $args = [], int $workers = 2, array $php = [], array $env = [], string $fixture = 'app.php', bool $wait = true, ?string $addr = null, array $wrap = []): array
 {
     $addr ??= free_address();
     $log  = temp_path();
@@ -436,7 +437,7 @@ function swerve_start(array $args = [], int $workers = 2, array $php = [], array
             $args[] = $default;
         }
     }
-    $process = swerve_spawn(["--http=$addr", "--workers=$workers", "--log=$log", '-vv', ...$args], $fixture, $php, $env);
+    $process = swerve_spawn(["--http=$addr", "--workers=$workers", "--log=$log", '-vv', ...$args], $fixture, $php, $env, wrap: $wrap);
     $deadline = microtime(true) + 10;
     while ($wait && null === probe($addr, '/hello')) {
         if (microtime(true) > $deadline || !proc_get_status($process)['running']) {

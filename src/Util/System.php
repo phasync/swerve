@@ -137,11 +137,13 @@ final class System {
     }
 
     /**
-     * Pin this process to NUMA node $index mod the number of nodes, and return that node's CPU
-     * list; null on a machine with one node, or when it can't be done (then the process stays
-     * unpinned: the same, only slower on a machine with several sockets). Call right after fork,
-     * before the process allocates much: memory then comes from the node's own, and threads
-     * started later (phasync-ext's) inherit the pinning.
+     * Pin this process to the CPUs it may use on one NUMA node, taking the nodes in turn by
+     * $index, and return those CPUs as a list; null when they lie on one node only (a machine
+     * with one node, or an operator's taskset, cpuset or --cpuset-cpus within one), or when it
+     * can't be done (then the process stays as it was: the same, only slower on a machine with
+     * several sockets). Only the CPUs the process inherited are used: pinning never widens
+     * them. Call right after fork, before the process allocates much: memory then comes from the
+     * node's own, and threads started later (phasync-ext's) inherit the pinning.
      *
      * With several sockets, a scheduler free to move a worker between them takes it away from
      * the memory it allocated; pinned, swerve served about a quarter more at 10,000 connections
@@ -149,25 +151,40 @@ final class System {
      */
     public static function pinToNumaNode(int $index): ?string
     {
-        $nodes = \glob('/sys/devices/system/node/node[0-9]*', \GLOB_ONLYDIR) ?: [];
+        $parse = static function (string $list): array {
+            $cpus = [];
+            foreach ('' === $list ? [] : \explode(',', $list) as $range) {
+                [$first, $last] = \array_map('intval', \explode('-', $range) + [1 => $range]);
+                for ($cpu = $first; $cpu <= $last; ++$cpu) {
+                    $cpus[] = $cpu;
+                }
+            }
+
+            return $cpus;
+        };
+        \preg_match('/^Cpus_allowed_list:\s*(\S+)/m', (string) @\file_get_contents('/proc/self/status'), $m);
+        $allowed = $parse($m[1] ?? '');
+        $nodes   = \glob('/sys/devices/system/node/node[0-9]*', \GLOB_ONLYDIR) ?: [];
         \natsort($nodes);
-        if (\count($nodes) < 2) {
+        $shares = [];
+        foreach ($nodes as $node) {
+            $cpus = \array_values(\array_intersect($parse(\trim((string) @\file_get_contents("$node/cpulist"))), $allowed));
+            if ($cpus) {
+                $shares[] = $cpus;
+            }
+        }
+        if (\count($shares) < 2) {
             return null;
         }
-        $cpus = \trim((string) @\file_get_contents(\array_values($nodes)[$index % \count($nodes)] . '/cpulist'));
-        if ('' === $cpus) {
-            return null;
-        }
+        $share = $shares[$index % \count($shares)];
+        $cpus  = \implode(',', $share);
         // FFI where it may be used (in the CLI by default): no process started
         if (\class_exists(\FFI::class, false)) {
             try {
                 $libc = \FFI::cdef('int sched_setaffinity(int pid, size_t size, const unsigned char *mask);', 'libc.so.6');
                 $mask = $libc->new('unsigned char[128]'); // cpu_set_t: 1024 CPUs
-                foreach (\explode(',', $cpus) as $range) {
-                    [$first, $last] = \array_map('intval', \explode('-', $range) + [1 => $range]);
-                    for ($cpu = $first; $cpu <= $last; ++$cpu) {
-                        $mask[$cpu >> 3] |= 1 << ($cpu & 7);
-                    }
+                foreach ($share as $cpu) {
+                    $mask[$cpu >> 3] |= 1 << ($cpu & 7);
                 }
                 if (0 === $libc->sched_setaffinity(0, 128, $mask)) {
                     return $cpus;

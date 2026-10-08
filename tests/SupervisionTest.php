@@ -1340,6 +1340,54 @@ test('on a machine with several NUMA nodes, the workers are pinned to them in tu
     }
 })->skip(fn () => count(glob('/sys/devices/system/node/node[0-9]*', GLOB_ONLYDIR)) < 2, 'needs several NUMA nodes');
 
+/** Each NUMA node's CPUs, as lists of ints. */
+function numa_cpus(): array
+{
+    $nodes = glob('/sys/devices/system/node/node[0-9]*', GLOB_ONLYDIR);
+    natsort($nodes);
+
+    return array_map(static function (string $node): array {
+        $cpus = [];
+        foreach (explode(',', trim(file_get_contents("$node/cpulist"))) as $range) {
+            [$first, $last] = explode('-', $range) + [1 => $range];
+            $cpus = [...$cpus, ...range((int) $first, (int) $last)];
+        }
+
+        return $cpus;
+    }, array_values($nodes));
+}
+
+function cpus_allowed(int $pid): string
+{
+    preg_match('/^Cpus_allowed_list:\s*(\S+)/m', file_get_contents("/proc/$pid/status"), $m);
+
+    return $m[1];
+}
+
+test('NUMA pinning keeps the CPUs the operator allowed: within one node, the workers stay on them', function () {
+    $cpus = [numa_cpus()[1][0], numa_cpus()[1][2]]; // two CPUs of the second node, not adjacent: listed as "a,b"
+    [$process, $addr] = swerve_start([], 2, wrap: ['taskset', '-c', implode(',', $cpus)]);
+    try {
+        foreach (worker_pids($addr, 2) as $pid) {
+            expect(cpus_allowed($pid))->toBe(implode(',', $cpus));
+        }
+    } finally {
+        native_stop($process);
+    }
+})->skip(fn () => count(glob('/sys/devices/system/node/node[0-9]*', GLOB_ONLYDIR)) < 2, 'needs several NUMA nodes');
+
+test('NUMA pinning keeps the CPUs the operator allowed: across nodes, each worker gets its node\'s share of them', function () {
+    $shares = array_map(static fn (array $node) => $node[0], array_slice(numa_cpus(), 0, 2)); // one CPU of each of two nodes
+    [$process, $addr] = swerve_start([], 2, wrap: ['taskset', '-c', implode(',', $shares)]);
+    try {
+        $pinned = array_map('cpus_allowed', worker_pids($addr, 2));
+        sort($pinned);
+        expect($pinned)->toBe(array_map('strval', $shares)); // one worker on each node, on its allowed CPU only
+    } finally {
+        native_stop($process);
+    }
+})->skip(fn () => count(glob('/sys/devices/system/node/node[0-9]*', GLOB_ONLYDIR)) < 2, 'needs several NUMA nodes');
+
 test('shutdown under concurrent load fails no request in flight', function () {
     [$process, $addr] = swerve_start();
     $signalled        = 0.0;
