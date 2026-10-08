@@ -14,7 +14,7 @@ set -u
 cd "$(dirname "$0")"
 SERVER=${SERVER:?set SERVER} CLIENT=${CLIENT:?set CLIENT} EXT=${EXT:-}
 WORKERS=${WORKERS:-$(nproc)} GO_LAYOUT=${GO_LAYOUT:-1x$(nproc)}
-JIT="-d opcache.enable_cli=1 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M"
+JIT="-d opcache.enable_cli=1 -d opcache.jit=1054 -d opcache.jit_buffer_size=128M"
 PHP="php ${EXT:+-d extension=$EXT} $JIT ../bin/swerve.php --workers=$WORKERS -q --watchdog=0"
 ulimit -n 1048576
 

@@ -10,7 +10,7 @@ B=~/bench A=~/bench/servers/apps S=~/bench/servers
 AP=$A; [ -n "${NATIVE:-}" ] && AP=$A/native
 PORT=18500 STATE=/tmp/srv.pgid LOG=/tmp/srv.log
 # Identical opcache + JIT for every server that runs PHP's CLI; FrankenPHP gets the same through php_ini
-PHPF=(-d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M)
+PHPF=(-d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=1054 -d opcache.jit_buffer_size=128M)
 
 tree() { # the leader and all its descendants (RoadRunner puts its PHP workers in groups of their own)
     local p=$1; echo $p
@@ -88,7 +88,7 @@ franken)
 		num_threads ${FRANKEN_THREADS:-$((N + 1))}
 		php_ini opcache.enable 1
 		php_ini opcache.validate_timestamps 0
-		php_ini opcache.jit tracing
+		php_ini opcache.jit 1054
 		php_ini opcache.jit_buffer_size 128M
 	}
 }

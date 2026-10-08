@@ -2,7 +2,7 @@
 # The scaling matrix, run on the server (black): application × route × N ∈ PROCS × server ∈
 # {PHP-FPM behind nginx with N children, swerve --workers=N, the same with phasync-ext}.
 # wrk -t32 -c16N runs on the client (CLIENT, over ssh, with client.sh) against HOST.
-# Opcache and tracing JIT everywhere. Raw output in raw/<app>-<route>-N<n>-<server>.txt.
+# Opcache and the JIT (1054: tracing without register allocation) everywhere. Raw output in raw/<app>-<route>-N<n>-<server>.txt.
 #
 #   ssh black 'bash ~/bench/scaling/run.sh [app...]'      (apps from setup.sh; default: all)
 set -u
@@ -12,7 +12,7 @@ HOST=${HOST:-192.168.10.15} PORT=${PORT:-19100} CLIENT=${CLIENT:-frode@192.168.1
 CDIR=${CDIR:-/home/frode/dev/swerve/benchmarks/scaling} # this directory on the client
 PROCS=${PROCS:-4 16 32} SERVERS=${SERVERS:-fpm swerve swerve-ext} DURATION=${DURATION:-10}
 EXT=$b/phasync.so
-PHP=(php -d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M)
+PHP=(php -d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=1054 -d opcache.jit_buffer_size=128M)
 ulimit -n 1048576
 mkdir -p "$here/raw"
 
@@ -39,7 +39,7 @@ app() { # sets dir, docroot, bin, script, opts, routes (name:path; the first is 
 
 start() { # server, n, log: starts it in a session of its own, sets pid
     case $1 in
-    fpm) JIT=tracing BIND=$HOST setsid "$b/fpm-bench/serve.sh" "$docroot" $PORT "$2" > "$3" 2>&1 & pid=$! ;;
+    fpm) JIT=1054 BIND=$HOST setsid "$b/fpm-bench/serve.sh" "$docroot" $PORT "$2" > "$3" 2>&1 & pid=$! ;;
     swerve*)
         local ext=(); [ "$1" = swerve-ext ] && ext=(-d extension=$EXT)
         (cd "$dir" && exec setsid "${PHP[@]}" "${ext[@]}" $bin --workers="$2" --http=$HOST:$PORT --no-access-log -q "${opts[@]}" $script) > "$3" 2>&1 &

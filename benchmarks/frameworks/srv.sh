@@ -6,7 +6,7 @@
 #   SERVER: swerve swerve-ext rr franken swoole swoole-process react (which apply: see FW's case below)
 # PHP settings come from ini directories (PHP_INI_SCAN_DIR=:dir, appended to the default scan
 # dir), so that processes a server spawns itself (Octane, RoadRunner) get them too:
-#   ini/jit    opcache + tracing JIT (every server)       ini/ext    + phasync-ext
+#   ini/jit    opcache + JIT 1054 (every server)          ini/ext    + phasync-ext
 #   ini/rr     + ext-protobuf (RoadRunner's workers)      ini/swoole + ext-swoole
 #   ini/react  + ext-ev                                   ini/franken-intl + intl (FrankenPHP)
 set -u

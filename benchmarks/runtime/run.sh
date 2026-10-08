@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runtime overhead: "Hello, World!" from the smallest server code on each runtime, over localhost
 # on black. Server pinned to physical cores 0..N-1 (CCD0, no SMT siblings), wrk -t8 -c64 pinned
-# to CCD1's cores 8-15. PHP with opcache and the tracing JIT.
+# to CCD1's cores 8-15. PHP with opcache and the JIT (1054: tracing without register allocation).
 #
 #   [WORKLOAD=hello|file4k|file1m] [FRONT=nginx|nginx-unix] ./run.sh dev|docs ["phasync phasync-ext node go"] ["1 2 4"]
 #
@@ -21,7 +21,7 @@ cd "$(dirname "$0")"
 MODE=$1 SERVERS=${2:-"phasync phasync-ext node go"} NS=${3:-"1 2 4"}
 RT=$HOME/bench/rt PORT=18600 WRK="taskset -c 8-15 wrk -t8 -c64 --latency"
 EXT=$PWD/../../vendor/phasync/phasync/ext/phasync-8.5-nts-x86_64-glibc.so NODE=$RT/node-v26.10.0-linux-x64/bin/node
-PHP="php8.5 -d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M"
+PHP="php8.5 -d opcache.enable_cli=1 -d opcache.validate_timestamps=0 -d opcache.jit=1054 -d opcache.jit_buffer_size=128M"
 WORKLOAD=${WORKLOAD:-hello}
 case $WORKLOAD in
     hello)  NAME=hello ;;

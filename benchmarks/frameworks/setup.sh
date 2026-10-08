@@ -10,7 +10,7 @@ B=~/bench F=~/bench/fw I=~/bench/fw/ini
 
 # PHP settings per server kind, loaded with PHP_INI_SCAN_DIR=:<dir> (srv.sh)
 mkdir -p $I/jit $I/rr $I/swoole $I/ext $I/react $I/franken-intl
-printf 'opcache.enable=1\nopcache.enable_cli=1\nopcache.validate_timestamps=0\nopcache.jit=tracing\nopcache.jit_buffer_size=128M\n' > $I/jit/90-bench.ini
+printf 'opcache.enable=1\nopcache.enable_cli=1\nopcache.validate_timestamps=0\nopcache.jit=1054\nopcache.jit_buffer_size=128M\n' > $I/jit/90-bench.ini
 for k in rr swoole ext react franken-intl; do cp $I/jit/90-bench.ini $I/$k/; done
 echo "extension=$B/ext/protobuf.so" > $I/rr/80-protobuf.ini
 echo "extension=$B/ext/swoole.so" > $I/swoole/80-swoole.ini
