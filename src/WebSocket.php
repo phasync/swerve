@@ -487,7 +487,7 @@ final class WebSocket implements \IteratorAggregate
             $this->put(self::head(8, 2 + \strlen($reason)) . \pack('n', $code) . $reason, self::CLOSE_TIMEOUT);
             $this->connection->end();
         }
-        if (null !== $this->reading && $this->reading !== \Fiber::getCurrent()) {
+        if (null !== $this->reading && $this->reading !== \phasync\ext\current_fiber()) {
             try {
                 phasync::throw($this->reading, new CancelledException('The WebSocket was ended')); // from the wait for the client's bytes
             } catch (\LogicException) {
@@ -673,7 +673,7 @@ final class WebSocket implements \IteratorAggregate
     private function need(int $n): string
     {
         while (\strlen($this->buffer) < $n) {
-            $this->reading = \Fiber::getCurrent();
+            $this->reading = \phasync\ext\current_fiber();
             try {
                 $bytes = $this->connection->read(65536);
             } catch (IOException) {
