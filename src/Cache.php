@@ -35,6 +35,11 @@ use Swerve\Util\Topics;
  * for the worker to serve, and directly in `swerve.php` it throws a `LogicException`. A key is a non-empty string without
  * `{}()/\@:`, else a {@see CacheKeyException} is thrown.
  *
+ * It implements every version of PSR-16 (psr/simple-cache 1, 2 and 3; the application's Composer
+ * picks one): parameters are untyped, as 1.0 declares them, and checked here instead -- a key
+ * that is no string throws a CacheKeyException, a TTL that is no int, DateInterval or null a
+ * TypeError.
+ *
  * @see Swerve::cache
  * @see Swerve::claim
  * @see Swerve\CacheKeyException
@@ -102,8 +107,9 @@ final class Cache implements CacheInterface
      * @throws CacheKeyException for an invalid key
      *
      * @see Cache::set
+     * @param string $key
      */
-    public function get(string $key, mixed $default = null): mixed
+    public function get($key, mixed $default = null): mixed
     {
         return $this->getMultiple([$key], $default)[$key];
     }
@@ -123,7 +129,7 @@ final class Cache implements CacheInterface
      *
      * @see Cache::setMultiple
      */
-    public function getMultiple(iterable $keys, mixed $default = null): array
+    public function getMultiple($keys, mixed $default = null): array
     {
         $values = [];
         foreach ($this->fetch(self::keys($keys)) as $key => $entry) {
@@ -137,8 +143,9 @@ final class Cache implements CacheInterface
      * Whether a value is stored under `$key` and has not expired.
      *
      * @throws CacheKeyException for an invalid key
+     * @param string $key
      */
-    public function has(string $key): bool
+    public function has($key): bool
     {
         return '' !== $this->fetch(self::keys([$key]))[$key];
     }
@@ -162,10 +169,11 @@ final class Cache implements CacheInterface
      *
      * @see Cache::get
      * @see Cache::delete
+     * @param string $key
      */
-    public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null): bool
+    public function set($key, mixed $value, $ttl = null): bool
     {
-        return $this->setMultiple([$key => $value], $ttl);
+        return $this->setMultiple([self::keys([$key])[0] => $value], $ttl);
     }
 
     /**
@@ -179,8 +187,14 @@ final class Cache implements CacheInterface
      * @throws CacheKeyException for an invalid key
      * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      */
-    public function setMultiple(iterable $values, null|int|\DateInterval $ttl = null): bool
+    public function setMultiple($values, $ttl = null): bool
     {
+        if (!\is_iterable($values)) {
+            throw new CacheKeyException('setMultiple() takes an iterable of key => value, not ' . \get_debug_type($values));
+        }
+        if (null !== $ttl && !\is_int($ttl) && !$ttl instanceof \DateInterval) {
+            throw new \TypeError('A cache TTL is seconds (int), a DateInterval or null, not ' . \get_debug_type($ttl));
+        }
         $items = [];
         foreach ($values as $key => $value) {
             $items[self::keys([(string) $key])[0]] = \serialize($value);
@@ -202,8 +216,9 @@ final class Cache implements CacheInterface
      *
      * @throws CacheKeyException for an invalid key
      * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
+     * @param string $key
      */
-    public function delete(string $key): bool
+    public function delete($key): bool
     {
         return $this->deleteMultiple([$key]);
     }
@@ -216,7 +231,7 @@ final class Cache implements CacheInterface
      * @throws CacheKeyException for an invalid key
      * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      */
-    public function deleteMultiple(iterable $keys): bool
+    public function deleteMultiple($keys): bool
     {
         return $this->call(['delete', self::keys($keys)]);
     }
@@ -438,8 +453,11 @@ final class Cache implements CacheInterface
      *
      * @return list<string>
      */
-    private static function keys(iterable $keys): array
+    private static function keys($keys): array
     {
+        if (!\is_iterable($keys)) {
+            throw new CacheKeyException('Cache keys come as an iterable of strings, not ' . \get_debug_type($keys));
+        }
         $valid = [];
         foreach ($keys as $key) {
             if (!\is_string($key) || '' === $key || false !== \strpbrk($key, '{}()/\@:')) {

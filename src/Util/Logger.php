@@ -82,7 +82,10 @@ class Logger implements LoggerInterface
         $this->console = new Console($file);
     }
 
-    public function log($level, string|\Stringable $message, array $context = []): void
+    /**
+     * @param string|\Stringable $message untyped, as psr/log 1 declares it, so the logger implements psr/log 1, 2 and 3
+     */
+    public function log($level, $message, array $context = []): void
     {
         if (!empty($this->logLevels[$level])) {
             $this->console->log($level, $message, $context, $this->source);

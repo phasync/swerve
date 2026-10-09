@@ -71,6 +71,19 @@ test('every key of a multiple call is checked, and nothing is stored when one is
     expect($cache->has('a.b-c_d'))->toBeFalse(); // dot, dash and underscore are valid
 });
 
+test('untyped as PSR-16 1.0 declares them, the methods still refuse what is no key, no iterable or no TTL', function () {
+    $cache = Cache::instance();
+    foreach ([42, null, ['a']] as $bad) {
+        expect(fn () => $cache->get($bad))->toThrow(Swerve\CacheKeyException::class);
+        expect(fn () => $cache->set($bad, 1))->toThrow(Swerve\CacheKeyException::class);
+    }
+    expect(fn () => $cache->getMultiple('a'))->toThrow(Swerve\CacheKeyException::class, 'Cache keys come as an iterable of strings, not string');
+    expect(fn () => $cache->deleteMultiple(1))->toThrow(Swerve\CacheKeyException::class);
+    expect(fn () => $cache->setMultiple('a'))->toThrow(Swerve\CacheKeyException::class, 'setMultiple() takes an iterable of key => value, not string');
+    expect(fn () => $cache->set('k', 1, '60'))->toThrow(TypeError::class, 'A cache TTL is seconds (int), a DateInterval or null, not string');
+    expect($cache->has('k'))->toBeFalse();
+});
+
 test('a TTL as an integer or a DateInterval expires the entry; a zero or negative one deletes it at once', function () {
     $cache = Cache::instance();
     $cache->clear();

@@ -240,6 +240,12 @@ less of a real one; `--no-access-log` turns it off.
 
 ## Adapters
 
+swerve is installed into the application's own `vendor/`, so the application and swerve share
+one version of each library. swerve accepts every major version of the PSR packages it uses
+(`psr/log` 1 to 3, `psr/simple-cache` 1 to 3, `psr/http-message` 1 and 2), and Composer picks
+the one the application needs; `php tests/psr-versions.php` checks that every class loads with
+each.
+
 An adapter is an installed package that provides the entry point in place of `swerve.php`. It
 declares itself in its own `composer.json`:
 

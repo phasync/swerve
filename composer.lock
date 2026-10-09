@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4a87a87cbb4ff4df1ed677a9fb6c452f",
+    "content-hash": "799491acaecb4a71608166070e5579f8",
     "packages": [
         {
             "name": "phasync/net",

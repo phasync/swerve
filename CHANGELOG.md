@@ -13,6 +13,15 @@
 
 ### Changed
 
+- swerve works with every major version of the PSR packages it uses, and its `composer.json`
+  says so: `psr/log` `^1.0 || ^2.0 || ^3.0`, `psr/simple-cache` `^1.0 || ^2.0 || ^3.0`,
+  `psr/http-message` `^1.0 || ^2.0` (now required directly, as `Psr\RequestBody` implements it).
+  An application that bundles psr/log 1 (MediaWiki) or another major gets it from its own
+  Composer, with swerve in the same `vendor/`. `Util\Logger::log()` takes an untyped
+  `$message`, and `Cache`'s methods untyped keys, iterables and TTLs, as the 1.0 interfaces
+  declare them, checked inside instead: a bad key or iterable throws `CacheKeyException`, a bad
+  TTL a `TypeError`. `php tests/psr-versions.php` loads every class against the lowest, middle
+  and highest allowed majors.
 - Adapters are looked up in the current directory, also when a file argument is given (it was
   that file's directory). Giving a file with an adapter other than `swerve` passes it to the
   adapter instead of being an error. The positional argument is `[file]` in `--help`.
