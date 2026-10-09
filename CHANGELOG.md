@@ -22,8 +22,12 @@
   declare them, checked inside instead: a bad key or iterable throws `CacheKeyException`, a bad
   TTL a `TypeError`. `php tests/psr-versions.php` loads every class against the lowest, middle
   and highest allowed majors.
-- Adapters are looked up in the current directory, also when a file argument is given (it was
-  that file's directory). Giving a file with an adapter other than `swerve` passes it to the
+- Adapters are looked up in the vendor directory swerve was loaded from (Composer's
+  `vendor/bin` proxy says which), so an application that keeps it elsewhere (Joomla's
+  `libraries/vendor`) works, and in the root package's `composer.json` when it declares an adapter
+  with its `entry` (an adapter run from its own checkout). Without the proxy, as before: the
+  current directory's `vendor/`. This holds also when a file argument is given (it was that
+  file's directory). Giving a file with an adapter other than `swerve` passes it to the
   adapter instead of being an error. The positional argument is `[file]` in `--help`.
 - The JIT runs as `opcache.jit=1054`, tracing without register allocation, instead of `tracing`.
   PHP 8.5's tracing JIT with register allocation can leave a variable undefined after an exception

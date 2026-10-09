@@ -262,7 +262,9 @@ The adapter is the first of: `--adapter=<name>`; `"extra": {"swerve": {"adapter"
 application's own `composer.json`; the only installed adapter; `swerve`, the built-in one, which
 loads `swerve.php` (always available as `--adapter=swerve`). Several installed adapters and no
 choice, or a name that is not installed, stops swerve at start. Adapters are looked up in the
-current directory (its `vendor/composer/installed.json` and `composer.json`). With an adapter other
+vendor directory swerve itself was loaded from (`vendor/`, or wherever the application keeps it,
+such as Joomla's `libraries/vendor`), and in the root package's `composer.json`, which may declare
+an adapter with its `entry` itself (an adapter package run from its own checkout). With an adapter other
 than `swerve`, a `swerve.php` in the application directory is ignored (logged once). The
 application directory is the current one, or for the `swerve` adapter the directory of the
 `swerve.php` given.

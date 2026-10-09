@@ -12,8 +12,8 @@ namespace Swerve\Util;
  * ```
  *
  * `entry` names a function that each worker calls once, after the fork, with the application
- * directory, and that returns a {@see \Swerve\RequestHandler}. The master only reads
- * `vendor/composer/installed.json`: it loads no adapter code.
+ * directory, and that returns a {@see \Swerve\RequestHandler}. The master only reads the
+ * `composer/installed.json` of the vendor directory swerve was loaded from: it loads no adapter code.
  *
  * @internal
  */
@@ -27,23 +27,32 @@ final class Adapters
     }
 
     /**
-     * The adapters the packages in `$appDir/vendor` declare.
+     * The adapters the packages in a Composer vendor directory declare: the one swerve was
+     * loaded from, where the application keeps it (`vendor/`, Joomla's `libraries/vendor`).
+     *
+     * With `$rootDir`, the root package's own composer.json counts too when it declares an adapter
+     * with its `entry` (an adapter package run from its own checkout); one naming only `adapter`
+     * chooses an installed one instead (see {@see configured()}).
      *
      * @return array<string, string> the adapter's name to its entry function
      *
      * @throws \RuntimeException for a package declaring an adapter without an entry, a name twice, or the name `swerve`
      */
-    public static function installed(string $appDir): array
+    public static function installed(string $vendorDir, ?string $rootDir = null): array
     {
-        $file = "$appDir/vendor/composer/installed.json";
-        if (!\is_file($file)) {
-            return [];
+        $file = "$vendorDir/composer/installed.json";
+        $data = \is_file($file) ? self::json($file) : [];
+        // Composer 2 wraps the list in {"packages": [...]}; Composer 1 is the list
+        $packages = $data['packages'] ?? $data;
+        if (null !== $rootDir && \is_file("$rootDir/composer.json")) {
+            $root = self::json("$rootDir/composer.json");
+            if (isset($root['extra']['swerve']['entry'])) {
+                $packages[] = ['name' => $root['name'] ?? "$rootDir/composer.json"] + $root;
+            }
         }
-        $data     = self::json($file);
         $adapters = [];
         $owners   = [self::BUILT_IN => 'swerve itself'];
-        // Composer 2 wraps the list in {"packages": [...]}; Composer 1 is the list
-        foreach ($data['packages'] ?? $data as $package) {
+        foreach ($packages as $package) {
             $declared = $package['extra']['swerve'] ?? null;
             if (!isset($declared['adapter'])) {
                 continue;

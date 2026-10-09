@@ -41,7 +41,7 @@ function adapter_app(array $adapters = [], ?array $composer = null, bool $swerve
  *
  * @return array{0: resource, 1: string, 2: string, 3: string, 4: string} the process, its address, the log, stderr, and the file that the entry functions record their calls in
  */
-function adapter_spawn(string $dir, array $args = [], ?string $file = null): array
+function adapter_spawn(string $dir, array $args = [], ?string $file = null, array $env = []): array
 {
     $addr    = free_address();
     $log     = temp_path();
@@ -52,7 +52,7 @@ function adapter_spawn(string $dir, array $args = [], ?string $file = null): arr
         ["--http=$addr", '--workers=2', "--log=$log", '--grace=2', '--watchdog=3', ...$args],
         $file,
         ['-d', "auto_prepend_file=$prelude"],
-        ['ADAPTER_CALLS' => $calls],
+        ['ADAPTER_CALLS' => $calls] + $env,
         [2 => ['file', $err, 'w']],
         $dir,
     );
@@ -61,9 +61,9 @@ function adapter_spawn(string $dir, array $args = [], ?string $file = null): arr
 }
 
 /** Start it and wait until it serves; the fixture swerve.php files answer the same as the entry functions. */
-function adapter_serve(string $dir, array $args = [], ?string $file = null): array
+function adapter_serve(string $dir, array $args = [], ?string $file = null, array $env = []): array
 {
-    $started                      = adapter_spawn($dir, $args, $file);
+    $started                      = adapter_spawn($dir, $args, $file, $env);
     [$process, $addr, $log, $err] = $started;
     $deadline                     = microtime(true) + 10;
     while ('Hello' !== probe($addr, '/')) {
@@ -193,6 +193,27 @@ test('a -t that is not a directory, or a file argument that does not exist, stop
     expect($err)->toContain('router.php not found');
 });
 
+test('adapters are found in the vendor directory swerve was loaded from, wherever the application keeps it', function () {
+    $dir = adapter_app(['psr15' => 'SwerveTest\\entry']);
+    mkdir("$dir/libraries");
+    rename("$dir/vendor", "$dir/libraries/vendor");
+    file_put_contents("$dir/libraries/vendor/autoload.php", '<?php return require ' . var_export(dirname(__DIR__) . '/vendor/autoload.php', true) . ';');
+
+    [$process, , $log, , $calls] = adapter_serve($dir, [], null, ['ADAPTER_AUTOLOAD' => "$dir/libraries/vendor/autoload.php"]);
+    native_stop($process);
+    expect(array_unique(array_column(adapter_calls($calls), 1)))->toBe(['SwerveTest\\entry']);
+    expect(file_get_contents($log))->toContain('serving adapter psr15');
+});
+
+test('the application\'s own composer.json may declare an adapter with its entry: a package run from its own checkout', function () {
+    $dir = adapter_app([], ['name' => 'acme/self', 'extra' => ['swerve' => ['adapter' => 'self', 'entry' => 'SwerveTest\\entry']]]);
+    [$process, , $log, , $calls] = adapter_serve($dir);
+    native_stop($process);
+
+    expect(array_unique(array_column(adapter_calls($calls), 1)))->toBe(['SwerveTest\\entry']);
+    expect(file_get_contents($log))->toContain('serving adapter self');
+});
+
 test('two adapters and no choice stop swerve before any worker starts, naming both ways to choose', function () {
     $dir = adapter_app(['psr15' => 'SwerveTest\entry', 'laravel' => 'SwerveTest\entry_other']);
     [$code, $err, $log] = adapter_fail($dir);
@@ -244,14 +265,20 @@ test('installed.json is read in both of Composer\'s formats, and a package witho
     $package = ['name' => 'acme/a', 'extra' => ['swerve' => ['adapter' => 'a', 'entry' => 'A\init']]];
 
     file_put_contents("$dir/vendor/composer/installed.json", json_encode([$package, ['name' => 'acme/b']]));
-    expect(Adapters::installed($dir))->toBe(['a' => 'A\init']);
+    expect(Adapters::installed("$dir/vendor"))->toBe(['a' => 'A\init']);
 
     file_put_contents("$dir/vendor/composer/installed.json", json_encode(['packages' => [$package]]));
-    expect(Adapters::installed($dir))->toBe(['a' => 'A\init']);
+    expect(Adapters::installed("$dir/vendor"))->toBe(['a' => 'A\init']);
 
     file_put_contents("$dir/vendor/composer/installed.json", json_encode(['packages' => [['name' => 'acme/c', 'extra' => ['swerve' => ['adapter' => 'c']]]]]));
-    expect(fn () => Adapters::installed($dir))->toThrow(RuntimeException::class, 'acme/c declares the swerve adapter c without an "entry" function');
+    expect(fn () => Adapters::installed("$dir/vendor"))->toThrow(RuntimeException::class, 'acme/c declares the swerve adapter c without an "entry" function');
 
     file_put_contents("$dir/vendor/composer/installed.json", json_encode(['packages' => [$package, ['name' => 'acme/d'] + $package]]));
-    expect(fn () => Adapters::installed($dir))->toThrow(RuntimeException::class, 'acme/d declares the swerve adapter a, which acme/a provides already');
+    expect(fn () => Adapters::installed("$dir/vendor"))->toThrow(RuntimeException::class, 'acme/d declares the swerve adapter a, which acme/a provides already');
+
+    file_put_contents("$dir/vendor/composer/installed.json", json_encode(['packages' => [$package]]));
+    file_put_contents("$dir/composer.json", json_encode(['name' => 'acme/root', 'extra' => ['swerve' => ['adapter' => 'root', 'entry' => 'Root\\init']]]));
+    expect(Adapters::installed("$dir/vendor", $dir))->toBe(['a' => 'A\\init', 'root' => 'Root\\init']);
+    file_put_contents("$dir/composer.json", json_encode(['extra' => ['swerve' => ['adapter' => 'a']]])); // a choice, not a declaration
+    expect(Adapters::installed("$dir/vendor", $dir))->toBe(['a' => 'A\\init']);
 });

@@ -146,15 +146,19 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     /**
-     * The adapter that provides the entry point (see Adapters), found in the current directory
-     * without loading any of its code. The application directory: the directory of the
+     * The adapter that provides the entry point (see Adapters), found in the vendor directory
+     * swerve was loaded from, without loading any of its code. The application directory: the directory of the
      * swerve.php given to the swerve adapter, else the current one.
      */
     $explicitFile = !$args->isDefault('swervefile');
     $swerveFile   = \str_starts_with($args->swervefile, '/') ? $args->swervefile : \getcwd() . '/' . $args->swervefile;
     try {
-        $installed = Adapters::installed(\getcwd());
-        $adapter   = Adapters::select($installed, $args->adapter ?: null, Adapters::configured(\getcwd()));
+        // The vendor directory swerve runs from and its root package (Composer's bin proxy says
+        // where), else the current directory's
+        $proxied   = isset($GLOBALS['_composer_autoload_path']);
+        $rootDir   = $proxied ? \realpath(\Composer\InstalledVersions::getRootPackage()['install_path']) : \getcwd();
+        $installed = Adapters::installed($proxied ? \dirname($GLOBALS['_composer_autoload_path']) : \getcwd() . '/vendor', $rootDir);
+        $adapter   = Adapters::select($installed, $args->adapter ?: null, Adapters::configured($rootDir));
     } catch (\RuntimeException $e) {
         \fwrite(\STDERR, 'swerve: ' . $e->getMessage() . "\n");
         exit(2);

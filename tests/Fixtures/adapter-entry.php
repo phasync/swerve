@@ -8,6 +8,12 @@
 
 namespace SwerveTest;
 
+// As Composer's vendor/bin proxy says where the autoloader is: an application whose vendor
+// directory is not vendor/ (Joomla's libraries/vendor), see AdapterTest
+if (false !== \getenv('ADAPTER_AUTOLOAD')) {
+    $GLOBALS['_composer_autoload_path'] = \getenv('ADAPTER_AUTOLOAD');
+}
+
 use Swerve\ClientRequest;
 use Swerve\RequestHandler;
 
