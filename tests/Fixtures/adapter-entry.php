@@ -44,3 +44,11 @@ function entry_bad(string $dir): int
 
     return 42;
 }
+
+/** An entry that takes swerve's `-t` (docroot) and its file argument, and records them. */
+function entry_paths(string $dir, ?string $docroot = null, ?string $file = null): RequestHandler
+{
+    record(__FUNCTION__, \json_encode([$dir, $docroot, $file]));
+
+    return handler();
+}

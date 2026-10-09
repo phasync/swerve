@@ -130,18 +130,67 @@ test('--adapter=swerve loads swerve.php although an adapter is installed', funct
     expect(file_get_contents($log))->not->toContain('ignored');
 });
 
-test('a swerve.php argument works with --adapter=swerve, and is an error with an adapter', function () {
+test('a swerve.php argument works with --adapter=swerve', function () {
     $dir = adapter_app(['psr15' => 'SwerveTest\entry'], swerveFile: true);
 
     [$process, , , , $calls] = adapter_serve($dir, ['--adapter=swerve'], "$dir/swerve.php");
     native_stop($process);
     expect(adapter_calls($calls))->toBe([]);
+});
 
-    foreach ([[], ['--adapter=psr15']] as $args) {
-        [$code, $err] = adapter_fail($dir, $args, "$dir/swerve.php");
-        expect($code)->toBe(2);
-        expect($err)->toContain("$dir/swerve.php is given, but the adapter psr15 provides the entry point");
-    }
+test('-t and the file argument reach an adapter\'s entry as $docroot and $file, as absolute paths', function () {
+    $dir = adapter_app(['sapi' => 'SwerveTest\entry_paths']);
+    mkdir("$dir/public");
+    file_put_contents("$dir/router.php", '<?php return false;');
+
+    [$process, , , , $calls] = adapter_serve($dir, ['-t', 'public'], './router.php');
+    native_stop($process);
+    $recorded = adapter_calls($calls);
+    expect($recorded)->toHaveCount(2);
+    expect(json_decode($recorded[0][2], true))->toBe([realpath($dir), realpath("$dir/public"), realpath("$dir/router.php")]);
+
+    // Neither given: the entry's own defaults apply
+    [$process, , , , $calls] = adapter_serve($dir);
+    native_stop($process);
+    expect(json_decode(adapter_calls($calls)[0][2], true))->toBe([realpath($dir), null, null]);
+});
+
+test('-t or a file argument for an adapter whose entry takes neither stops swerve with exit code 2, naming what it takes', function (array $args, bool $file, string $what) {
+    $dir = adapter_app(['psr15' => 'SwerveTest\entry'], swerveFile: true);
+    mkdir("$dir/public");
+    [$code, , $log] = adapter_fail($dir, $args, $file ? "$dir/swerve.php" : null);
+
+    expect($code)->toBe(2);
+    expect($log)->toContain("The adapter psr15 takes no $what: its entry SwerveTest\\entry has no \$");
+})->with([
+    '-t'   => [['-t', 'public'], false, 'document root (-t)'],
+    'file' => [[], true, 'file argument'],
+]);
+
+test('-t with the built-in adapter is a usage error, pointing at --public', function () {
+    $dir = adapter_app(swerveFile: true);
+    mkdir("$dir/public");
+    [$code, $err] = adapter_fail($dir, ['-t', 'public']);
+
+    expect($code)->toBe(2);
+    expect($err)->toContain('-t public is for an adapter that serves a document root')->toContain('--public=public');
+});
+
+test('a -t that is not a directory, or a file argument that does not exist, stops swerve at start', function () {
+    $dir = adapter_app(['sapi' => 'SwerveTest\entry_paths']);
+    file_put_contents("$dir/file.txt", '');
+
+    [$code, $err] = adapter_fail($dir, ['-t', 'nope']);
+    expect($code)->toBe(2);
+    expect($err)->toContain('nope is not a directory');
+
+    [$code, $err] = adapter_fail($dir, ['-t', 'file.txt']);
+    expect($code)->toBe(2);
+    expect($err)->toContain('file.txt is not a directory');
+
+    [$code, $err] = adapter_fail($dir, [], './router.php');
+    expect($code)->toBe(1);
+    expect($err)->toContain('router.php not found');
 });
 
 test('two adapters and no choice stop swerve before any worker starts, naming both ways to choose', function () {

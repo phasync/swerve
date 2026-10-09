@@ -146,34 +146,47 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     /**
-     * The application directory: the directory of the swerve.php given, else the current one.
-     * Then the adapter that provides the entry point (see Adapters), found without loading any
-     * of its code.
+     * The adapter that provides the entry point (see Adapters), found in the current directory
+     * without loading any of its code. The application directory: the directory of the
+     * swerve.php given to the swerve adapter, else the current one.
      */
     $explicitFile = !$args->isDefault('swervefile');
     $swerveFile   = \str_starts_with($args->swervefile, '/') ? $args->swervefile : \getcwd() . '/' . $args->swervefile;
-    $appDir       = $explicitFile ? \dirname($swerveFile) : \getcwd();
     try {
-        $installed = Adapters::installed($appDir);
-        $adapter   = Adapters::select($installed, $args->adapter ?: null, Adapters::configured($appDir));
+        $installed = Adapters::installed(\getcwd());
+        $adapter   = Adapters::select($installed, $args->adapter ?: null, Adapters::configured(\getcwd()));
     } catch (\RuntimeException $e) {
         \fwrite(\STDERR, 'swerve: ' . $e->getMessage() . "\n");
         exit(2);
     }
-    $entry = $installed[$adapter] ?? null;
-    if (null !== $entry && $explicitFile) {
-        \fwrite(\STDERR, "swerve: {$args->swervefile} is given, but the adapter $adapter provides the entry point: use --adapter=swerve to load it\n");
-        exit(2);
-    }
+    $entry  = $installed[$adapter] ?? null;
+    $appDir = null === $entry && $explicitFile ? \dirname($swerveFile) : \getcwd();
 
-    /**
-     * Check that `swerve.php` file exists. The application is loaded in each worker, after
-     * the fork, so that a reload runs the current code. Symlinks are not resolved: a deploy
-     * that points `current` at a new release, then reloads, runs the new release.
+    /*
+     * Check that the file exists. The application is loaded in each worker, after the fork, so
+     * that a reload runs the current code. Symlinks are not resolved: a deploy that points
+     * `current` at a new release, then reloads, runs the new release.
      */
-    if (null === $entry && !\is_file($swerveFile)) {
+    if ((null === $entry || $explicitFile) && !\is_file($swerveFile)) {
         \fwrite(\STDERR, "swerve: {$args->swervefile} not found\n");
         exit(1);
+    }
+
+    /*
+     * What an adapter's entry gets besides the application directory, as named arguments:
+     * `docroot` (-t) and `file` (the file argument), absolute. Their meaning is the adapter's.
+     */
+    $entryArgs = [];
+    if ('' !== $args->docroot) {
+        if (null === $entry) {
+            \fwrite(\STDERR, "swerve: -t {$args->docroot} is for an adapter that serves a document root; "
+                . "swerve.php is the application itself: to serve the files in {$args->docroot} before it, use --public={$args->docroot}\n");
+            exit(2);
+        }
+        $entryArgs['docroot'] = \realpath($args->docroot);
+    }
+    if (null !== $entry && $explicitFile) {
+        $entryArgs['file'] = \realpath($swerveFile);
     }
 
     $http      = \array_map(Address::normalize(...), $args->http);
@@ -223,7 +236,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         $logger = new Logger(\STDOUT, $source, $logLevel, access: $access);
     }
 
-    if (null !== $entry && \is_file("$appDir/swerve.php")) {
+    if (null !== $entry && \is_file("$appDir/swerve.php") && ($entryArgs['file'] ?? null) !== \realpath("$appDir/swerve.php")) {
         $logger->notice('{file} is ignored: the adapter {adapter} provides the entry point', ['file' => "$appDir/swerve.php", 'adapter' => $adapter]);
     }
 
@@ -304,7 +317,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
     // Before the application loads, which may change the working directory
     $files = '' !== $args->public ? new StaticFiles($args->public) : null;
     $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
-    phasync::run(static function () use ($swerveFile, $appDir, $adapter, $entry, $args, $logger, $worker, $http, $files, $proxies) {
+    phasync::run(static function () use ($swerveFile, $appDir, $adapter, $entry, $entryArgs, $args, $logger, $worker, $http, $files, $proxies) {
         try {
             Swerve::startWorker();
         } catch (\Throwable $e) {
@@ -313,7 +326,16 @@ foreach ([\STDOUT, \STDERR] as $out) {
         }
         try {
             Cache::$loader = phasync::getFiber();
-            $app           = null === $entry ? require $swerveFile : $entry($appDir);
+            if (null !== $entry && [] !== $entryArgs) {
+                $parameters = \array_map(static fn (\ReflectionParameter $p) => $p->getName(), (new \ReflectionFunction($entry))->getParameters());
+                foreach (['docroot' => 'document root (-t)', 'file' => 'file argument'] as $name => $what) {
+                    if (isset($entryArgs[$name]) && !\in_array($name, $parameters, true)) {
+                        $logger->critical('The adapter {adapter} takes no {what}: its entry {entry} has no ${name} parameter', ['adapter' => $adapter, 'what' => $what, 'entry' => $entry, 'name' => $name]);
+                        exit(Worker::EXIT_BAD_APP);
+                    }
+                }
+            }
+            $app           = null === $entry ? require $swerveFile : $entry($appDir, ...$entryArgs);
             Cache::$loader = null;
         } catch (\Throwable $e) {
             $logger->critical('Loading {what} failed: {exception}', ['what' => null === $entry ? $swerveFile : "the adapter $adapter", 'exception' => $e]);

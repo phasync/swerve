@@ -184,10 +184,11 @@ Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets`
 
 ```
 > vendor/bin/swerve --help
-Usage: swerve [options] [swerve.php]
+Usage: swerve [options] [file]
 
 Application:
-  [swerve.php]                     A PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest
+  [file]                           With the swerve adapter: swerve.php, a PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest (default: ./swerve.php). With another adapter: given to it (a router script, say, as for php -S)
+  -t, --docroot=<dir>              The document root, given to the adapter (one serving plain PHP files, say, as php -S does); not for the swerve adapter, see --public
   --adapter=<name>                 The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application's composer.json, the only installed adapter, else swerve
 
 Serving:
@@ -254,9 +255,23 @@ does, and anything else stops swerve with exit code 2. The master only reads
 The adapter is the first of: `--adapter=<name>`; `"extra": {"swerve": {"adapter": "<name>"}}` in the
 application's own `composer.json`; the only installed adapter; `swerve`, the built-in one, which
 loads `swerve.php` (always available as `--adapter=swerve`). Several installed adapters and no
-choice, or a name that is not installed, stops swerve at start. With an adapter other than `swerve`,
-a `swerve.php` in the application directory is ignored (logged once), and giving one on the command
-line is an error. The application directory is the directory of that argument, else the current one.
+choice, or a name that is not installed, stops swerve at start. Adapters are looked up in the
+current directory (its `vendor/composer/installed.json` and `composer.json`). With an adapter other
+than `swerve`, a `swerve.php` in the application directory is ignored (logged once). The
+application directory is the current one, or for the `swerve` adapter the directory of the
+`swerve.php` given.
+
+An adapter's entry may take two more arguments, which swerve passes by name, as absolute paths,
+only when given on the command line: `$docroot` (`-t <dir>`) and `$file` (the file argument). What
+they mean is the adapter's: one serving plain PHP files can take the shape of PHP's built-in
+server, so that `swerve -t public router.php` serves like `php -S 127.0.0.1:8080 -t public
+router.php`. An entry without such a parameter stops swerve with exit code 2 when it is
+given; `-t` with the `swerve` adapter is a usage error (`--public` serves files in front of a
+`swerve.php`).
+
+```php
+function entry(string $appDir, ?string $docroot = null, ?string $file = null): Swerve\RequestHandler
+```
 
 ### Integrating a package with swerve
 

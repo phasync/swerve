@@ -21,7 +21,12 @@ return (function () {
     $seconds = fn ($value) => \is_numeric($value) && $value >= 0 ? null : 'A number of seconds (0 or more) required';
 
     $args->section('Application');
-    $args->add('swervefile', new Argument('swerve.php', 'A PHP file returning a Swerve\\RequestHandler, which runs once per request with a ClientRequest', './swerve.php'));
+    $args->add('swervefile', new Argument('file', 'With the swerve adapter: swerve.php, a PHP file returning a Swerve\\RequestHandler, which runs once per request with a ClientRequest (default: ./swerve.php). With another adapter: given to it (a router script, say, as for php -S)', './swerve.php'));
+    $args->add('docroot', new Option(
+        't', 'docroot', 'The document root, given to the adapter (one serving plain PHP files, say, as php -S does); not for the swerve adapter, see --public',
+        placeholder: 'dir',
+        validator: fn ($value) => \is_dir($value) ? null : "$value is not a directory",
+    ));
 
     $args->add('adapter', new Option(
         '', 'adapter', 'The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application\'s composer.json, the only installed adapter, else swerve',

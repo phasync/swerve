@@ -2,8 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- `-t, --docroot=<dir>` and the file argument reach an adapter's entry, by name and as absolute
+  paths, when given: `entry(string $appDir, ?string $docroot = null, ?string $file = null)`. An
+  adapter for plain PHP files can so take the shape of `php -S` (`swerve -t public router.php`).
+  An entry without such a parameter stops swerve (exit code 2) when it is given; `-t` with the
+  `swerve` adapter is a usage error that points at `--public`; a `-t` that is no directory, or a
+  file argument that does not exist, stops swerve at start.
+
 ### Changed
 
+- Adapters are looked up in the current directory, also when a file argument is given (it was
+  that file's directory). Giving a file with an adapter other than `swerve` passes it to the
+  adapter instead of being an error. The positional argument is `[file]` in `--help`.
 - The JIT runs as `opcache.jit=1054`, tracing without register allocation, instead of `tracing`.
   PHP 8.5's tracing JIT with register allocation can leave a variable undefined after an exception
   from an internal call (`Fiber::resume()`) is caught in the same function; phasync's event loop
