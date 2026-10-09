@@ -1,0 +1,8 @@
+{"packages": [
+  {"name": "phasync/swerve", "require": {"php": "^8.2", "phasync/phasync": "*", "psr/log-implementation": "*"}, "install-path": "../phasync/swerve"},
+  {"name": "phasync/phasync", "require": {"psr/log": "*", "ext-pcntl": "*"}, "install-path": "../phasync/phasync"},
+  {"name": "psr/log", "provide": {"psr/log-implementation": "1.0"}, "install-path": "../psr/log"},
+  {"name": "acme/adapter", "require": {"phasync/swerve": "*"}, "extra": {"swerve": {"adapter": "acme", "entry": "Acme\\Adapter\\entry"}}, "install-path": "../acme/adapter"},
+  {"name": "acme/app-lib", "require": {"psr/log": "*"}, "install-path": "../acme/app-lib"},
+  {"name": "acme/unrelated", "install-path": "../acme/unrelated"}
+]}

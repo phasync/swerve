@@ -241,7 +241,11 @@ less of a real one; `--no-access-log` turns it off.
 ## Adapters
 
 swerve is installed into the application's own `vendor/`, so the application and swerve share
-one version of each library. swerve accepts every major version of the PSR packages it uses
+one version of each library. Run as `vendor/bin/swerve`, the worker loads only swerve's own
+dependency closure (swerve, the installed adapters, and what they require), never the
+application's classes or its Composer `files`: an application that includes
+`vendor/autoload.php` itself (a plain PHP application under swerve-sapi) gets them fresh in every
+request, framework bootstraps included, as under php-fpm. swerve accepts every major version of the PSR packages it uses
 (`psr/log` 1 to 3, `psr/simple-cache` 1 to 3, `psr/http-message` 1 and 2), and Composer picks
 the one the application needs; `php tests/psr-versions.php` checks that every class loads with
 each.

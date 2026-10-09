@@ -168,6 +168,11 @@ final class Worker
      */
     public static function refreshAutoloader(): void
     {
+        if (WorkerAutoloader::isRegistered()) {
+            WorkerAutoloader::refresh();
+
+            return;
+        }
         foreach (ClassLoader::getRegisteredLoaders() as $vendorDir => $loader) {
             $loader->addClassMap(require "$vendorDir/composer/autoload_classmap.php");
             foreach (require "$vendorDir/composer/autoload_psr4.php" as $prefix => $paths) {

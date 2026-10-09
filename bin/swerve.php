@@ -23,10 +23,21 @@ use Swerve\Util\LoggingContext;
 use Swerve\Util\System;
 use Swerve\Util\Worker;
 
-// Composer's vendor/bin proxy says where the autoloader is. Otherwise: swerve's own vendor
-// directory in a checkout, or the project's when installed at vendor/phasync/swerve.
-require $GLOBALS['_composer_autoload_path']
-    ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
+// Composer's vendor/bin proxy says where the autoloader is. When swerve is installed in that
+// vendor directory (an application's), the worker loads only swerve's own dependency closure and
+// the adapters', never the application's classes or its Composer "files": a request's own
+// require of vendor/autoload.php then runs them fresh, as under php-fpm (see WorkerAutoloader).
+// Otherwise: that autoloader, or swerve's own vendor directory in a checkout, or the project's
+// when installed at vendor/phasync/swerve.
+require_once __DIR__ . '/../src/Util/WorkerAutoloader.php';
+if (isset($GLOBALS['_composer_autoload_path']) && \Swerve\Util\WorkerAutoloader::applies(\dirname($GLOBALS['_composer_autoload_path']))) {
+    $vendorDir = \dirname($GLOBALS['_composer_autoload_path']);
+    \Swerve\Util\WorkerAutoloader::register($vendorDir, (require "$vendorDir/composer/installed.php")['root']['install_path']);
+    unset($vendorDir);
+} else {
+    require $GLOBALS['_composer_autoload_path']
+        ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
+}
 
 // swerve is a long-running process, like Node.js: php.ini's limits for shared hosting don't apply,
 // and memory is the container's to bound. These settings override php.ini (which still loads the

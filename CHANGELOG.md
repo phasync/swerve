@@ -4,6 +4,14 @@
 
 ### Added
 
+- Run from an application's `vendor/bin`, with swerve installed in that vendor directory, the
+  worker loads only swerve's dependency closure: the packages reachable through `require` from
+  swerve, the installed adapters, and the root package when it declares an adapter, with their
+  classes from Composer's generated maps and their `files` (`Util\WorkerAutoloader`). The
+  application's classes and `files` (CakePHP's ORM bootstrap, Laravel's helpers) are no longer
+  declared and run at boot, where their statics were shared by every request; a request's own
+  `require 'vendor/autoload.php'` runs them fresh. Elsewhere (a checkout, a hand-wired
+  autoloader that doesn't list swerve), the autoloader is included as before.
 - `-t, --docroot=<dir>` and the file argument reach an adapter's entry, by name and as absolute
   paths, when given: `entry(string $appDir, ?string $docroot = null, ?string $file = null)`. An
   adapter for plain PHP files can so take the shape of `php -S` (`swerve -t public router.php`).
