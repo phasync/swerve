@@ -6,7 +6,7 @@
  * Loads every class of src/ against each major version of the psr/* packages this package's
  * composer.json allows, as an application's Composer may pick any of them: run N takes the Nth
  * allowed major of each package (its last for a package that allows fewer), so the first run is
- * every package at its lowest major, the last at its highest. A class whose signatures one
+ * every package at the lowest release it allows, the last at its highest major. A class whose signatures one
  * version's interfaces don't accept fails to load, and the run fails. Needs composer and network
  * (or composer's cache).
  */
@@ -26,7 +26,7 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$root/src
         continue;
     }
     $namespace = '';
-    $tokens    = \PhpToken::tokenize(\file_get_contents($file->getPathname()));
+    $tokens    = PhpToken::tokenize(\file_get_contents($file->getPathname()));
     foreach ($tokens as $i => $token) {
         if ($token->is(\T_NAMESPACE)) {
             $namespace = '';
@@ -34,9 +34,10 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$root/src
                 $namespace .= \trim($tokens[$j]->text);
             }
         } elseif ($token->is([\T_CLASS, \T_INTERFACE, \T_TRAIT, \T_ENUM]) && !$tokens[$i - 1]->is(\T_DOUBLE_COLON) && !$tokens[$i - 2]->is(\T_NEW)) {
-            for ($j = $i + 1; $tokens[$j]->is(\T_WHITESPACE); ++$j);
+            for ($j = $i + 1; $tokens[$j]->is(\T_WHITESPACE); ++$j) {
+            }
             if ($tokens[$j]->is(\T_STRING)) {
-                $classes[] = ltrim("$namespace\\{$tokens[$j]->text}", '\\');
+                $classes[] = \ltrim("$namespace\\{$tokens[$j]->text}", '\\');
             }
         }
     }
@@ -53,7 +54,8 @@ for ($run = 0; $run < $runs; ++$run) {
     $dir   = \sys_get_temp_dir() . '/psr-versions-' . \getmypid() . "-$run";
     \mkdir($dir);
     $args = \implode(' ', \array_map(fn ($n, $v) => \escapeshellarg("$n:^$v.0"), \array_keys($picked), $picked));
-    \exec("composer require --no-interaction --quiet --working-dir=" . \escapeshellarg($dir) . " $args 2>&1", $out, $code);
+    // The first run at the lowest release of each lowest major, the others at the newest
+    \exec('composer require --no-interaction --quiet --working-dir=' . \escapeshellarg($dir) . ($run ? '' : ' --prefer-lowest') . " $args 2>&1", $out, $code);
     if (0 !== $code) {
         echo "FAIL  $label: composer could not install it\n", \implode("\n", $out), "\n";
         $failed = true;
