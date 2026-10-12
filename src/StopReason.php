@@ -6,6 +6,8 @@ namespace Swerve;
  * Why a worker stops, see WorkerStoppingException.
  *
  * @topic production
+ *
+ * @example examples/StopReason/1-tell-the-client.php Tell the client why
  */
 enum StopReason
 {

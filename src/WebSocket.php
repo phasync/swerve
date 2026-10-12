@@ -61,6 +61,8 @@ use phasync\Util\Event;
  * @see Swerve::subscribe
  *
  * @topic websockets-and-sse
+ *
+ * @example examples/WebSocket/1-echo.php An echo server
  */
 final class WebSocket implements \IteratorAggregate
 {
@@ -172,6 +174,8 @@ final class WebSocket implements \IteratorAggregate
      * @param string[]                  $subprotocols see accept()
      * @param string[]|null             $origins      see accept()
      * @param int                       $maxMessage   see accept()
+     *
+     * @example examples/WebSocket.from/1-listen-and-push.php Listen to messages, push from a subscription
      */
     public static function from(ClientRequest $request, callable $callback, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): void
     {
@@ -211,6 +215,8 @@ final class WebSocket implements \IteratorAggregate
      * @param string[]      $subprotocols the subprotocols you speak, in your order of preference: the first one the client offered is chosen, and none when they share none
      * @param string[]|null $origins      the allowed `Origin`s (compared case-insensitively), null: any. A client that sends none (not a browser) is let through.
      * @param int           $maxMessage   the largest message received, in bytes; a larger one closes with 1009
+     *
+     * @example examples/WebSocket.accept/1-receive-loop.php Read with receive() and close yourself
      */
     public static function accept(ClientRequest $request, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): ?self
     {
@@ -241,6 +247,8 @@ final class WebSocket implements \IteratorAggregate
      * @param bool                        $hasBody      whether the request has a body (a handshake has none)
      * @param string[]                    $subprotocols see accept()
      * @param string[]|null               $origins      see accept()
+     *
+     * @example examples/WebSocket.handshake/1-decisions.php Decisions for four requests
      */
     public static function handshake(string $method, string $version, array $headers, bool $hasBody, array $subprotocols = [], ?array $origins = null): WebSocketHandshake
     {
@@ -295,6 +303,8 @@ final class WebSocket implements \IteratorAggregate
      * @param array<string, string|list<string>> $headers    the `101` response's headers, including `sec-websocket-accept`
      * @param callable(WebSocket): void          $callback
      * @param int                                $maxMessage the largest message received, in bytes; a larger one closes with 1009
+     *
+     * @example examples/WebSocket.upgrade/1-adapter.php An adapter's upgrade
      */
     public static function upgrade(ClientRequest $request, array $headers, callable $callback, int $maxMessage = self::MAX_MESSAGE): void
     {
@@ -310,6 +320,8 @@ final class WebSocket implements \IteratorAggregate
      *
      * @param callable(WebSocket): void $callback
      * @param int                       $maxMessage see upgrade()
+     *
+     * @example examples/WebSocket.run/1-own-101.php After a 101 of your own
      */
     public static function run(Duplex $connection, callable $callback, ?string $subprotocol = null, int $maxMessage = self::MAX_MESSAGE): void
     {
@@ -444,6 +456,8 @@ final class WebSocket implements \IteratorAggregate
      * @param string $data the message
      *
      * @see WebSocket::send
+     *
+     * @example examples/WebSocket.sendBinary/1-binary.php A binary message
      */
     public function sendBinary(string $data): void
     {
@@ -470,6 +484,8 @@ final class WebSocket implements \IteratorAggregate
      * @param string $reason the close frame's reason text: UTF-8, at most 123 bytes
      *
      * @throws \ValueError when the code may not be sent or the reason is too long or not UTF-8
+     *
+     * @example examples/WebSocket.end/1-close-code.php A close code of your own
      */
     public function end(int $code = 1000, string $reason = ''): void
     {

@@ -29,6 +29,8 @@ use phasync\IOException;
  * @see docs/websocket.md
  *
  * @topic websockets-and-sse
+ *
+ * @example examples/ServerSentEvents/1-event-stream.php An event stream
  */
 final class ServerSentEvents
 {
@@ -60,6 +62,8 @@ final class ServerSentEvents
     /**
      * The `Last-Event-ID` the client sent when it reconnected: the `id` of the last event it saw
      * before the connection dropped, or null at its first connection.
+     *
+     * @example examples/ServerSentEvents.lastEventId/1-resume.php Resume after the last event seen
      */
     public function lastEventId(): ?string
     {
@@ -83,6 +87,8 @@ final class ServerSentEvents
      * @param int|null    $retry milliseconds the browser waits before it reconnects
      *
      * @throws IOException when the client is gone
+     *
+     * @example examples/ServerSentEvents.send/1-event-fields.php Event names, ids and retry
      */
     public function send(string $data, ?string $event = null, ?string $id = null, ?int $retry = null): void
     {
@@ -109,6 +115,8 @@ final class ServerSentEvents
      * @param string $text what the comment says; line breaks become spaces
      *
      * @throws IOException when the client is gone
+     *
+     * @example examples/ServerSentEvents.comment/1-keep-alive.php Keep-alive comments
      */
     public function comment(string $text = ''): void
     {

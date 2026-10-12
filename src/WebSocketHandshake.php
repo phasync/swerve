@@ -11,6 +11,8 @@ namespace Swerve;
  * itself answers.
  *
  * @topic websockets-and-sse
+ *
+ * @example examples/WebSocketHandshake/1-accepted-or-refused.php Accepted and refused
  */
 final class WebSocketHandshake
 {

@@ -28,6 +28,8 @@ use Swerve\Util\Topics;
  * @see Swerve\Subscription
  *
  * @topic production
+ *
+ * @example examples/Swerve/1-one-process.php Messages and the cache within one process
  */
 final class Swerve
 {
@@ -64,6 +66,8 @@ final class Swerve
      * @see Swerve::setLog  replaces it
      *
      * @topic production
+     *
+     * @example examples/Swerve.log/1-default.php The logger before swerve sets one
      */
     public static function log(): LoggerInterface
     {
@@ -85,6 +89,8 @@ final class Swerve
      * @see Swerve::log
      *
      * @topic production
+     *
+     * @example examples/Swerve.setLog/1-own-logger.php Log through a PSR-3 logger of your own
      */
     public static function setLog(LoggerInterface $log): void
     {
@@ -122,6 +128,8 @@ final class Swerve
      * @see Swerve\OrderedChannel   when order between workers matters
      *
      * @topic publish-and-subscribe
+     *
+     * @example examples/Swerve.publish/1-to-subscribers.php Every subscriber gets every message
      */
     public static function publish(string $topic, mixed $message): void
     {
@@ -156,6 +164,9 @@ final class Swerve
      * @see Swerve\OrderedChannel   when every subscriber must see one common order
      *
      * @topic publish-and-subscribe
+     *
+     * @example examples/Swerve.subscribe/1-what-arrives.php What a subscriber receives for each kind of value
+     * @example examples/Swerve.subscribe/2-heartbeat.php A heartbeat for keep-alives
      */
     public static function subscribe(string $topic, float $maxLag = 30.0, ?float $heartbeat = null): Subscription
     {
@@ -179,8 +190,8 @@ final class Swerve
      *
      * ```php
      * $cache = Swerve::cache();
-     * $user  = $cache->get("user:$id") ?? load_user($id);
-     * $cache->set("user:$id", $user, 60);
+     * $user  = $cache->get("user.$id") ?? load_user($id);
+     * $cache->set("user.$id", $user, 60);
      * ```
      *
      * @return \Psr\SimpleCache\CacheInterface the same cache on every call
@@ -189,6 +200,8 @@ final class Swerve
      * @see Swerve::claim   when one worker at a time must do something
      *
      * @topic resource-management
+     *
+     * @example examples/Swerve.cache/1-read-through.php Load once, then read from the cache
      */
     public static function cache(): \Psr\SimpleCache\CacheInterface
     {
@@ -215,6 +228,8 @@ final class Swerve
      * @see Swerve::cache
      *
      * @topic resource-management
+     *
+     * @example examples/Swerve.claim/1-one-at-a-time.php Only one runs the report
      */
     public static function claim(string $name): Claim
     {
@@ -240,6 +255,8 @@ final class Swerve
      * @see Swerve::subscribe
      *
      * @topic production
+     *
+     * @example examples/Swerve.draining/1-during-a-drain.php False while serving, true once the drain begins
      */
     public static function draining(): bool
     {
@@ -279,6 +296,8 @@ final class Swerve
      * @see Swerve::draining
      *
      * @topic production
+     *
+     * @example examples/Swerve.onShutdown/1-websocket-goodbye.php Close a WebSocket with a reason when the server stops
      */
     public static function onShutdown(\Closure $callback): void
     {
@@ -301,6 +320,8 @@ final class Swerve
      * @throws \LogicException outside a coroutine
      *
      * @topic production
+     *
+     * @example examples/Swerve.awaitShutdown/1-timeout.php Wait with a timeout
      */
     public static function awaitShutdown(?float $timeout = null): bool
     {
@@ -349,6 +370,8 @@ final class Swerve
      * @see phasync\Context\SwitchAwareInterface
      *
      * @topic context-switching
+     *
+     * @example examples/Swerve.onRequestSwitch/1-timezone-per-request.php A timezone per request
      */
     public static function onRequestSwitch(\Closure $resume, \Closure $suspend): void
     {
@@ -387,6 +410,18 @@ final class Swerve
      * worker's event loop, so it may start coroutines that run for the worker's life. Register it
      * the way {@see Swerve::ini()} says; calls after startup change nothing. A callback that
      * throws stops the worker, as an application that fails to load does.
+     *
+     * ```php
+     * // a file in your package's composer.json "files"
+     * Swerve::onWorkerStart(function () {
+     *     phasync::go(function () {
+     *         while (true) {
+     *             refresh_feature_flags();
+     *             phasync::sleep(60);
+     *         }
+     *     });
+     * });
+     * ```
      *
      * @param \Closure():void $callback
      *
@@ -427,6 +462,8 @@ final class Swerve
      * @return string the version, or 'unknown' when Composer has none for `phasync/swerve`
      *
      * @topic production
+     *
+     * @example examples/Swerve.getVersion/1-version.php The installed version
      */
     public static function getVersion(): string
     {

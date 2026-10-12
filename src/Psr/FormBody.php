@@ -29,6 +29,8 @@ use Swerve\Swerve;
  * @see RequestBody
  *
  * @topic request-handlers
+ *
+ * @example examples/FormBody/1-fields.php The fields of a url-encoded form
  */
 final class FormBody
 {
@@ -53,6 +55,8 @@ final class FormBody
     /**
      * The form of a request with this method and Content-Type, or null when PHP would not parse
      * its body.
+     *
+     * @example examples/FormBody.for/1-which-bodies.php Which requests have a form
      */
     public static function for(string $method, string $contentType, StreamInterface $body): ?self
     {
@@ -78,7 +82,11 @@ final class FormBody
         return $this->fields;
     }
 
-    /** $_FILES, as PSR-7 UploadedFileInterface objects. */
+    /**
+     * $_FILES, as PSR-7 UploadedFileInterface objects.
+     *
+     * @example examples/FormBody.files/1-upload.php An uploaded file
+     */
     public function files(): array
     {
         $this->parse();
@@ -89,6 +97,8 @@ final class FormBody
     /**
      * php://input: an url-encoded body's bytes, still readable after parsing; a multipart one's
      * are used up by the parser, as in PHP.
+     *
+     * @example examples/FormBody.input/1-raw-bytes.php The raw bytes after parsing
      */
     public function input(): StreamInterface
     {

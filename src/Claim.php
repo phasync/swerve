@@ -40,6 +40,8 @@ use Swerve\Util\System;
  * @see Swerve::draining
  *
  * @topic resource-management
+ *
+ * @example examples/Claim/1-handle.php Two handles on one name
  */
 final class Claim
 {
@@ -129,6 +131,8 @@ final class Claim
      *
      * @see Claim::release
      * @see Claim::available
+     *
+     * @example examples/Claim.acquire/1-wait-for-it.php Wait for the holder to finish
      */
     public function acquire(float $timeout = 0.0): ?static
     {
@@ -158,6 +162,8 @@ final class Claim
      * Does nothing when this handle holds nothing.
      *
      * @see Claim::acquire
+     *
+     * @example examples/Claim.release/1-release-early.php Release before the handle goes
      */
     public function release(): void
     {

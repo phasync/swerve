@@ -38,6 +38,8 @@ use phasync\Net\Duplex;
  * @see RequestHandler
  *
  * @topic request-handlers
+ *
+ * @example examples/ClientRequest/1-hello.php Read the request, write the response
  */
 interface ClientRequest extends Duplex
 {
@@ -70,13 +72,19 @@ interface ClientRequest extends Duplex
      * @param array<string, string|list<string>> $headers
      *
      * @throws HeadersSentException when the final head was committed already
+     *
+     * @example examples/ClientRequest.sendResponseHeaders/1-interim-and-final.php An interim 103 and a final 201
      */
     public function sendResponseHeaders(int $status, array $headers = []): void;
 
     /** Whether the final head is committed (it may still be held back until the first body bytes). */
     public function headersSent(): bool;
 
-    /** Commit the head (an implicit `200`) and put it on the wire, with nothing buffered. */
+    /**
+     * Commit the head (an implicit `200`) and put it on the wire, with nothing buffered.
+     *
+     * @example examples/ClientRequest.flush/1-progress.php Put the head on the wire before the work
+     */
     public function flush(): void;
 
     /**
@@ -86,6 +94,8 @@ interface ClientRequest extends Duplex
      * @param resource $stream a readable stream, such as fopen()'s
      * @param int|null $offset where to start reading, null: where the stream is
      * @param int|null $length how many bytes, null: to the end
+     *
+     * @example examples/ClientRequest.sendFile/1-part-of-a-file.php Send part of a file
      */
     public function sendFile($stream, ?int $offset = null, ?int $length = null): void;
 
@@ -97,6 +107,8 @@ interface ClientRequest extends Duplex
      * @param array<string, string|list<string>>|null $trailers
      *
      * @throws \LogicException when there is a content-length, or the client is HTTP/1.0, or the response may not have them
+     *
+     * @example examples/ClientRequest.end/1-trailers.php Trailers after a chunked body
      */
     public function end(?array $trailers = null): void;
 }

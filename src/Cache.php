@@ -13,8 +13,8 @@ use Swerve\Util\Topics;
  *
  * ```php
  * $cache = Swerve::cache();
- * $user  = $cache->get("user:$id") ?? load_user($id);
- * $cache->set("user:$id", $user, 60);
+ * $user  = $cache->get("user.$id") ?? load_user($id);
+ * $cache->set("user.$id", $user, 60);
  * ```
  *
  * Two layers. Each worker keeps what it read (and what it found missing) in a local layer of
@@ -45,6 +45,8 @@ use Swerve\Util\Topics;
  * @see Swerve\CacheKeyException
  *
  * @topic resource-management
+ *
+ * @example examples/Cache/1-shared-cache.php Set, get and expire values
  */
 final class Cache implements CacheInterface
 {
@@ -103,7 +105,7 @@ final class Cache implements CacheInterface
      * The value stored under `$key`, or `$default` when there is none or it has expired.
      *
      * ```php
-     * $user = Swerve::cache()->get("user:$id") ?? load_user($id);
+     * $user = Swerve::cache()->get("user.$id") ?? load_user($id);
      * ```
      *
      * @throws CacheKeyException for an invalid key
@@ -146,6 +148,8 @@ final class Cache implements CacheInterface
      *
      * @throws CacheKeyException for an invalid key
      * @param string $key
+     *
+     * @example examples/Cache.has/1-null-and-missing.php A stored null and a missing key
      */
     public function has($key): bool
     {
@@ -159,7 +163,7 @@ final class Cache implements CacheInterface
      * forget the key and fetches the new value when it next reads it.
      *
      * ```php
-     * Swerve::cache()->set("user:$id", $user, 60);
+     * Swerve::cache()->set("user.$id", $user, 60);
      * ```
      *
      * @param string                 $key
@@ -188,6 +192,8 @@ final class Cache implements CacheInterface
      *
      * @throws CacheKeyException for an invalid key
      * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
+     *
+     * @example examples/Cache.setMultiple/1-several-at-once.php Several values with one ttl
      */
     public function setMultiple($values, $ttl = null): bool
     {
@@ -219,6 +225,8 @@ final class Cache implements CacheInterface
      * @throws CacheKeyException for an invalid key
      * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      * @param string $key
+     *
+     * @example examples/Cache.delete/1-forget.php Delete one key, or several
      */
     public function delete($key): bool
     {
@@ -242,6 +250,8 @@ final class Cache implements CacheInterface
      * Remove everything from the cache of every worker.
      *
      * @throws \LogicException directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
+     *
+     * @example examples/Cache.clear/1-empty.php Empty the cache
      */
     public function clear(): bool
     {

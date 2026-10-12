@@ -462,8 +462,8 @@ limits, results that are costly to make.
 
 ```php
 $cache = Swerve::cache();
-$user  = $cache->get("user:$id") ?? load_user($id);
-$cache->set("user:$id", $user, 60);
+$user  = $cache->get("user.$id") ?? load_user($id);
+$cache->set("user.$id", $user, 60);
 ```
 
 - Each worker keeps what it read in a local layer (8 MiB), so a repeated read costs about a

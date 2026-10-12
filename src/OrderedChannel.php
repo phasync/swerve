@@ -30,6 +30,8 @@ use Swerve\Util\OrderedLog;
  * @see Swerve\Subscription
  *
  * @topic publish-and-subscribe
+ *
+ * @example examples/OrderedChannel/1-one-order.php One order for every subscriber
  */
 final class OrderedChannel implements \IteratorAggregate
 {
@@ -61,6 +63,8 @@ final class OrderedChannel implements \IteratorAggregate
      *
      * @see OrderedChannel::subscribe
      * @see Swerve::publish
+     *
+     * @example examples/OrderedChannel.write/1-no-subscriber.php Nothing is kept without a subscriber
      */
     public function write(mixed $message): void
     {
@@ -97,6 +101,8 @@ final class OrderedChannel implements \IteratorAggregate
      * Subscribes with the defaults, so `foreach ($channel as $message)` subscribes at the foreach.
      *
      * @see OrderedChannel::subscribe
+     *
+     * @example examples/OrderedChannel.getIterator/1-foreach.php Subscribe at the foreach
      */
     public function getIterator(): Subscription
     {

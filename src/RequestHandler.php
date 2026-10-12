@@ -16,6 +16,8 @@ namespace Swerve;
  * finished, and the connection serves its next request.
  *
  * @topic request-handlers
+ *
+ * @example examples/RequestHandler/1-hello-world.php Hello, world
  */
 final class RequestHandler
 {

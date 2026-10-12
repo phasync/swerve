@@ -18,6 +18,8 @@ namespace Swerve;
  * @see Swerve\Cache
  *
  * @topic resource-management
+ *
+ * @example examples/CacheKeyException/1-invalid-key.php Keys the cache refuses
  */
 final class CacheKeyException extends \InvalidArgumentException implements \Psr\SimpleCache\InvalidArgumentException
 {

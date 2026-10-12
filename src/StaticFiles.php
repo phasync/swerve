@@ -26,6 +26,8 @@ namespace Swerve;
  * ```
  *
  * @topic request-handlers
+ *
+ * @example examples/StaticFiles/1-public-directory.php Files, and the application for the rest
  */
 final class StaticFiles
 {
@@ -70,6 +72,8 @@ final class StaticFiles
      * @param \Closure(ClientRequest): void $app the application's handler
      *
      * @return \Closure(ClientRequest): void
+     *
+     * @example examples/StaticFiles.wrap/1-ranges-and-revalidation.php Ranges, revalidation, and no PHP sources
      */
     public function wrap(\Closure $app): \Closure
     {

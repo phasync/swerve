@@ -11,6 +11,8 @@ use phasync\ShutdownException;
  * needs to stop catches nothing. `$reason` says why, for telling a client what happens next.
  *
  * @topic production
+ *
+ * @example examples/WorkerStoppingException/1-cleanup.php Clean up when the worker stops
  */
 final class WorkerStoppingException extends ShutdownException
 {

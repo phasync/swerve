@@ -27,6 +27,8 @@ namespace Swerve\Util;
  * @see Swerve::subscribe
  *
  * @topic publish-and-subscribe
+ *
+ * @example examples/SealedObject/1-read-only.php A read-only message
  */
 final class SealedObject implements \IteratorAggregate, \JsonSerializable
 {
@@ -45,6 +47,8 @@ final class SealedObject implements \IteratorAggregate, \JsonSerializable
     /**
      * What json_decode() (without assoc) returned, with its objects replaced by SealedObjects; the
      * objects inside one are wrapped when first read.
+     *
+     * @example examples/SealedObject.seal/1-decoded-value.php Seal a decoded value
      */
     public static function seal(mixed $value): mixed
     {

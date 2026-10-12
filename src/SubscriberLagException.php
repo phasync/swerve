@@ -23,6 +23,8 @@ namespace Swerve;
  * @see Swerve\Subscription
  *
  * @topic publish-and-subscribe
+ *
+ * @example examples/SubscriberLagException/1-too-slow.php A subscriber that fell behind
  */
 class SubscriberLagException extends \RuntimeException
 {

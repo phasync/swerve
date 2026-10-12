@@ -21,6 +21,8 @@ use Swerve\ClientRequest;
  * body, the same way for every framework: {@see FormBody} is its form data, parsed the same way too.
  *
  * @topic request-handlers
+ *
+ * @example examples/RequestBody/1-read-as-it-arrives.php Read a body as it arrives
  */
 final class RequestBody implements StreamInterface
 {

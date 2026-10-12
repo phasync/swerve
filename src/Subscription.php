@@ -35,6 +35,8 @@ use Swerve\Util\Topics;
  * @see Swerve\OrderedChannel
  *
  * @topic publish-and-subscribe
+ *
+ * @example examples/Subscription/1-ends-with-reference.php A subscription ends with its last reference
  */
 final class Subscription implements \IteratorAggregate
 {
