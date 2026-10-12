@@ -59,6 +59,8 @@ use phasync\Util\Event;
  * @see ServerSentEvents
  * @see Swerve::publish
  * @see Swerve::subscribe
+ *
+ * @topic websockets-and-sse
  */
 final class WebSocket implements \IteratorAggregate
 {

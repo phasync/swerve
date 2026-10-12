@@ -28,6 +28,8 @@ use Swerve\Util\OrderedLog;
  * @see Swerve::publish
  * @see Swerve::subscribe
  * @see Swerve\Subscription
+ *
+ * @topic publish-and-subscribe
  */
 final class OrderedChannel implements \IteratorAggregate
 {

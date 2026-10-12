@@ -26,6 +26,8 @@ use Swerve\Util\Topics;
  * @see Swerve\Cache
  * @see Swerve\Claim
  * @see Swerve\Subscription
+ *
+ * @topic production
  */
 final class Swerve
 {
@@ -60,6 +62,8 @@ final class Swerve
      * @return LoggerInterface the log of this process
      *
      * @see Swerve::setLog  replaces it
+     *
+     * @topic production
      */
     public static function log(): LoggerInterface
     {
@@ -79,6 +83,8 @@ final class Swerve
      * @param LoggerInterface $log returned by every later call of `Swerve::log()`
      *
      * @see Swerve::log
+     *
+     * @topic production
      */
     public static function setLog(LoggerInterface $log): void
     {
@@ -114,6 +120,8 @@ final class Swerve
      *
      * @see Swerve::subscribe       receives the messages
      * @see Swerve\OrderedChannel   when order between workers matters
+     *
+     * @topic publish-and-subscribe
      */
     public static function publish(string $topic, mixed $message): void
     {
@@ -146,6 +154,8 @@ final class Swerve
      *
      * @see Swerve::publish         sends the messages
      * @see Swerve\OrderedChannel   when every subscriber must see one common order
+     *
+     * @topic publish-and-subscribe
      */
     public static function subscribe(string $topic, float $maxLag = 30.0, ?float $heartbeat = null): Subscription
     {
@@ -177,6 +187,8 @@ final class Swerve
      *
      * @see Swerve\Cache
      * @see Swerve::claim   when one worker at a time must do something
+     *
+     * @topic resource-management
      */
     public static function cache(): \Psr\SimpleCache\CacheInterface
     {
@@ -201,6 +213,8 @@ final class Swerve
      *
      * @see Swerve\Claim
      * @see Swerve::cache
+     *
+     * @topic resource-management
      */
     public static function claim(string $name): Claim
     {
@@ -224,6 +238,8 @@ final class Swerve
      *
      * @see Swerve::onShutdown
      * @see Swerve::subscribe
+     *
+     * @topic production
      */
     public static function draining(): bool
     {
@@ -261,6 +277,8 @@ final class Swerve
      *
      * @see Swerve::awaitShutdown    to wait for it in sequential code
      * @see Swerve::draining
+     *
+     * @topic production
      */
     public static function onShutdown(\Closure $callback): void
     {
@@ -281,6 +299,8 @@ final class Swerve
      * @return bool true once it must (at once if it must already), false when `$timeout` passed first
      *
      * @throws \LogicException outside a coroutine
+     *
+     * @topic production
      */
     public static function awaitShutdown(?float $timeout = null): bool
     {
@@ -327,6 +347,8 @@ final class Swerve
      * @param \Closure(ClientRequest):void $suspend a coroutine of a different request is about to run
      *
      * @see phasync\Context\SwitchAwareInterface
+     *
+     * @topic context-switching
      */
     public static function onRequestSwitch(\Closure $resume, \Closure $suspend): void
     {
@@ -347,6 +369,8 @@ final class Swerve
      * ```
      *
      * @param array<string, string|int|float|bool> $settings
+     *
+     * @topic production
      */
     public static function ini(array $settings): void
     {
@@ -365,6 +389,8 @@ final class Swerve
      * throws stops the worker, as an application that fails to load does.
      *
      * @param \Closure():void $callback
+     *
+     * @topic production
      */
     public static function onWorkerStart(\Closure $callback): void
     {
@@ -399,6 +425,8 @@ final class Swerve
      * The installed version, as Composer knows it: `0.1.0`, or `dev-main` in a checkout.
      *
      * @return string the version, or 'unknown' when Composer has none for `phasync/swerve`
+     *
+     * @topic production
      */
     public static function getVersion(): string
     {

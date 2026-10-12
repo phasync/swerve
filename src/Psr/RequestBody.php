@@ -19,12 +19,16 @@ use Swerve\ClientRequest;
  *
  * A framework adapter (swerve-psr15, Symfony, Tether) builds one of these for a {@see ClientRequest}'s
  * body, the same way for every framework: {@see FormBody} is its form data, parsed the same way too.
+ *
+ * @topic request-handlers
  */
 final class RequestBody implements StreamInterface
 {
     private int $position = 0;
 
     /**
+     * Wrap the body of `$request`; nothing is read until the application reads.
+     *
      * @param ClientRequest $request the exchange whose body this is
      * @param int|null      $size    the body's size when the request declared it, null when it is chunked
      */
@@ -32,6 +36,7 @@ final class RequestBody implements StreamInterface
     {
     }
 
+    /** The rest of the body, read to its end: `getContents()`. */
     public function __toString(): string
     {
         return $this->getContents();

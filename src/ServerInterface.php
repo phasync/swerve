@@ -15,6 +15,8 @@ namespace Swerve;
  * ```
  *
  * @see Swerve\ClientRequest
+ *
+ * @topic request-handlers
  */
 interface ServerInterface
 {

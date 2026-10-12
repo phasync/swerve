@@ -25,6 +25,8 @@ namespace Swerve\Util;
  *
  * @see Swerve::publish
  * @see Swerve::subscribe
+ *
+ * @topic publish-and-subscribe
  */
 final class SealedObject implements \IteratorAggregate, \JsonSerializable
 {

@@ -27,6 +27,8 @@ use phasync\IOException;
  * and to keep proxies from closing the idle stream.
  *
  * @see docs/websocket.md
+ *
+ * @topic websockets-and-sse
  */
 final class ServerSentEvents
 {

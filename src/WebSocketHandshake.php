@@ -9,10 +9,14 @@ namespace Swerve;
  * $status`), `$headers` are those of the `101` response and `$subprotocol` is the one chosen.
  * Refused (426, 400 or 403), `$headers` and `$body` are the complete final response, as swerve
  * itself answers.
+ *
+ * @topic websockets-and-sse
  */
 final class WebSocketHandshake
 {
     /**
+     * The decision as {@see WebSocket::handshake()} makes it.
+     *
      * @param array<string, string> $headers lowercase name => value
      */
     public function __construct(

@@ -36,6 +36,8 @@ use phasync\Net\Duplex;
  * what the client sent behind its Upgrade request.
  *
  * @see RequestHandler
+ *
+ * @topic request-handlers
  */
 interface ClientRequest extends Duplex
 {

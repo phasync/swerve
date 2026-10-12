@@ -16,6 +16,8 @@ namespace Swerve;
  * ```
  *
  * @see Swerve\Cache
+ *
+ * @topic resource-management
  */
 final class CacheKeyException extends \InvalidArgumentException implements \Psr\SimpleCache\InvalidArgumentException
 {

@@ -38,6 +38,8 @@ use Swerve\Util\System;
  * @see Swerve::claim
  * @see Swerve::cache
  * @see Swerve::draining
+ *
+ * @topic resource-management
  */
 final class Claim
 {

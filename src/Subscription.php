@@ -33,6 +33,8 @@ use Swerve\Util\Topics;
  * @see Swerve::subscribe
  * @see Swerve::publish
  * @see Swerve\OrderedChannel
+ *
+ * @topic publish-and-subscribe
  */
 final class Subscription implements \IteratorAggregate
 {

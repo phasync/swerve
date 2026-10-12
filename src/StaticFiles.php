@@ -24,6 +24,8 @@ namespace Swerve;
  *     // what is not a file
  * }));
  * ```
+ *
+ * @topic request-handlers
  */
 final class StaticFiles
 {

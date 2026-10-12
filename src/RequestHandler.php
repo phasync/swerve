@@ -14,10 +14,16 @@ namespace Swerve;
  *
  * The callable gets a {@see ClientRequest} and returns when it is done: the response is then
  * finished, and the connection serves its next request.
+ *
+ * @topic request-handlers
  */
 final class RequestHandler
 {
-    /** @param \Closure(ClientRequest): void $handler */
+    /**
+     * Wrap the callable that serves each exchange.
+     *
+     * @param \Closure(ClientRequest): void $handler
+     */
     public function __construct(public readonly \Closure $handler)
     {
     }

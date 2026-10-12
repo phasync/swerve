@@ -27,6 +27,8 @@ use Swerve\Swerve;
  * max_input_vars fields, where PHP's own POST parser keeps one more.
  *
  * @see RequestBody
+ *
+ * @topic request-handlers
  */
 final class FormBody
 {
@@ -93,6 +95,7 @@ final class FormBody
         return $this->input ?? $this->body;
     }
 
+    /** Delete the uploaded files' temporary copies that were not moved with `moveTo()`. */
     public function __destruct()
     {
         foreach ($this->temporary as $file) {

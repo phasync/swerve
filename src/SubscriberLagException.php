@@ -21,6 +21,8 @@ namespace Swerve;
  *
  * @see Swerve::subscribe
  * @see Swerve\Subscription
+ *
+ * @topic publish-and-subscribe
  */
 class SubscriberLagException extends \RuntimeException
 {

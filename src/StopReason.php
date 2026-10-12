@@ -2,7 +2,11 @@
 
 namespace Swerve;
 
-/** Why a worker stops, see WorkerStoppingException. */
+/**
+ * Why a worker stops, see WorkerStoppingException.
+ *
+ * @topic production
+ */
 enum StopReason
 {
     /** swerve stops: SIGTERM, Ctrl+C, or the master died. Tell clients the server is going away. */

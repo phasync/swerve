@@ -43,6 +43,8 @@ use Swerve\Util\Topics;
  * @see Swerve::cache
  * @see Swerve::claim
  * @see Swerve\CacheKeyException
+ *
+ * @topic resource-management
  */
 final class Cache implements CacheInterface
 {
@@ -160,6 +162,7 @@ final class Cache implements CacheInterface
      * Swerve::cache()->set("user:$id", $user, 60);
      * ```
      *
+     * @param string                 $key
      * @param int|\DateInterval|null $ttl seconds, an interval, or null for no expiry; zero or less deletes the key
      *
      * @return bool false when the value is larger than the cache holds
@@ -169,7 +172,6 @@ final class Cache implements CacheInterface
      *
      * @see Cache::get
      * @see Cache::delete
-     * @param string $key
      */
     public function set($key, mixed $value, $ttl = null): bool
     {
