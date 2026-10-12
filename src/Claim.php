@@ -39,7 +39,7 @@ use Swerve\Util\System;
  * @see Swerve::cache
  * @see Swerve::draining
  *
- * @topic resource-management
+ * @topic coordination-across-workers
  *
  * @example examples/Claim/1-handle.php Two handles on one name
  */

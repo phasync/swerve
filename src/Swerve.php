@@ -27,7 +27,7 @@ use Swerve\Util\Topics;
  * @see Swerve\Claim
  * @see Swerve\Subscription
  *
- * @topic production
+ * @topic request-handlers
  *
  * @example examples/Swerve/1-one-process.php Messages and the cache within one process
  */
@@ -127,7 +127,7 @@ final class Swerve
      * @see Swerve::subscribe       receives the messages
      * @see Swerve\OrderedChannel   when order between workers matters
      *
-     * @topic publish-and-subscribe
+     * @topic coordination-across-workers
      *
      * @example examples/Swerve.publish/1-to-subscribers.php Every subscriber gets every message
      */
@@ -163,7 +163,7 @@ final class Swerve
      * @see Swerve::publish         sends the messages
      * @see Swerve\OrderedChannel   when every subscriber must see one common order
      *
-     * @topic publish-and-subscribe
+     * @topic coordination-across-workers
      *
      * @example examples/Swerve.subscribe/1-what-arrives.php What a subscriber receives for each kind of value
      * @example examples/Swerve.subscribe/2-heartbeat.php A heartbeat for keep-alives
@@ -227,7 +227,7 @@ final class Swerve
      * @see Swerve\Claim
      * @see Swerve::cache
      *
-     * @topic resource-management
+     * @topic coordination-across-workers
      *
      * @example examples/Swerve.claim/1-one-at-a-time.php Only one runs the report
      */

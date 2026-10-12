@@ -29,7 +29,7 @@ use Swerve\Util\OrderedLog;
  * @see Swerve::subscribe
  * @see Swerve\Subscription
  *
- * @topic publish-and-subscribe
+ * @topic coordination-across-workers
  *
  * @example examples/OrderedChannel/1-one-order.php One order for every subscriber
  */

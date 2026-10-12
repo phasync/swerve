@@ -26,7 +26,7 @@ namespace Swerve\Util;
  * @see Swerve::publish
  * @see Swerve::subscribe
  *
- * @topic publish-and-subscribe
+ * @topic coordination-across-workers
  *
  * @example examples/SealedObject/1-read-only.php A read-only message
  */

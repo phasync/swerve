@@ -22,7 +22,7 @@ namespace Swerve;
  * @see Swerve::subscribe
  * @see Swerve\Subscription
  *
- * @topic publish-and-subscribe
+ * @topic coordination-across-workers
  *
  * @example examples/SubscriberLagException/1-too-slow.php A subscriber that fell behind
  */

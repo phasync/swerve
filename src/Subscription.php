@@ -34,7 +34,7 @@ use Swerve\Util\Topics;
  * @see Swerve::publish
  * @see Swerve\OrderedChannel
  *
- * @topic publish-and-subscribe
+ * @topic coordination-across-workers
  *
  * @example examples/Subscription/1-ends-with-reference.php A subscription ends with its last reference
  */
