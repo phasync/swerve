@@ -154,3 +154,22 @@ test('end() does not let a second canceller of the same read crash it: phasync::
         expect($ws->isClosed())->toBeTrue();
     });
 });
+
+test('the ping service ends with its run() and starts again for a WebSocket of the next run()', function () {
+    $interval               = WebSocket::$pingInterval;
+    WebSocket::$pingInterval = 0.02;
+    try {
+        foreach ([1, 2] as $run) {
+            $connection = new MemoryDuplex();
+            phasync::run(function () use ($connection) {
+                WebSocket::run($connection, function (WebSocket $ws) {
+                    phasync::sleep(0.07);
+                    $ws->end(1000);
+                });
+            });
+            expect($connection->sent)->toStartWith("\x89\x00"); // a ping before the close
+        }
+    } finally {
+        WebSocket::$pingInterval = $interval;
+    }
+});
