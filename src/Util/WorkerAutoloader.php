@@ -175,9 +175,10 @@ final class WorkerAutoloader
         }
     }
 
+    /** Whether $path is a package's install path or under one; the prefixes end with '/', and so does $path here, so a directory equal to one counts. */
     private static function inClosure(string $path): bool
     {
-        $path = self::normalize($path);
+        $path = self::normalize($path) . '/';
         foreach (self::$exclude as $prefix) {
             if (\str_starts_with($path, $prefix)) {
                 foreach (self::$include as $included) {

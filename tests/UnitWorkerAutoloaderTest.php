@@ -47,3 +47,8 @@ test('a root package that declares an adapter with its entry is in the closure, 
     );
     expect($loads)->toBe([true, true, false, ['phasync files', 'adapter files', 'app-lib files', 'app files']]);
 });
+
+test('a package whose PSR-4 directory is its install path is in the closure; one whose path only starts with it is not', function () {
+    expect(worker_autoload('echo json_encode([class_exists("Acme\\\\Flat\\\\Root"), class_exists("Acme\\\\Flatter\\\\Root")]);'))
+        ->toBe([true, false]);
+});
