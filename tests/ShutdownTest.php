@@ -95,14 +95,14 @@ test('a callback of a request that ended never runs, and what it holds is freed 
         $probes = [];
         $ran    = [];
         for ($i = 0; $i < 3; ++$i) {
-            phasync::withContext(function () use (&$probes, &$ran, $i) {
+            (new Scope())->run(phasync::run(...), function () use (&$probes, &$ran, $i) {
                 $probe    = new stdClass();
                 $probes[] = WeakReference::create($probe);
                 Swerve::onShutdown(static function () use ($probe, &$ran, $i) {
                     $ran[] = $i;
                 });
                 phasync::sleep(0.01);
-            }, new stdClass());
+            });
         }
         phasync::sleep(0.7); // phasync collects cycles half a second after a coroutine ends
         gc_collect_cycles();
@@ -122,12 +122,12 @@ test('a callback of a coroutine that is still running does run, also when anothe
         $ran = [];
         $ctx = static function (string $name, float $for) use (&$ran) {
             return phasync::go(function () use ($name, $for, &$ran) {
-                phasync::withContext(function () use ($name, $for, &$ran) {
+                (new Scope())->run(phasync::run(...), function () use ($name, $for, &$ran) {
                     Swerve::onShutdown(static function () use ($name, &$ran) {
                         $ran[] = $name;
                     });
                     phasync::sleep($for);
-                }, new stdClass());
+                });
             });
         };
         $long = $ctx('long', 0.5);
@@ -142,6 +142,30 @@ test('a callback of a coroutine that is still running does run, also when anothe
     shutdown_reset();
 
     expect($got)->toBe(['long']);
+});
+
+test('a callback runs in the scope of the request that registered it', function () {
+    $got = phasync::run(function () {
+        $scope = new Scope();
+        $ran   = null;
+        $long  = phasync::go(function () use ($scope, &$ran) {
+            $scope->run(phasync::run(...), function () use (&$ran) {
+                Swerve::onShutdown(static function () use (&$ran) {
+                    $ran = Scope::getCurrent();
+                });
+                phasync::sleep(0.2);
+            });
+        });
+        phasync::sleep(0.01);
+        Topics::drain();
+        phasync::sleep(0.05);
+        phasync::await($long);
+
+        return $ran === $scope;
+    });
+    shutdown_reset();
+
+    expect($got)->toBeTrue();
 });
 
 test('awaitShutdown() waits for the shutdown, or the timeout', function () {

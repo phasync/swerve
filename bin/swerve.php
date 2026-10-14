@@ -19,7 +19,6 @@ use Swerve\Swerve;
 use Swerve\Util\Adapters;
 use Swerve\Util\Cluster;
 use Swerve\Util\Logger;
-use Swerve\Util\LoggingContext;
 use Swerve\Util\System;
 use Swerve\Util\Worker;
 
@@ -333,6 +332,10 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $files = '' !== $args->public ? new StaticFiles($args->public) : null;
     $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
     phasync::run(static function () use ($swerveFile, $appDir, $adapter, $entry, $entryArgs, $args, $logger, $worker, $http, $files, $proxies) {
+        // A coroutine of the worker or a service (each request's frame has its own handler, see
+        // HttpConnection) that fails with nobody awaiting it is logged, and the worker serves on:
+        // without a handler the failure would end this run() once every other coroutine had
+        phasync::frame()->setExceptionHandler(static fn (\Throwable $e) => $logger->error('Unhandled exception in a coroutine: {exception}', ['exception' => $e]));
         try {
             Swerve::startWorker();
         } catch (\Throwable $e) {
@@ -394,6 +397,6 @@ foreach ([\STDOUT, \STDERR] as $out) {
             $worker->serve($server->run(...), $server->drain(...));
         }
         $worker->ready();
-    }, [], new LoggingContext($logger));
+    });
     exit(0);
 })();

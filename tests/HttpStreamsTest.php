@@ -607,8 +607,8 @@ test('phasync::finally() in the handler runs after the whole response, streamed 
     }
 });
 
-test('a request run in a switch-aware context keeps its own static property while requests overlap in one worker', function () {
-    [$master, $addr] = native_start(workers: 1);
+test('a request keeps its own static property, swapped by a phasync::onScopeChange() hook, while requests overlap in one worker', function () {
+    [$master, $addr] = native_start(workers: 1, env: ['SWERVE_TEST_SCOPE_HOOK' => '1']);
     try {
         $conns = [];
         foreach (['a', 'b', 'c'] as $v) {
@@ -623,24 +623,22 @@ test('a request run in a switch-aware context keeps its own static property whil
     }
 });
 
-test('each request gets a phasync context of its own, created when its code asks for one, shared by the coroutines it starts', function () {
+test('each request runs in a Scope of its own, shared by the coroutines it starts', function () {
     $seen    = [];
     $handler = function (ClientRequest $r) use (&$seen) {
-        $seen[] = [phasync::getContext(), phasync::await(phasync::go(static fn () => phasync::getContext()))];
+        $seen[] = [Scope::getCurrent(), phasync::await(phasync::go(static fn () => Scope::getCurrent()))];
         streams_answer($r, 'ok');
     };
-    $never = fn (ClientRequest $r) => streams_answer($r, 'none');
-    foreach ([$handler, $never] as $h) {
-        serve_in_process($h, function ($conn) {
-            client_write($conn, "GET /a HTTP/1.1\r\nHost: t\r\n\r\nGET /b HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+    serve_in_process($handler, function ($conn) {
+        client_write($conn, "GET /a HTTP/1.1\r\nHost: t\r\n\r\nGET /b HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
 
-            return array_column(parse_responses(client_read_all($conn)), 'status');
-        });
-    }
+        return array_column(parse_responses(client_read_all($conn)), 'status');
+    });
     expect($seen)->toHaveCount(2);
     expect($seen[0][0])->toBe($seen[0][1]);
     expect($seen[1][0])->toBe($seen[1][1]);
     expect($seen[0][0])->not->toBe($seen[1][0]);
+    expect($seen[0][0])->not->toBe(Scope::getRootScope());
 });
 
 test('the client has the whole response while the request\'s own work goes on, and the connection closes after it', function () {

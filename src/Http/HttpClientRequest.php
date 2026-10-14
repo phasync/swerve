@@ -438,7 +438,7 @@ final class HttpClientRequest implements ClientRequest
         }
         if (!$this->keepAlive) {
             // The client sees the response end now, also a body that ends at the close, while
-            // the request's own coroutines go on in the context
+            // the request's own coroutines go on in its frame
             $c->io->end();
             $c->linger = true;
 

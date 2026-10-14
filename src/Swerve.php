@@ -4,7 +4,6 @@ namespace Swerve;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
-use Swerve\Util\RequestSwitch;
 use Swerve\Util\Shutdown;
 use Swerve\Util\Topics;
 
@@ -274,8 +273,9 @@ final class Swerve
      * passed already. Its waits get the worker's {@see WorkerStoppingException} too: write a
      * goodbye inside `phasync::shielded()`.
      *
-     * The callback belongs to the request (or coroutine context) that registered it, and goes
-     * when that request ends, without running: swerve holds no reference to the request. phasync
+     * The callback belongs to the `Scope` that registered it (a request's, or outside any request
+     * the root scope), runs in it, and goes when that request ends, without running: swerve holds
+     * no reference to the request. phasync
      * collects the cycles half a second after a coroutine ends, so what the callback holds is
      * freed shortly after.
      *
@@ -326,56 +326,6 @@ final class Swerve
     public static function awaitShutdown(?float $timeout = null): bool
     {
         return Shutdown::await($timeout);
-    }
-
-    /**
-     * Run `$resume`/`$suspend` around a switch between coroutines of two different requests, so a
-     * framework can keep process-wide PHP state (`setlocale()`, `date_default_timezone_set()`,
-     * `mb_internal_encoding()`, ...) as its own per request, letting application code use the
-     * plain functions.
-     *
-     * Call once at boot (`swerve.php`, or an adapter's entry point), before any request is
-     * served. From then on, every request's `$resume($request)` runs once, as its first
-     * coroutine starts (that is its own one call, with no earlier request to pair with); from
-     * then on, it runs again only when a coroutine of a *different* request ran since - never
-     * after the event loop's own code, and never between two coroutines of the same request (its
-     * own `phasync::go()` children share its context). `$suspend($request)` runs just before a
-     * coroutine of a different request is about to run, in the same way: a request that never
-     * shares a worker tick with another gets none. Nothing here costs anything until this is
-     * called at least once; from then on, every request's first coroutine enters its context
-     * (which it would otherwise only do lazily, on its own first `phasync::getContext()`,
-     * `go()` or `finally()`), so that resume/suspend can bracket it correctly from the start.
-     *
-     * Several registrations run in registration order on resume and reverse order on suspend, as
-     * nested scopes would. Each closure runs on the switch path, in a coroutine of its own: it
-     * must return without waiting (no `phasync::sleep()`, no await) or it is logged and abandoned
-     * instead of hanging the switch. Any other exception is logged the same way and never thrown
-     * into a request.
-     *
-     * ```php
-     * $locales = new WeakMap();
-     * Swerve::onRequestSwitch(
-     *     resume: function (ClientRequest $request) use ($locales) {
-     *         setlocale(LC_ALL, $locales[$request] ?? 'C');
-     *     },
-     *     suspend: function (ClientRequest $request) use ($locales) {
-     *         $locales[$request] = setlocale(LC_ALL, 0);
-     *     },
-     * );
-     * ```
-     *
-     * @param \Closure(ClientRequest):void $resume  a coroutine of $request is about to run
-     * @param \Closure(ClientRequest):void $suspend a coroutine of a different request is about to run
-     *
-     * @see phasync\Context\SwitchAwareInterface
-     *
-     * @topic context-switching
-     *
-     * @example examples/Swerve.onRequestSwitch/1-timezone-per-request.php A timezone per request
-     */
-    public static function onRequestSwitch(\Closure $resume, \Closure $suspend): void
-    {
-        RequestSwitch::listen($resume, $suspend);
     }
 
     /**

@@ -211,19 +211,18 @@ return new RequestHandler((new class($version) {
 
     public function __construct(private string $version)
     {
-        // Swerve::onRequestSwitch(), as a framework adapter would call it at boot, before any
-        // request is served: see /locale-switch. Behind an env var so only that test's workers
-        // pay for it.
-        if (\getenv('SWERVE_TEST_LOCALE_SWITCH')) {
-            $locales = new \WeakMap();
-            Swerve::onRequestSwitch(
-                resume: static function (ClientRequest $request) use ($locales) {
-                    \setlocale(LC_ALL, $locales[$request] ?? 'C');
-                },
-                suspend: static function (ClientRequest $request) use ($locales) {
-                    $locales[$request] = \setlocale(LC_ALL, 0);
-                },
-            );
+        // phasync::onScopeChange(), as a framework adapter would call it at boot, before any
+        // request is served: each request's setlocale() and SwapFixture::$value are its own (see
+        // /locale-switch and /swap). Behind an env var so only those tests' workers pay for it.
+        if (\getenv('SWERVE_TEST_SCOPE_HOOK')) {
+            $saved = new \WeakMap();
+            phasync::onScopeChange(static function (\Scope $new, ?\Scope $old) use ($saved) {
+                if (null !== $old) {
+                    $saved[$old] = [\setlocale(LC_ALL, 0), SwapFixture::$value];
+                }
+                [$locale, SwapFixture::$value] = $saved[$new] ?? ['C', null];
+                \setlocale(LC_ALL, $locale);
+            });
         }
     }
 
@@ -282,31 +281,16 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 200, ['Content-Type' => 'text/plain'], \str_repeat('x', (int) $query['n']));
 
                 return;
-            // A static kept per request, as an adapter keeps its framework's: the request runs in
-            // a switch-aware context. ?v= set, read back after waiting ?ms=
+            // A static kept per request, as an adapter keeps its framework's, by the hook registered
+            // at boot (SWERVE_TEST_SCOPE_HOOK). ?v= set, read back after waiting ?ms=
             case '/swap':
-                phasync::withContext(static function () use ($r, $query) {
-                    SwapFixture::$value = $query['v'];
-                    phasync::sleep((int) $query['ms'] / 1000);
-                    fx_send($r, 200, [], (string) SwapFixture::$value);
-                }, new class implements phasync\Context\SwitchAwareInterface {
-                    private ?string $own = null;
-
-                    public function resume(): void
-                    {
-                        SwapFixture::$value = $this->own;
-                    }
-
-                    public function suspend(): void
-                    {
-                        $this->own = SwapFixture::$value;
-                    }
-                });
+                SwapFixture::$value = $query['v'];
+                phasync::sleep((int) $query['ms'] / 1000);
+                fx_send($r, 200, [], (string) SwapFixture::$value);
 
                 return;
-            // Swerve::onRequestSwitch(), registered at boot (below, when SWERVE_TEST_LOCALE_SWITCH
-            // is set): setlocale() is this request's own, through every wait. ?v= set, read back
-            // after waiting ?ms=
+            // setlocale() is this request's own, through every wait, by the hook registered at boot
+            // (SWERVE_TEST_SCOPE_HOOK). ?v= set, read back after waiting ?ms=
             case '/locale-switch':
                 \setlocale(LC_ALL, (string) $query['v']);
                 phasync::sleep((int) $query['ms'] / 1000);

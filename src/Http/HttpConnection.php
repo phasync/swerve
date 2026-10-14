@@ -9,9 +9,6 @@ use phasync\Net\Duplex;
 use phasync\TimeoutException;
 use Psr\Log\LoggerInterface;
 use Swerve\Util\Logger;
-use Swerve\Util\RequestContextFactory;
-use Swerve\Util\RequestSwitch;
-use Swerve\Util\SwitchAwareLoggingContext;
 
 /**
  * One HTTP/1.1 client connection: reads a request head, runs the application's handler on
@@ -215,20 +212,14 @@ final class HttpConnection
                     break;
                 }
                 $first = false;
-                // Each request runs in a phasync context of its own, which the coroutines it starts share:
-                // request-scoped state can hang on phasync::getContext() (mini's does). It runs in this
-                // connection's coroutine: a coroutine per request cost about half of a hello-world request.
-                // The context is created when the request's code first asks for one. The response is
-                // finished inside it, so phasync::finally() in the handler runs once all of it is sent.
-                //
-                // Once Swerve::onRequestSwitch() has registered something, the context is entered
-                // eagerly instead, as a SwitchAwareLoggingContext: phasync's lazy-context bookkeeping
-                // does not expect a resume() it calls while entering one to itself ask for a coroutine
-                // (phasync::go(), see RequestSwitch), which only an eager context avoids.
-                $context   = RequestSwitch::active()
-                    ? new SwitchAwareLoggingContext($this->logger, $request)
-                    : new RequestContextFactory($this->logger, $request);
-                $keepAlive = phasync::withContext($request->run(...), $context);
+                // Each request is a Scope of its own, its identity: state kept per request hangs on a
+                // WeakMap keyed by Scope::getCurrent(), and phasync::onScopeChange() hooks swap process
+                // state (a locale) as the event loop moves between requests. Its lifetime is the frame
+                // of a nested phasync::run(), which the coroutines it starts join and which waits for
+                // them. It runs in this connection's coroutine: a coroutine per request cost about half
+                // of a hello-world request. The response is finished inside it, so phasync::finally()
+                // in the handler runs once all of it is sent.
+                $keepAlive = (new \Scope())->run(phasync::run(...), $this->runRequest(...), $request);
                 unset($request);
                 // With the next request already buffered (pipelined), and the response written
                 // without waiting, nothing would suspend this coroutine: a client sending many
@@ -267,6 +258,17 @@ final class HttpConnection
                 }
             });
         }
+    }
+
+    /**
+     * A request, in its scope and frame (see serve()). A coroutine of the request that fails
+     * with nobody awaiting it is logged, and the request goes on.
+     */
+    private function runRequest(HttpClientRequest $request): bool
+    {
+        phasync::frame()->setExceptionHandler(fn (\Throwable $e) => $this->logger->error('A coroutine of {request} failed: {exception}', ['request' => $request->getMethod() . ' ' . $request->getTarget(), 'exception' => $e]));
+
+        return $request->run();
     }
 
     /**
