@@ -11,8 +11,8 @@ return new Swerve\RequestHandler(function (Swerve\ClientRequest $request): void 
 });
 ```
 
-The handler runs in the connection's own coroutine, in a phasync context of its own:
-`phasync::getContext()` is per request, and `phasync::finally()` in a handler runs once the
+The handler runs in the connection's own coroutine, in a `Scope` of its own:
+`Scope::getCurrent()` is per request, and `phasync::finally()` in a handler runs once the
 exchange is finished. It may keep the request for as long as it likes (an event stream, a long
 download) by not returning. When it returns, swerve finishes the exchange: an implicit `end()`,
 and the unread request body is skipped (up to 64 KiB within 5 s) or the connection closed. The

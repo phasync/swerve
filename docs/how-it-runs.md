@@ -33,9 +33,11 @@ phasync::go(function () {
 });
 ```
 
-The handler runs in the connection's own coroutine, once per request, inside a phasync context of
-its own, which the coroutines the request starts share: request-scoped state belongs on
-`phasync::getContext()`. The connection reads its next request once the handler has returned
+The handler runs in the connection's own coroutine, once per request, in a `Scope` of its own,
+which the coroutines the request starts share: request-scoped state belongs in a `WeakMap` keyed
+by `Scope::getCurrent()`, and is freed with the request. The request is also a nested
+`phasync::run()`, whose frame (`phasync::frame()`) its coroutines join: a coroutine that fails
+with nobody awaiting it is logged with the request, and the request goes on. The connection reads its next request once the handler has returned
 and the coroutines it started have ended, but the client has the whole response before that, so work
 after the response (`phasync::finally()`, a `go()`) costs it nothing. Work that must outlive the
 request belongs in `phasync::service()`.
@@ -86,7 +88,7 @@ Everything in PHP memory belongs to one worker, and lives from the worker's star
 - **Process-wide PHP state** (`setlocale()`, `date_default_timezone_set()`, ...) is the same for
   every request of a worker while it runs, like the others above. A framework running requests as
   coroutines rather than one process each can keep it as each request's own with
-  [`Swerve::onRequestSwitch()`](../README.md#per-request-process-state-for-framework-authors).
+  a [`phasync::onScopeChange()` hook](../README.md#per-request-process-state-for-framework-authors).
 
 ### Shared state with SQLite
 

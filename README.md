@@ -45,7 +45,7 @@ requests and connections at once on [phasync](https://github.com/phasync/phasync
   worker. A Slim app costs swerve about 10% over a bare handler; Express costs Node half or more.
 - **Waiting is free.** While one request waits for the database or an API, the same worker serves
   others. Your handler stays ordinary sequential PHP: no promises, no callbacks.
-- **Isolated requests.** Each request runs in a phasync context of its own, which the coroutines it
+- **Isolated requests.** Each request runs in a `Scope` of its own, which the coroutines it
   starts share, so request-scoped state stays separate even with thousands in flight.
 - **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
   workers that grow are recycled, and reloads roll one worker at a time.
@@ -101,8 +101,9 @@ it needs phasync-ext, which waits with epoll.
    started inside one request now also share the worker with other requests.
 2. **Keep per-request state per request.** A worker runs many requests at once, so static
    properties and globals are shared between them. There are no `$_GET`, `$_SERVER` or
-   `$_SESSION`: read request data from the `ClientRequest` (a framework's adapter does), and hang
-   request-scoped state on `phasync::getContext()`. See
+   `$_SESSION`: read request data from the `ClientRequest` (a framework's adapter does), and keep
+   request-scoped state in a `WeakMap` keyed by `Scope::getCurrent()`: each request is a `Scope`
+   of its own. See
    [How swerve runs your application](docs/how-it-runs.md).
 3. **Return a `Swerve\RequestHandler`** from `swerve.php`. A framework gets an adapter that turns
    the `ClientRequest` into its own request and response.
@@ -309,30 +310,26 @@ autoloader in every request.
 
 ## Per-request process state, for framework authors
 
-A framework that runs its requests as coroutines of one worker (not one process each, as
-PHP-FPM does) shares process-wide PHP state - `setlocale()`, `date_default_timezone_set()`,
-`mb_internal_encoding()` - between every request running there. `Swerve::onRequestSwitch()` lets
-it keep that state as each request's own, so application code can go on using the plain
-functions:
+Each request runs in a `Scope` of its own (fiber-interop/scope), which the coroutines it starts
+share. A framework that runs its requests as coroutines of one worker (not one process each, as
+PHP-FPM does) shares process-wide PHP state - `setlocale()`, `date_default_timezone_set()`, a
+static of its own - between every request running there. A `phasync::onScopeChange()` hook keeps
+that state as each request's own, so application code can go on using the plain functions:
 
 ```php
-$locales = new WeakMap();
-Swerve::onRequestSwitch(
-    resume: function (Swerve\ClientRequest $request) use ($locales) {
-        setlocale(LC_ALL, $locales[$request] ?? 'C');
-    },
-    suspend: function (Swerve\ClientRequest $request) use ($locales) {
-        $locales[$request] = setlocale(LC_ALL, 0);
-    },
-);
+$locales = new WeakMap();   // per Scope
+phasync::onScopeChange(function (Scope $new, ?Scope $old) use ($locales) {
+    if (null !== $old) {
+        $locales[$old] = setlocale(LC_ALL, 0);
+    }
+    setlocale(LC_ALL, $locales[$new] ?? 'C');
+});
 ```
 
-Call it once at boot. `resume($request)` runs just before a coroutine of `$request` runs, but only
-when a coroutine of a *different* request ran last; `suspend($request)` runs just before a
-coroutine of a different request is about to run. Switching between a request's own coroutines
-(its own `phasync::go()` children) calls neither. A closure runs on the switch path: it must
-return without waiting, or it is logged and abandoned instead of hanging the switch; any other
-exception is logged the same way, never thrown into a request.
+Register it once at boot. It runs before a coroutine of another scope than the last one runs, and
+as a request begins: never between a request's own coroutines. The worker's own code runs in
+the root scope (`Scope::getRootScope()`), which gets its state saved and restored the same way.
+A hook runs in the event loop and must not wait, and an exception from one stops the worker.
 
 ## Static files
 
@@ -368,7 +365,7 @@ it a logger with `Swerve::setLog()`.
 body (`''` only at its end) and `write()` sends the response body. The module does the framing.
 [Requests and responses](docs/requests-and-responses.md) is the reference; in short:
 
-- The handler runs in the connection's own coroutine, once per exchange, in a phasync context of its
+- The handler runs in the connection's own coroutine, once per exchange, in a `Scope` of its
   own (`phasync::finally()` in a handler runs once the exchange is finished). Return to finish the
   response; the request body can no longer be read after that.
 - `sendResponseHeaders($status, $headers)` sets the head, held until the first `write()`, `end()`,
@@ -403,8 +400,8 @@ body (`''` only at its end) and `write()` sends the response body. The module do
 - **Saying goodbye.** `Swerve::onShutdown($callback)` runs the callback in a coroutine when the
   worker stops (for a recycle, at the end of the lingering; `Swerve::draining()` turns true when
   it begins), for example to send a protocol-level goodbye from a place that holds no request.
-  Its waits get the `WorkerStoppingException` too: write the goodbye shielded. Callbacks are held weakly by the registering coroutine's context: one
-  whose request has ended is dropped (it relies on phasync's garbage collection, about half a
+  Its waits get the `WorkerStoppingException` too: write the goodbye shielded. A callback runs in
+  the `Scope` that registered it, which holds it weakly: one whose request has ended is dropped (it relies on phasync's garbage collection, about half a
   second after a coroutine ends) and never runs. An exception in a callback is logged and
   stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
 - **Many connections.** Without phasync-ext a worker serves at most 512 connections, whatever

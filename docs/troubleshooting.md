@@ -7,7 +7,7 @@ slow database query, `curl`, `sleep()`, heavy computation. See
 [the rule](how-it-runs.md#the-rule-never-block-a-worker). With `--watchdog` (on by default), a
 worker stuck for 30 s is replaced, and the log says which request it was stuck in, and where.
 
-**`Can't create a coroutine outside of a context`.** `phasync::go()` was called outside
+**`Can't create a coroutine outside of a coroutine`.** `phasync::go()` was called outside
 swerve's event loop, such as in a script run on its own. Inside swerve (your application file,
 its handlers) coroutines work.
 

@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Changed (breaking): a Scope per request, phasync's frame for its lifetime
+
+phasync replaced its contexts with the ambient `Scope` (fiber-interop/scope) for identity and
+`phasync\Frame` for lifetime; swerve's request model follows. Each request runs in a `new
+Scope()` of its own, which the coroutines it starts share, inside a nested `phasync::run()`: its
+frame waits for those coroutines, and a failure of one nobody awaits is logged as
+`A coroutine of GET /path failed: ...`, and the request goes on. The worker's own coroutines and
+the services log theirs from the worker's frame.
+
+- `Swerve::onRequestSwitch()` is removed: register a `phasync::onScopeChange()` hook, which gets the
+  scope a coroutine of another request (or the worker's root scope) runs in, and the one before.
+  It fires as a request begins too. A hook that throws stops the worker, where a callback's
+  exception was logged and ignored.
+- `Swerve::onShutdown()` keeps its callbacks by the registering `Scope` (was the phasync context),
+  and runs each in that scope.
+- A publish to a worker whose inbox is full no longer makes the publishing request wait for the
+  delivery: the queue is sent by a phasync service.
+- Requires phasync `dev-main` (Scope + Frame) until its next release.
+
+Migration:
+
+| Before | After |
+| --- | --- |
+| `Swerve::onRequestSwitch(resume: fn ($request) => ..., suspend: fn ($request) => ...)` | `phasync::onScopeChange(function (Scope $new, ?Scope $old) { /* save into $old's slot, load $new's */ })`, state in a `WeakMap` keyed by the scope |
+| request state on `phasync::getContext()` | a `WeakMap` keyed by `Scope::getCurrent()`; outside a request it is `Scope::getRootScope()` |
+| `phasync::withContext($fn, $context)` in an application | `(new Scope())->run(phasync::run(...), $fn)` |
+
 ### Added
 
 - Run from an application's `vendor/bin`, with swerve installed in that vendor directory, the
