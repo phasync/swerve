@@ -52,3 +52,11 @@ test('a package whose PSR-4 directory is its install path is in the closure; one
     expect(worker_autoload('echo json_encode([class_exists("Acme\\\\Flat\\\\Root"), class_exists("Acme\\\\Flatter\\\\Root")]);'))
         ->toBe([true, false]);
 });
+
+test('an entry that wants the application\'s classes requires its autoloader, as the README says: they load, and the closure\'s files do not run again', function () {
+    expect(worker_autoload(
+        '$before = class_exists("App\\\\Model"); $GLOBALS["_composer_autoload_path"] = __DIR__ . "/vendor/autoload.php"; $appDir = __DIR__;'
+        . 'require_once $GLOBALS["_composer_autoload_path"] ?? "$appDir/vendor/autoload.php";'
+        . 'echo json_encode([$before, class_exists("App\\\\Model"), class_exists("Acme\\\\AppLib\\\\Counter"), $GLOBALS["ran"]]);',
+    ))->toBe([false, true, true, ['phasync files', 'adapter files', 'app-lib files', 'app files']]);
+});

@@ -258,9 +258,17 @@ declares itself in its own `composer.json`:
 {"extra": {"swerve": {"adapter": "psr15", "entry": "Swerve\\Psr15\\init"}}}
 ```
 
-`entry` names a function that each worker calls once, after the fork and after `vendor/autoload.php`
-is loaded, with the application directory; it returns a `Swerve\RequestHandler`, as `swerve.php`
-does, and anything else stops swerve with exit code 2. The master only reads
+`entry` names a function that each worker calls once, after the fork, with the application
+directory; it returns a `Swerve\RequestHandler`, as `swerve.php` does, and anything else stops
+swerve with exit code 2. The entry runs with swerve's dependency closure only (above): the
+adapter, what it requires, swerve and phasync. Whether the application's classes are loaded once
+per worker and shared by its requests, or fresh in each request, is the adapter's choice. One that
+shares them (a framework adapter) requires the application's autoloader in its entry, from the
+vendor directory swerve runs from:
+
+```php
+require_once $GLOBALS['_composer_autoload_path'] ?? "$appDir/vendor/autoload.php";
+``` The master only reads
 `vendor/composer/installed.json` to find adapters, and doesn't call their entry.
 
 The adapter is the first of: `--adapter=<name>`; `"extra": {"swerve": {"adapter": "<name>"}}` in the

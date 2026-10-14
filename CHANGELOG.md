@@ -11,7 +11,7 @@ frame waits for those coroutines, and a failure of one nobody awaits is logged a
 `A coroutine of GET /path failed: ...`, and the request goes on. The worker's own coroutines and
 the services log theirs from the worker's frame.
 
-- `Swerve::onRequestSwitch()` is removed: register a `phasync::onScopeChange()` hook, which gets the
+- `Swerve::onRequestSwitch()`, added since beta6 and never tagged, is removed: register a `phasync::onScopeChange()` hook, which gets the
   scope a coroutine of another request (or the worker's root scope) runs in, and the one before.
   It fires as a request begins too. A hook that throws stops the worker, where a callback's
   exception was logged and ignored.
@@ -103,17 +103,13 @@ Migration:
   process (applied by the startup restart; an explicit `-d` still wins); `onWorkerStart()` runs code
   in every worker before the application loads. Calls after startup change nothing.
 
-- `Swerve::onRequestSwitch(resume, suspend)`: a framework running requests as coroutines of one
-  worker can keep process-wide PHP state (`setlocale()`, `date_default_timezone_set()`,
-  `mb_internal_encoding()`, ...) as each request's own. `resume($request)` runs just before a
-  coroutine of `$request` runs, but only when a coroutine of a *different* request ran last;
-  `suspend($request)` runs just before a different request's coroutine is about to run; a
-  request's own `phasync::go()` children call neither. Implemented by the request's phasync
-  context (`phasync\Context\SwitchAwareInterface`), entered eagerly only once something is
-  registered - nothing registered costs nothing. See the README, Per-request process state.
-
 ### Fixed
 
+- A package whose PSR-4 or PSR-0 directory is its install path (`"psr-4": {"Foo\\": ""}`) is in
+  the worker's dependency closure; its classes were not found. (#51)
+- The README said an adapter's entry runs after `vendor/autoload.php`; since the worker loads
+  only swerve's dependency closure it does not. An entry that wants the application's classes
+  requires `$GLOBALS['_composer_autoload_path'] ?? "$appDir/vendor/autoload.php"` itself. (#50)
 - NUMA pinning no longer overrides the CPUs the operator allowed (`taskset`, a cgroup cpuset,
   `--cpuset-cpus`): a worker pins to its node's share of them, and not at all when they lie on one
   node. Before, each worker took its whole node, whatever the affinity it inherited (#41).
