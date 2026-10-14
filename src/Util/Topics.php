@@ -321,7 +321,8 @@ final class Topics
         \error_clear_last(); // the inbox is full
         self::$outbox[$inbox] = new \SplQueue();
         self::$outbox[$inbox]->enqueue($datagram);
-        phasync::go(self::flush(...), [$inbox]);
+        // A service: the publisher's request does not wait for it, and the next full inbox starts another
+        phasync::service(self::flush(...), $inbox);
     }
 
     private static function flush(int $inbox): void
