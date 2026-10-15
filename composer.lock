@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "fiber-interop/scope",
-            "version": "v0.2.0",
+            "version": "v0.2.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/fiber-interop/scope.git",
-                "reference": "e8a4e113c23fff181e501c96014c0b35293c55d4"
+                "reference": "944ae5258b0ac147523a2ea4788d55652289701f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/fiber-interop/scope/zipball/e8a4e113c23fff181e501c96014c0b35293c55d4",
-                "reference": "e8a4e113c23fff181e501c96014c0b35293c55d4",
+                "url": "https://api.github.com/repos/fiber-interop/scope/zipball/944ae5258b0ac147523a2ea4788d55652289701f",
+                "reference": "944ae5258b0ac147523a2ea4788d55652289701f",
                 "shasum": ""
             },
             "require": {
@@ -60,9 +60,9 @@
             ],
             "support": {
                 "issues": "https://github.com/fiber-interop/scope/issues",
-                "source": "https://github.com/fiber-interop/scope/tree/v0.2.0"
+                "source": "https://github.com/fiber-interop/scope/tree/v0.2.1"
             },
-            "time": "2026-10-13T15:20:27+00:00"
+            "time": "2026-10-15T10:00:47+00:00"
         },
         {
             "name": "phasync/net",
@@ -118,16 +118,16 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "90860626f8455cda117c29cc6ff84599c0ee2746"
+                "reference": "30876e581024491461b2bc507f3a05374a9d11b7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/90860626f8455cda117c29cc6ff84599c0ee2746",
-                "reference": "90860626f8455cda117c29cc6ff84599c0ee2746",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/30876e581024491461b2bc507f3a05374a9d11b7",
+                "reference": "30876e581024491461b2bc507f3a05374a9d11b7",
                 "shasum": ""
             },
             "require": {
-                "fiber-interop/scope": "^0.2",
+                "fiber-interop/scope": "^0.2.1",
                 "php": "^8.2",
                 "psr/http-factory": "^1.0",
                 "psr/http-message": "^1.0 || ^2.0",
@@ -186,7 +186,7 @@
                 "issues": "https://github.com/phasync/phasync/issues",
                 "source": "https://github.com/phasync/phasync/tree/main"
             },
-            "time": "2026-10-14T07:37:39+00:00"
+            "time": "2026-10-15T20:22:33+00:00"
         },
         {
             "name": "psr/http-factory",
