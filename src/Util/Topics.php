@@ -77,6 +77,8 @@ final class Topics
     private static array $outbox = [];
     /** @var array<int, true> inboxes that have dropped messages, until one is written again: one warning per episode */
     private static array $dropped = [];
+    /** @var array<string, \SplQueue<string>> messages published while a topic's bitmap is unknown, in order; sendPending() fetches it and flushes them, not the publisher */
+    private static array $pending = [];
 
     /**
      * In a worker: its inbox, and the others' to write to. Needs Topics::$toMaster.
@@ -141,7 +143,14 @@ final class Topics
         self::publishEncoded('Swerve::publishRaw', $topic, self::encodeRaw($topic, $bytes));
     }
 
-    /** What publish() and publishRaw() both do once $message is encoded: deliver here, or fan it out. */
+    /**
+     * What publish() and publishRaw() both do once $message is encoded: deliver here, or fan it
+     * out. Never waits: a topic's bitmap, once known, is used at once; the first publish to a
+     * topic (or the first after the master forgets its bitmap, see forget()) queues the message
+     * instead and starts sendPending() to fetch it, which neither this call nor the event loop
+     * waits for. A publish from a coroutine the caller has already cancelled (a WebSocket
+     * handler's goodbye in a finally) still queues and is still sent: nothing here suspends it.
+     */
     private static function publishEncoded(string $caller, string $topic, string $message): void
     {
         if (null === self::$toMaster) {
@@ -149,8 +158,48 @@ final class Topics
 
             return;
         }
-        if ('' !== $bitmap = self::bitmap($caller, $topic)) {
-            self::fanOut($topic, $message, $bitmap);
+        if (!Cache::$listening) {
+            Cache::awaitListening("$caller()"); // throws directly in swerve.php; else waits until the worker serves, as before
+        }
+        if (isset(self::$pending[$topic])) {
+            self::$pending[$topic]->enqueue($message); // sendPending() is already fetching this topic's bitmap: joins its queue, in order
+
+            return;
+        }
+        $bitmap = self::$bitmaps->get($topic);
+        if (null !== $bitmap) {
+            if ('' !== $bitmap) {
+                self::fanOut($topic, $message, $bitmap);
+            }
+
+            return;
+        }
+        self::$pending[$topic] = new \SplQueue();
+        self::$pending[$topic]->enqueue($message);
+        phasync::service(self::sendPending(...), $topic);
+    }
+
+    /**
+     * The service publishEncoded() starts for a topic whose bitmap is unknown: fetches it, then
+     * sends what queued meanwhile, in the order it queued. Topics::$pending stays set for the
+     * whole fetch and flush, not just the fetch: fanOut() can suspend (deliver() to this
+     * worker's own subscribers waits for the slowest to take the message, see its docblock), and
+     * publishEncoded() checks Topics::$pending before Topics::$bitmaps (not the reverse), so a
+     * publish arriving during that suspension still joins this queue instead of its message
+     * overtaking one still waiting here to be sent.
+     */
+    private static function sendPending(string $topic): void
+    {
+        try {
+            $bitmap = self::fetch($topic);
+            $queue  = self::$pending[$topic];
+            if ('' !== $bitmap) {
+                while (!$queue->isEmpty()) {
+                    self::fanOut($topic, $queue->dequeue(), $bitmap);
+                }
+            }
+        } finally {
+            unset(self::$pending[$topic]);
         }
     }
 
