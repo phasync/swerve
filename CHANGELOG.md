@@ -31,6 +31,10 @@ Migration:
 
 ### Added
 
+- `Swerve::publishRaw(string $topic, string $bytes): void` sends `$bytes` unchanged to every
+  subscriber of `$topic`, for messages `publish()` cannot carry (bytes that are not valid UTF-8,
+  such as a binary WebSocket frame). The same delivery guarantees as `publish()`; a topic may
+  mix `publish()` and `publishRaw()` messages.
 - Run from an application's `vendor/bin`, with swerve installed in that vendor directory, the
   worker loads only swerve's dependency closure: the packages reachable through `require` from
   swerve, the installed adapters, and the root package when it declares an adapter, with their

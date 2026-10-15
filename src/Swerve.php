@@ -124,6 +124,7 @@ final class Swerve
      * @throws \JsonException            for a value JSON can't express
      *
      * @see Swerve::subscribe       receives the messages
+     * @see Swerve::publishRaw      bytes that are not JSON, such as a binary WebSocket frame
      * @see Swerve\OrderedChannel   when order between workers matters
      *
      * @topic coordination-across-workers
@@ -134,6 +135,38 @@ final class Swerve
     {
         self::refuseInternal($topic);
         Topics::publish($topic, $message);
+    }
+
+    /**
+     * Send `$bytes` unchanged to every subscriber of `$topic`, in every worker process of this swerve, this one included.
+     *
+     * For messages {@see Swerve::publish()} cannot carry: bytes that are not valid UTF-8, such as
+     * a binary WebSocket frame, which `publish()` would fail to encode as JSON. A subscriber gets
+     * exactly `$bytes`, as a plain string, never decoded. The same delivery guarantees as
+     * `publish()` apply (order, at-most-once, and the rest); see its docblock. A topic may mix
+     * `publish()` and `publishRaw()` messages: each subscriber gets each one in its own shape.
+     *
+     * ```php
+     * Swerve::publishRaw('frames', $binaryWebSocketFrame);
+     * ```
+     *
+     * @param string $topic 1 to 255 bytes
+     * @param string $bytes any bytes, including none; at most 128 KiB
+     *
+     * @throws \InvalidArgumentException for a topic or message outside those sizes, or a topic starting with "\0"
+     * @throws \LogicException           directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
+     *
+     * @see Swerve::subscribe   receives the messages, raw or not
+     * @see Swerve::publish     for a value JSON can carry
+     *
+     * @topic coordination-across-workers
+     *
+     * @example examples/Swerve.publishRaw/1-websocket-frames.php A WebSocket handler forwards binary frames to the other workers
+     */
+    public static function publishRaw(string $topic, string $bytes): void
+    {
+        self::refuseInternal($topic);
+        Topics::publishRaw($topic, $bytes);
     }
 
     /**

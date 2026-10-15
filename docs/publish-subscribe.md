@@ -106,6 +106,18 @@ $subscription = $ledger->subscribe(maxLag: 30.0, heartbeat: null);
   SSE clients, publish the string those clients should get: it is encoded once, by the publisher,
   not by every subscriber.
 
+## Binary messages
+
+`Swerve::publishRaw(string $topic, string $bytes): void` sends `$bytes` unchanged: for messages
+`publish()` cannot carry, such as a binary WebSocket frame, which is not valid UTF-8 and so
+cannot be JSON. A subscriber gets exactly `$bytes`, as a plain string, never decoded. The same
+promises as `publish()` apply (order, delivery, limits); a topic may mix `publish()` and
+`publishRaw()` messages, each subscriber getting each one in its own shape.
+
+```php
+Swerve::publishRaw('frames', $binaryWebSocketFrame);
+```
+
 ## Patterns
 
 **State on connect, then updates.** Almost every realtime page needs the current state first,

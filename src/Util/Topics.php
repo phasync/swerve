@@ -35,8 +35,8 @@ final class Topics
     public const MAX_TOPIC = 255;
     /** Largest message: a datagram carries it whole, and the sockets' buffers are about 200 KiB. */
     public const MAX_MESSAGE = 1 << 17;
-    /** Largest datagram: the topic's length, the topic and the message. */
-    public const MAX_DATAGRAM = self::MAX_MESSAGE + self::MAX_TOPIC + 1;
+    /** Largest datagram: the topic's length byte, the topic, the message, and publishRaw()'s one-byte marker. */
+    public const MAX_DATAGRAM = self::MAX_MESSAGE + self::MAX_TOPIC + 2;
     /** How long a worker that does not read its inbox is waited for, before the messages for it are dropped. */
     public const SEND_WAIT = 0.1;
     /** What a worker keeps of the master's bitmaps. */
@@ -105,25 +105,51 @@ final class Topics
         // Depth 511: json_decode() at its default 512 fails on the 512 levels json_encode() accepts,
         // so what the workers could not decode fails here, in the publisher
         $message = \json_encode($message, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION, 511);
+        self::checkSizes($topic, $message);
+
+        return $message;
+    }
+
+    /**
+     * What publishRaw() sends: $bytes unchanged, marked with a leading "\0" so deliver() hands it
+     * back as a plain string instead of decoding it as JSON (no JSON text starts with "\0").
+     */
+    public static function encodeRaw(string $topic, string $bytes): string
+    {
+        self::checkSizes($topic, $bytes);
+
+        return "\0" . $bytes;
+    }
+
+    private static function checkSizes(string $topic, string $message): void
+    {
         if ('' === $topic || \strlen($topic) > self::MAX_TOPIC) {
             throw new \InvalidArgumentException('A topic is 1 to ' . self::MAX_TOPIC . ' bytes, not ' . \strlen($topic));
         }
         if (\strlen($message) > self::MAX_MESSAGE) {
             throw new \InvalidArgumentException('A message is at most ' . self::MAX_MESSAGE . ' bytes, not ' . \strlen($message));
         }
-
-        return $message;
     }
 
     public static function publish(string $topic, mixed $message): void
     {
-        $message = self::encode($topic, $message);
+        self::publishEncoded('Swerve::publish', $topic, self::encode($topic, $message));
+    }
+
+    public static function publishRaw(string $topic, string $bytes): void
+    {
+        self::publishEncoded('Swerve::publishRaw', $topic, self::encodeRaw($topic, $bytes));
+    }
+
+    /** What publish() and publishRaw() both do once $message is encoded: deliver here, or fan it out. */
+    private static function publishEncoded(string $caller, string $topic, string $message): void
+    {
         if (null === self::$toMaster) {
             self::deliver($topic, $message); // decoded again: what subscribers get never depends on where it came from
 
             return;
         }
-        if ('' !== $bitmap = self::bitmap('Swerve::publish', $topic)) {
+        if ('' !== $bitmap = self::bitmap($caller, $topic)) {
             self::fanOut($topic, $message, $bitmap);
         }
     }
@@ -173,10 +199,12 @@ final class Topics
     }
 
     /**
-     * A JSON message for this process's subscribers of $topic, if any: decoded here, once for
-     * all of them. They share the value (an array is copied only if one changes it; an object
-     * is a SealedObject, which nobody can change). Each message carries when it arrived (now,
-     * unless $arrived says), for Subscription's lag check.
+     * A message for this process's subscribers of $topic, if any: decoded here, once for all of
+     * them. A message from publishRaw() is marked with a leading "\0" (no JSON text starts with
+     * it): the rest goes to subscribers unchanged, as a plain string, skipping json_decode().
+     * Otherwise it is JSON, as publish() sent it. They share the value (an array is copied only
+     * if one changes it; an object is a SealedObject, which nobody can change). Each message
+     * carries when it arrived (now, unless $arrived says), for Subscription's lag check.
      *
      * The write suspends until the topic's publisher has taken the message. If the last
      * subscriber leaves meanwhile (leave()), or the process drains, the publisher is closed and
@@ -186,7 +214,8 @@ final class Topics
     {
         if (isset(self::$writers[$topic])) {
             try {
-                self::$writers[$topic]->write([$arrived ?? \hrtime(true), SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR))]);
+                $value = "\0" === ($message[0] ?? '') ? \substr($message, 1) : SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR));
+                self::$writers[$topic]->write([$arrived ?? \hrtime(true), $value]);
             } catch (ChannelException) {
                 // Closed while the write was suspended: the topic has no subscribers left
             }

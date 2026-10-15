@@ -459,6 +459,9 @@ foreach (Swerve::subscribe('chat') as $message) {
 - Topics are 1 to 255 bytes, messages at most 128 KiB. A worker that does not read its
   inbox (its event loop stuck) loses the messages sent to it after 0.1 s, with a warning in the
   log; it does not hold up the publishers.
+- `Swerve::publishRaw('frames', $bytes)` sends `$bytes` unchanged, for messages `publish()`
+  cannot carry (bytes that are not valid UTF-8, such as a binary WebSocket frame). Its
+  subscribers get exactly `$bytes`; a topic may mix `publish()` and `publishRaw()` messages.
 
 ## Shared cache
 
