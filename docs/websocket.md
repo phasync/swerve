@@ -152,6 +152,25 @@ wire. `send()` throws `ValueError` for text that is not UTF-8; use `sendBinary()
 - **Cancellation.** When the connection ends under `from()` (the client left or reset, or a drain), a callback
   still running is cancelled, and its `CancelledException` is not an error. A reset ends the callback without a
   line in the log; `$onClose` fires once with 1006.
+
+  Cleanup that must still run belongs in a `finally`, as it does for any cancellation; anything in it that may
+  itself wait (an I/O call, a lock) should be wrapped in `phasync::shielded(fn () => ...)`, so the cancellation
+  does not cut it short too. `Swerve::publish()`/`publishRaw()` no longer need that wrapping: neither suspends
+  the caller, so one in a `finally` is sent even when the coroutine running it was already cancelled.
+
+  ```php
+  Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
+      Swerve::publish('room', ['joined' => $ws->subprotocol]);
+      try {
+          foreach ($ws as $message) {
+              Swerve::publish('room', $message); // never waits, even the first time
+          }
+      } finally {
+          Swerve::publish('room', ['left' => true]);          // sent even if the line above was cancelled
+          phasync::shielded(fn () => $ws->end(1000, 'bye'));   // writing the close frame may wait: shield it
+      }
+  });
+  ```
 - **Drain.** A shutdown or reload closes every open WebSocket with 1001, so the process exits within its grace
   period, with status 0 and a clean log. Clients reconnect, as they must after any 1001.
 - **Many sockets.** A socket costs a coroutine and no thread; a worker serves ordinary requests promptly with 200

@@ -64,6 +64,11 @@ final class OrderedChannel implements \IteratorAggregate
      * @see OrderedChannel::subscribe
      * @see Swerve::publish
      *
+     * @note Unlike `Swerve::publish()`/`publishRaw()`, the first `write()` to a channel (or the
+     *       first after the master forgets its bitmap) suspends the caller until the master
+     *       answers: whether to append at all depends on its reply, so, unlike a plain topic's
+     *       message, the write itself cannot be queued ahead of knowing it.
+     *
      * @example examples/OrderedChannel.write/1-no-subscriber.php Nothing is kept without a subscriber
      */
     public function write(mixed $message): void

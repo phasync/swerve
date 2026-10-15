@@ -99,12 +99,15 @@ final class Swerve
     /**
      * Send a message to every subscriber of `$topic`, in every worker process of this swerve, this one included.
      *
-     * Returns once the message is on its way, not once delivered. Delivery is at most once, to the
-     * subscriptions that exist when the message reaches their worker: there is no history, and a
-     * worker starting later (after a reload, a recycle, a crash) sees nothing sent before. The
-     * messages of one publishing worker arrive in the order it published them, with no order
-     * between workers. A worker that does not read its inbox loses the messages sent to it after
-     * 0.1 s. Swerve embedded without its master process delivers in this process only.
+     * Returns once the message is on its way, not once delivered, and never suspends the caller,
+     * even the first time this worker publishes to `$topic`: safe to call from a `finally`,
+     * including one that runs after the coroutine was cancelled (a WebSocket handler's goodbye).
+     * Delivery is at most once, to the subscriptions that exist when the message reaches their
+     * worker: there is no history, and a worker starting later (after a reload, a recycle, a
+     * crash) sees nothing sent before. The messages of one publishing worker arrive in the order
+     * it published them, with no order between workers. A worker that does not read its inbox
+     * loses the messages sent to it after 0.1 s. Swerve embedded without its master process
+     * delivers in this process only.
      *
      * Every message travels as JSON: encoded once here, decoded once in each worker, and every
      * subscriber gets the value published, shared: a string stays a string (`'{}'` too), a list an
@@ -143,8 +146,9 @@ final class Swerve
      * For messages {@see Swerve::publish()} cannot carry: bytes that are not valid UTF-8, such as
      * a binary WebSocket frame, which `publish()` would fail to encode as JSON. A subscriber gets
      * exactly `$bytes`, as a plain string, never decoded. The same delivery guarantees as
-     * `publish()` apply (order, at-most-once, and the rest); see its docblock. A topic may mix
-     * `publish()` and `publishRaw()` messages: each subscriber gets each one in its own shape.
+     * `publish()` apply (order, at-most-once, never suspends the caller, and the rest); see its
+     * docblock. A topic may mix `publish()` and `publishRaw()` messages: each subscriber gets
+     * each one in its own shape.
      *
      * ```php
      * Swerve::publishRaw('frames', $binaryWebSocketFrame);
