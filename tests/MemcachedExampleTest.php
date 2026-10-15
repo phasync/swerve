@@ -6,6 +6,28 @@
  * guarantees across workers, and the drain.
  */
 
+/*
+ * A watchdog per test: #49 (a worker crash under phasync-ext) can leave a test stuck well past
+ * any timeout it reads its sockets with. Past 25 s, the swerve it started is killed (the same
+ * groups tests/Pest.php's own afterEach kills) and the test fails instead of hanging the whole
+ * run, where an outer timeout killing *this* process would leave that swerve orphaned (it runs
+ * in its own process group, setsid, so a signal to this one does not reach it). Not a fix for
+ * #49 itself.
+ */
+uses()->beforeEach(function () {
+    pcntl_async_signals(true);
+    pcntl_signal(SIGALRM, static function () {
+        foreach ($GLOBALS['swerve_groups'] ?? [] as $pgid) {
+            @posix_kill(-$pgid, SIGKILL);
+        }
+        throw new RuntimeException('Timed out after 25 s (see #49): its swerve was killed instead of left running');
+    });
+    pcntl_alarm(25);
+})->afterEach(function () {
+    pcntl_alarm(0);
+    pcntl_signal(SIGALRM, SIG_DFL);
+});
+
 function mc_start(): array
 {
     $port = (int) substr(strrchr(free_address(), ':'), 1);
