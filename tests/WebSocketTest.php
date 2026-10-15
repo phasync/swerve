@@ -519,8 +519,15 @@ test('a callback that only sends (a subscription forwarded) gets every publish, 
             $clients[] = ws_connect($addr, '/websocket-news');
         }
         expect(ws_live($addr, 'news', 8, 2))->toBe(8);
-        expect(probe($addr, '/publish?topic=news&m=first'))->toBe('published');
-        expect(probe($addr, '/publish?topic=news&m=second'))->toBe('published');
+        // One connection, so both publishes are from the same worker: publish() never waits for
+        // the master, even its first call, so two publishes from different workers are not
+        // promised any order against each other (see Swerve::publish()'s docblock)
+        $publisher = native_connect($addr);
+        foreach (['first', 'second'] as $m) {
+            fwrite($publisher, "GET /publish?topic=news&m=$m HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head = native_read_head($publisher);
+            expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
+        }
         foreach ($clients as $conn) {
             expect([ws_read($conn), ws_read($conn)])->toBe([[1, 'first'], [1, 'second']]);
         }
@@ -579,13 +586,17 @@ test('a subscription loop forwards messages and ends the socket when told to', f
             $clients[] = ws_connect($addr, '/websocket-feed');
         }
         usleep(300_000); // every callback subscribed
-        expect(probe($addr, '/publish?topic=feed&m=one'))->toBe('published');
-        expect(probe($addr, '/publish-json?topic=feed&m=two'))->toBe('published');
+        // One connection for all three: see the note in the test above
+        $publisher = native_connect($addr);
+        foreach (['/publish?topic=feed&m=one', '/publish-json?topic=feed&m=two', '/publish-end?topic=feed'] as $path) {
+            fwrite($publisher, "GET $path HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head = native_read_head($publisher);
+            expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
+        }
         foreach ($clients as $conn) {
             expect(ws_read($conn))->toBe([1, 'one']);
             expect(json_decode(ws_read($conn)[1], true))->toBe(['m' => 'two', 'n' => 1, 'list' => [1, 2]]);
         }
-        expect(probe($addr, '/publish-end?topic=feed'))->toBe('published');
         foreach ($clients as $conn) {
             expect(ws_read($conn))->toBe([8, pack('n', 1000)]);
             ws_send($conn, 8, pack('n', 1000));

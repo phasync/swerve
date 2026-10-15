@@ -178,8 +178,14 @@ test('in a cluster, a message published in one worker reaches the subscribers in
             $pids[$pid]    = true;
         }
         expect(count($pids))->toBeGreaterThanOrEqual(min(2, $workers));
+        // One connection, so every publish is from the same worker: publish() never waits for
+        // the master, even its first call, so a publish from a different worker is not promised
+        // any order against these (see Swerve::publish()'s docblock)
+        $publisher = native_connect($addr);
         foreach (['one', 'two', 'three'] as $m) {
-            expect(probe($addr, "/publish?topic=room&m=$m"))->toBe('published');
+            fwrite($publisher, "GET /publish?topic=room&m=$m HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head = native_read_head($publisher);
+            expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
         }
         foreach ($subscribers as $conn) {
             $events = '';
@@ -360,8 +366,13 @@ test('a message reaches every subscriber in every worker as the value published:
             $pids[$pid]    = true;
         }
         expect(count($pids))->toBe(2);
-        expect(probe($addr, '/publish-json?topic=structured&m=hello'))->toBe('published');
-        expect(probe($addr, '/publish?topic=structured&m=plain'))->toBe('published');
+        // One connection, so both publishes are from the same worker: see the note in the test above
+        $publisher = native_connect($addr);
+        foreach (['/publish-json?topic=structured&m=hello', '/publish?topic=structured&m=plain'] as $path) {
+            fwrite($publisher, "GET $path HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head = native_read_head($publisher);
+            expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
+        }
         foreach ($subscribers as $conn) {
             $events = '';
             while (null !== ($chunk = native_read_chunk($conn)) && '' !== $chunk) {

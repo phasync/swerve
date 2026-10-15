@@ -914,6 +914,44 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 200, [], 'published');
 
                 return;
+            // Publishes ?topic= from a coroutine's finally, after cancelling that coroutine first:
+            // the publish must still be sent, even though its coroutine no longer runs
+            case '/publish-from-cancelled':
+                $fiber = phasync::go(static function () use ($query) {
+                    try {
+                        phasync::sleep(100);
+                    } finally {
+                        Swerve::publish($query['topic'], 'goodbye');
+                    }
+                });
+                phasync::cancel($fiber);
+                try {
+                    phasync::await($fiber);
+                } catch (\phasync\CancelledException) {
+                }
+                fx_send($r, 200, [], 'done');
+
+                return;
+            // ?n= messages "msg<i>" to ?topic=, back to back with no wait in between: on this
+            // topic's first publish in this worker, every one of them queues before the first
+            // reaches the master, so their order out of that queue is what is tested
+            case '/publish-burst':
+                for ($i = 0; $i < (int) $query['n']; ++$i) {
+                    Swerve::publish($query['topic'], "msg$i");
+                }
+                fx_send($r, 200, [], 'done');
+
+                return;
+            // Whether Swerve::publish() of ?topic= (never published before in this worker)
+            // suspended the coroutine that called it: go() runs a coroutine that never waits to
+            // completion before returning, so isTerminated() answers without waiting for it
+            case '/publish-non-suspending':
+                $fiber = phasync::go(static function () use ($query) {
+                    Swerve::publish($query['topic'], 'hello');
+                });
+                fx_send($r, 200, [], $fiber->isTerminated() ? 'true' : 'false');
+
+                return;
             case '/app-log':
                 Swerve::log()->warning('from the application: {what}', ['what' => 'hi']);
                 fx_send($r, 200, [], 'logged');
