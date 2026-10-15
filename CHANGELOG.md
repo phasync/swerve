@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-beta7 (2026-10-15)
 
 ### Changed (breaking): a Scope per request, phasync's frame for its lifetime
 
