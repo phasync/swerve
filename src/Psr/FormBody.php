@@ -2,7 +2,9 @@
 
 namespace Swerve\Psr;
 
-use phasync\Psr\StreamFactory;
+use phasync\Psr\EmptyStream;
+use phasync\Psr\ResourceStream;
+use phasync\Psr\StringStream;
 use phasync\Psr\UploadedFile;
 use Psr\Http\Message\StreamInterface;
 use Swerve\Swerve;
@@ -139,17 +141,17 @@ final class FormBody
                     }
                     \rewind($input);
                     $this->tooLarge($max);
-                    $this->input = StreamFactory::create($input);
+                    $this->input = new ResourceStream($input);
 
                     return;
                 }
             }
-            $this->input = StreamFactory::create($raw);
+            $this->input = new StringStream($raw);
             \parse_str($raw, $this->fields);
 
             return;
         }
-        $this->input = StreamFactory::create('');
+        $this->input = EmptyStream::create();
         $this->multipart($max);
     }
 
@@ -271,9 +273,9 @@ final class FormBody
                     $path = \stream_get_meta_data($file)['uri'];
                     \fclose($file);
                     if ('' === $filename && 0 === $size) {
-                        $files[] = [$name, new UploadedFile(StreamFactory::create(''), '', '', 0, \UPLOAD_ERR_NO_FILE)];
+                        $files[] = [$name, new UploadedFile(EmptyStream::create(), '', '', 0, \UPLOAD_ERR_NO_FILE)];
                     } elseif ($tooBig) {
-                        $files[] = [$name, new UploadedFile(StreamFactory::create(''), $filename, '', 0, \UPLOAD_ERR_INI_SIZE)];
+                        $files[] = [$name, new UploadedFile(EmptyStream::create(), $filename, '', 0, \UPLOAD_ERR_INI_SIZE)];
                     } else {
                         $files[] = [$name, new UploadedFile($path, $filename, $type, $size, \UPLOAD_ERR_OK)];
                     }
@@ -366,6 +368,6 @@ final class FormBody
         Swerve::log()->warning('POST Content-Length exceeds the limit of {max} bytes (post_max_size): the form is empty', ['max' => $max]);
         $this->fields = [];
         $this->files  = [];
-        $this->input  = StreamFactory::create('');
+        $this->input  = EmptyStream::create();
     }
 }
