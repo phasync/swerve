@@ -113,10 +113,12 @@ test('in a cluster, publish() and publishRaw() on one topic reach a subscriber i
         expect(probe($addr, '/publish?topic=mixed&m=json-str'))->toBe('published');
         expect(probe($addr, '/publish-raw?topic=mixed&m=' . \bin2hex("\xFF\xFE")))->toBe('published');
 
+        // The two probes may land on different workers, and there is no order between workers
         \preg_match('/^data: ([0-9a-f]*)\n\n$/', (string) native_read_chunk($conn), $m1);
         \preg_match('/^data: ([0-9a-f]*)\n\n$/', (string) native_read_chunk($conn), $m2);
-        expect(\hex2bin($m1[1]))->toBe('json-str'); // publish(): a string stays a string
-        expect(\hex2bin($m2[1]))->toBe("\xFF\xFE");   // publishRaw(): the exact bytes
+        $got = [\hex2bin($m1[1]), \hex2bin($m2[1])];
+        \sort($got);
+        expect($got)->toBe(['json-str', "\xFF\xFE"]); // publish(): a string stays a string; publishRaw(): the exact bytes
     } finally {
         native_stop($process);
     }
