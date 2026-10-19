@@ -115,11 +115,11 @@ final class HttpServer implements ServerInterface
         }
         \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
 
-        $options = ['max_connections' => $this->max];
-        // A unix: listener is one socket for every worker, made before they were forked
+        // A unix: listener is one socket for every worker, made before they were forked; on
+        // TCP every worker binds the address itself, into one SO_REUSEPORT group
         $this->server = \str_starts_with($this->address, 'unix:')
-            ? new Server(Listener::fromStream(System::listen($this->address)), $options)
-            : new Server($this->address, $options);
+            ? new Server(Listener::fromStream(System::listen($this->address)), ['max_connections' => $this->max])
+            : new Server($this->address, ['max_connections' => $this->max, 'so_reuseport' => true]);
         $this->logger->info('Serving HTTP at {address}, at most {max} connections', ['address' => $this->server->addr(), 'max' => $this->max]);
     }
 
