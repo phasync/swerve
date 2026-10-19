@@ -65,7 +65,7 @@ seen by the others (see [state](how-it-runs.md#state-per-worker-shared-by-its-re
 cache, messages and claims are what the workers share.
 
 An extra listening socket needs `SO_REUSEPORT`, so that every worker can listen on the same
-port: the kernel hands each new connection to one worker, and it stays there. Keep what the
+port (with phasync/net: `phasync\Net\serve($address, ['so_reuseport' => true])`): the kernel hands each new connection to one worker, and it stays there. Keep what the
 connections must share in `Swerve::cache()`. Or let one worker own the port: take a claim, and
 listen only while you hold it.
 

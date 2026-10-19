@@ -25,7 +25,7 @@ framework's own request and response.
 
 ## The ClientRequest
 
-`ClientRequest` extends `phasync\Net\Duplex`: `read()` is the request body, `write()` the response
+`ClientRequest` is a `phasync\Net\Duplex`: `read()` is the request body, `write()` the response
 body.
 
 | | |
