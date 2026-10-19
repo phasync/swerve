@@ -11,8 +11,9 @@ use Swerve\Util\Topics;
  *
  * It receives what is published from the moment it was created, not from the first iteration.
  * It ends when its last reference goes: a `break` out of the loop, the variable going out of
- * scope, or the request's coroutine ending. There is no unsubscribe() to forget. Its iteration
- * ends when the process drains (shutdown, reload, recycle).
+ * scope, or the request's coroutine ending. There is no unsubscribe() to forget. When the worker
+ * stops (shutdown, reload, the end of a recycle), its iteration throws a
+ * {@see WorkerStoppingException} at its wait, as every wait does then.
  *
  * A subscriber that falls behind gets a {@see SubscriberLagException} from the iteration: when
  * the message it is about to receive arrived in this process more than `$maxLag` seconds ago.
@@ -63,7 +64,8 @@ final class Subscription implements \IteratorAggregate
     /**
      * The messages, as they come; null after each `$heartbeat` seconds without one.
      *
-     * Ends when the process drains. A subscription made while draining ends at once.
+     * Throws a {@see WorkerStoppingException} when the worker stops. A subscription made while
+     * draining ends at once.
      *
      * ```php
      * foreach (Swerve::subscribe('chat') as $message) {

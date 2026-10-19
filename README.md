@@ -173,7 +173,7 @@ Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets`
    Each line has the time, the worker (its slot number, 0 to 7 here; blank for the master
    process), and the message: a request with its status and how long the application took,
    or anything else worth knowing, such as a worker that crashed and was restarted. Ctrl+C
-   stops swerve, letting the requests in flight finish first.
+   stops swerve: requests in flight get a `503`, or are cut.
 
    ```bash
    vendor/bin/swerve --watch              # during development: reload when a PHP file changes

@@ -36,7 +36,10 @@ interface ServerInterface
     public function run(): void;
 
     /**
-     * Stop accepting and let the requests in flight finish; {@see ServerInterface::run()} then returns.
+     * Stop accepting; {@see ServerInterface::run()} returns once every connection has ended.
+     * Meanwhile the worker stops the requests in flight with a {@see WorkerStoppingException}
+     * at their wait, and the server ends its protocol for each (a `503` for a response not
+     * yet begun).
      *
      * Upgraded connections stay until they close, or until the worker's stop ends their
      * coroutines.
