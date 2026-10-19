@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "668ea8b23d274cd3cefc858909a332bf",
+    "content-hash": "433ab06cabe58ec437d13658a7488e9a",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -5919,7 +5919,7 @@
         }
     ],
     "aliases": [],
-    "minimum-stability": "beta",
+    "minimum-stability": "stable",
     "stability-flags": {
         "friendsofphp/php-cs-fixer": 20
     },

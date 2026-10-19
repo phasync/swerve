@@ -697,7 +697,7 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 200, [], (string) \memory_get_usage(true));
 
                 return;
-            // Uninterruptible: with phasync-ext, checkpoint preemption would let other
+            // Uninterruptible: with ext-phasync, checkpoint preemption would let other
             // coroutines (the heartbeat among them) run between iterations, healing the
             // very stall this route exists to simulate for the watchdog tests.
             case '/spin':
@@ -889,7 +889,7 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 200, [], 'published');
 
                 return;
-            // Blocks the worker's event loop for ?ms= (a busy wait: with phasync-ext, usleep() yields)
+            // Blocks the worker's event loop for ?ms= (a busy wait: with ext-phasync, usleep() yields)
             case '/block':
                 (#[\phasync\Uninterruptible] static function () use ($query) {
                     for ($end = \microtime(true) + (int) $query['ms'] / 1000; \microtime(true) < $end;) {
@@ -961,7 +961,7 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 200, [], \implode(',', Swerve\Util\Topics::active()));
 
                 return;
-            // A stalled event loop: uninterruptible, or phasync-ext's preemption would let the
+            // A stalled event loop: uninterruptible, or ext-phasync's preemption would let the
             // worker's other coroutines run between iterations
             case '/busy':
                 (#[\phasync\Uninterruptible] static function () use ($query) {

@@ -25,7 +25,7 @@ request and response: [Laravel](https://github.com/phasync/swerve-laravel),
 [CodeIgniter](https://github.com/phasync/swerve-codeigniter) and
 [Laminas](https://github.com/phasync/swerve-laminas).
 
-> Beta: APIs and options may still change until 1.0.
+> Swerve is at 0.x: options and APIs may still change before 1.0.
 
 **[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
 [Server-Sent Events](examples/sse-chat).
@@ -52,45 +52,6 @@ requests and connections at once on [phasync](https://github.com/phasync/phasync
 - **Yours to own.** MIT, with no third-party dependencies beyond phasync and the PSR logger and
   cache interfaces. See [the Ennerd philosophy](PHILOSOPHY.md).
 
-The same application on every server, 2 and 8 workers on one CCD of a Ryzen 9 9950X3D, wrk on
-the other, over loopback ([method, scripts and raw results](benchmarks/servers/SUMMARY.md)).
-8 workers serve 3.9× what 2 do.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/hello-dark.svg">
-  <img alt="Hello world, requests per second: Swoole 1.01M, OpenSwoole 966k, swerve 860k, swerve + ext-phasync 846k, ReactPHP 617k, FrankenPHP 457k, RoadRunner 144k at 8 workers" src="benchmarks/charts/hello-light.svg">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/page-dark.svg">
-  <img alt="10 KB page, requests per second at 8 workers: Swoole 220k, OpenSwoole 215k, swerve + ext-phasync 214k, swerve 213k, ReactPHP 200k, FrankenPHP 135k, RoadRunner 85k" src="benchmarks/charts/page-light.svg">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/wait-dark.svg">
-  <img alt="10 ms wait, 10,000 connections, 8 workers: Swoole 621k, OpenSwoole 557k, swerve + ext-phasync 501k, ReactPHP 223k, FrankenPHP 706, RoadRunner 701 requests per second" src="benchmarks/charts/wait-light.svg">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/websocket-dark.svg">
-  <img alt="Time for a message to reach the last of 50,000 WebSockets: swerve + ext-phasync 78 ms, ReactPHP 150 ms, Swoole 199 ms, OpenSwoole 203 ms" src="benchmarks/charts/websocket-light.svg">
-</picture>
-
-The same framework applications on each server they have an integration for
-([method and results](benchmarks/frameworks/SUMMARY.md)). With ext-phasync, Symfony on swerve
-also overlaps requests that wait: 10,455 req/s with a 10 ms wait at 8 workers, where one request
-per worker at a time gives about 780.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/frameworks-lean-dark.svg">
-  <img alt="JSON route, 8 workers. Slim: Swoole 834k, swerve 705k, swerve + ext-phasync 699k, ReactPHP 546k, FrankenPHP 366k, RoadRunner 132k. Symfony: Swoole 206k, swerve + ext-phasync 96.6k, swerve 94.6k, FrankenPHP 88.9k, RoadRunner 57.6k. Yii 3: swerve 197k, swerve + ext-phasync 192k, RoadRunner 80k" src="benchmarks/charts/frameworks-lean-light.svg">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/frameworks-full-dark.svg">
-  <img alt="JSON route, 8 workers. Laravel: FrankenPHP 21.5k, Swoole 21.1k, RoadRunner 19.2k (all Octane), swerve 18.5k, swerve + ext-phasync 18.4k. CodeIgniter: swerve 20.6k, swerve + ext-phasync 20.2k, FrankenPHP 17.6k. Spiral: RoadRunner 21.4k, swerve + ext-phasync 19.8k, swerve 19.8k" src="benchmarks/charts/frameworks-full-light.svg">
-</picture>
-
 Up to 512 connections per worker swerve runs on PHP's own `stream_select()`; above that
 it needs ext-phasync, which waits with epoll.
 
@@ -116,11 +77,9 @@ it needs ext-phasync, which waits with epoll.
 
 Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions.
 
-1. Install swerve. While it is beta, your project must allow beta packages:
+1. Install swerve:
 
    ```bash
-   composer config minimum-stability beta
-   composer config prefer-stable true
    composer require phasync/swerve
    ```
 

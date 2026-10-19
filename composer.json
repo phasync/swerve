@@ -28,7 +28,7 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "beta",
+    "minimum-stability": "stable",
     "prefer-stable": true,
     "require-dev": {
         "friendsofphp/php-cs-fixer": "dev-master",

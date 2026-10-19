@@ -29,5 +29,5 @@ them: [`sse-chat`](../examples/sse-chat) and
 [`memcached`](../examples/memcached), a memcached server in every worker on top of the shared
 cache, with a [step-by-step tutorial](../examples/memcached/README.md).
 
-Swerve is beta: options and APIs may change until 1.0. It runs on Linux, with PHP 8.2 or
+Swerve is at 0.x: options and APIs may change before 1.0. It runs on Linux, with PHP 8.2 or
 later and the `pcntl`, `posix` and `sockets` extensions.

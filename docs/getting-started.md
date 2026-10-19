@@ -2,20 +2,15 @@
 
 ## Install
 
-Swerve and phasync, the coroutine library it runs on, are beta, so your project must allow
-beta packages:
-
 ```bash
-composer config minimum-stability beta
-composer config prefer-stable true
 composer require phasync/swerve
 ```
 
-Recommended, with PHP 8.3 or later: the phasync extension, which ships inside phasync. Start swerve
+Recommended, with PHP 8.3 or later: the phasync extension, which ships with phasync. Start swerve
 with `--ext`, or install it with `pie install phasync/ext-phasync`. See [Production](production.md#ext-phasync) for what it changes.
 
 ```bash
-vendor/bin/swerve --ext --version   # swerve 0.1.0-beta8 (PHP 8.5.11, phasync 2.0.0, ext-phasync 2.0.0)
+vendor/bin/swerve --ext --version   # swerve 0.1.0 (PHP 8.5.11, phasync 2.0.0, ext-phasync 2.0.0)
 ```
 
 ## A first application

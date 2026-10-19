@@ -51,8 +51,7 @@ see [Production](production.md#sizing).
 
 ## Reporting a bug
 
-Swerve and phasync are beta, and bug reports are how they get to 1.0. A report that can be
-reproduced gets fixed; please include:
+A bug report that can be reproduced gets fixed; please include:
 
 1. What happened, and what you expected, with the exact error or log lines (run with `-vv`).
 2. `vendor/bin/swerve --version`.
