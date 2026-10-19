@@ -176,7 +176,7 @@ final class Cluster
         if (!\extension_loaded('phasync')) {
             $this->logger->notice($extInComposer
                 ? 'phasync-ext is enabled in composer.json but did not load: phasync ships no binary for this PHP build (or PHASYNC_EXT_SO is wrong); see https://github.com/phasync/phasync/issues'
-                : 'phasync-ext is not loaded: fine for development, but in production it lifts the limit of 512 connections per worker and speeds up waiting. It ships inside phasync: add "extra": {"phasync": {"ext": true}} to your composer.json, or start swerve with --ext');
+                : 'phasync-ext is not loaded: fine for development, but in production it lifts the limit of 512 connections per worker and speeds up waiting. It ships inside phasync: start swerve with --ext, or install it with pie install phasync/phasync-ext');
         }
         if ('0' === \trim((string) @\file_get_contents('/proc/sys/net/ipv4/tcp_migrate_req'))) {
             $this->logger->info('net.ipv4.tcp_migrate_req=0: connections queued on a closing listener are reset during reload/recycle; set it to 1 for lossless handovers');

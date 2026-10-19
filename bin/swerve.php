@@ -92,9 +92,7 @@ if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
     \pcntl_exec(\PHP_BINARY, [...$flags, ...phasync\ext\_original_args()]);
 }
 
-// Load phasync-ext (it ships inside phasync): --ext must succeed or swerve stops; composer.json's setting only
-// logs a notice when the extension cannot load. Either may restart this process once.
-$extInComposer = phasync\ext_enabled();
+// Load phasync-ext (it ships inside phasync) with --ext: swerve stops if it cannot. May restart this process once.
 if (\in_array('--ext', $argv, true)) {
     try {
         phasync\ext\ensure_loaded();
@@ -102,8 +100,6 @@ if (\in_array('--ext', $argv, true)) {
         \fwrite(\STDERR, 'swerve: --ext: '.$e->getMessage()."\n");
         exit(1);
     }
-} elseif ($extInComposer) {
-    phasync\try_enable_ext();
 }
 
 pcntl_async_signals(true);

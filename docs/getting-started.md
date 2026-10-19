@@ -11,9 +11,8 @@ composer config prefer-stable true
 composer require phasync/swerve
 ```
 
-Recommended, on Linux with PHP 8.2 to 8.5: the phasync extension, which ships inside phasync.
-Enable it with `"extra": {"phasync": {"ext": true}}` in your `composer.json`, or start swerve with
-`--ext`. See [Production](production.md#phasync-ext) for what it changes.
+Recommended, with PHP 8.3 or later: the phasync extension, which ships inside phasync. Start swerve
+with `--ext`, or install it with `pie install phasync/phasync-ext`. See [Production](production.md#phasync-ext) for what it changes.
 
 ```bash
 vendor/bin/swerve --ext --version   # swerve 0.1.0-beta4 (PHP 8.5.11, phasync 2.0.0-beta7, phasync-ext 0.5.0-beta5)

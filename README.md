@@ -107,7 +107,7 @@ it needs phasync-ext, which waits with epoll.
    [How swerve runs your application](docs/how-it-runs.md).
 3. **Return a `Swerve\RequestHandler`** from `swerve.php`. A framework gets an adapter that turns
    the `ClientRequest` into its own request and response.
-4. **Load phasync-ext** in production (it ships inside phasync: `--ext`, or `"extra": {"phasync": {"ext": true}}` in composer.json). Blocking calls in
+4. **Load phasync-ext** in production (it ships inside phasync: start swerve with `--ext`, or `pie install phasync/phasync-ext`). Blocking calls in
    libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
    coroutine instead of stalling the worker, and a worker can hold far more than 1,024
    connections.
@@ -199,7 +199,7 @@ Serving:
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
 
 Extension:
-  --ext                            Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot
+  --ext                            Load phasync-ext (bundled with phasync); swerve stops if it cannot
 
 Development:
   --watch                          Restart all workers when a PHP file of the application changes

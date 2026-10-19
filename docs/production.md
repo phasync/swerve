@@ -3,17 +3,11 @@
 ## phasync-ext
 
 phasync-ext is an optional PHP extension that ships inside [phasync](https://github.com/phasync/phasync),
-with prebuilt binaries for PHP 8.2 to 8.5 on Linux. Swerve loads it when your project enables it in
-`composer.json`, or when you start swerve with `--ext`:
-
-```json
-{
-    "extra": {"phasync": {"ext": true}}
-}
-```
+with prebuilt binaries for PHP 8.3 to 8.5 on Linux and macOS. Swerve loads it when you start it with
+`--ext`, and uses one installed with `pie install phasync/phasync-ext` as it is:
 
 ```bash
-vendor/bin/swerve --ext          # the same, without touching composer.json; swerve stops if it cannot load
+vendor/bin/swerve --ext          # swerve stops if it cannot load it
 vendor/bin/swerve --version      # ... phasync-ext 0.5.0-beta5
 ```
 
