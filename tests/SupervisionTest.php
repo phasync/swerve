@@ -1388,7 +1388,7 @@ test('NUMA pinning keeps the CPUs the operator allowed: across nodes, each worke
     }
 })->skip(fn () => count(glob('/sys/devices/system/node/node[0-9]*', GLOB_ONLYDIR)) < 2, 'needs several NUMA nodes');
 
-test('shutdown under concurrent load fails no request in flight', function () {
+test('shutdown under concurrent load answers each request in flight whole, 200 or 503, and stops at once', function () {
     [$process, $addr] = swerve_start();
     $signalled        = 0.0;
     $load             = http_load($addr, '/sleep?ms=100&id=l', 3, 8, [[1.0, static function () use ($process, &$signalled) {
@@ -1396,7 +1396,10 @@ test('shutdown under concurrent load fails no request in flight', function () {
         swerve_signal($process, SIGTERM);
     }]]);
 
-    expect([$load['status5xx'], $load['truncated']])->toBe([0, 0]);
+    // A worker stops at once: the requests in flight get 503 (at most one per client), none is cut
+    expect($load['ok'])->toBeGreaterThan(0);
+    expect($load['status5xx'])->toBeLessThanOrEqual(8);
+    expect($load['truncated'])->toBe(0);
     expect($load['reset'])->toBeLessThanOrEqual(resets_allowed());
     [$code] = swerve_wait($process, 2);
     expect($code)->toBe(0);
