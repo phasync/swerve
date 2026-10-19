@@ -1,10 +1,11 @@
 # Command line
 
 ```
-Usage: swerve [options] [swerve.php]
+Usage: swerve [options] [file]
 
 Application:
-  [swerve.php]                     A PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest
+  [file]                           With the swerve adapter: swerve.php, a PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest (default: ./swerve.php). With another adapter: given to it (a router script, say, as for php -S)
+  -t, --docroot=<dir>              The document root, given to the adapter (one serving plain PHP files, say, as php -S does); not for the swerve adapter, see --public
   --adapter=<name>                 The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application's composer.json, the only installed adapter, else swerve
 
 Serving:
@@ -14,7 +15,7 @@ Serving:
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
 
 Extension:
-  --ext                            Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot
+  --ext                            Load ext-phasync (bundled with phasync); swerve stops if it cannot
 
 Development:
   --watch                          Restart all workers when a PHP file of the application changes
@@ -36,7 +37,7 @@ Limits:
 
 Information:
   -h, --help                       This help
-  --version                        The versions of swerve, PHP, phasync and phasync-ext
+  --version                        The versions of swerve, PHP, phasync and ext-phasync
 ```
 
 - Options and the application file may come in any order. An option's value is attached
