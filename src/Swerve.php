@@ -372,10 +372,10 @@ final class Swerve
      * explicit `-d` on the command line still wins.
      *
      * Calls after startup change nothing, so the file may run again: an application that
-     * includes Composer's autoloader in every request (under `virtualize()`) includes it again.
+     * includes Composer's autoloader in every request includes it again.
      *
      * ```php
-     * Swerve::ini(['phasync.virtualize' => true]);
+     * Swerve::ini(['memory_limit' => '512M']);
      * ```
      *
      * @param array<string, string|int|float|bool> $settings

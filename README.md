@@ -306,7 +306,7 @@ swerve's own, when the master loads the autoloader at startup:
 ```php
 use Swerve\Swerve;
 
-Swerve::ini(['phasync.virtualize' => true]);  // php.ini settings, applied by swerve's startup restart
+Swerve::ini(['memory_limit' => '512M']);  // php.ini settings, applied by swerve's startup restart
 Swerve::onWorkerStart(function () {           // in every worker, before the application loads
     // set up what the worker shares between requests; coroutines started here run for its life
 });

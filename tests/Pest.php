@@ -95,7 +95,7 @@ function swerve_spawn(array $args, ?string $fixture, array $php = [], array $env
     if (in_array('--ext', $args, true) && !getenv('PHASYNC_EXT_SO') && [] === glob(__DIR__ . '/../vendor/phasync/phasync/ext/phasync-*.so')) {
         // phasync's dev-main bundles no binaries (only its release tags do): otherwise every --ext
         // test fails as "swerve did not start serving", with an empty log
-        throw new RuntimeException('--ext needs a phasync-ext binary: set PHASYNC_EXT_SO to one (and PHASYNC_LICENSE_FILE to a licence)');
+        throw new RuntimeException('--ext needs a phasync extension binary: set PHASYNC_EXT_SO to one');
     }
     $path    = null === $fixture ? [] : [str_contains($fixture, '/') ? $fixture : __DIR__ . "/Fixtures/$fixture"];
     $process = proc_open(
