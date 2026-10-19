@@ -4,14 +4,14 @@
     "type": "library",
     "require": {
         "php": "^8.2",
-        "phasync/phasync": "dev-main",
+        "phasync/phasync": "^2.0",
         "psr/http-message": "^1.0 || ^2.0",
         "psr/log": "^1.0 || ^2.0 || ^3.0",
         "psr/simple-cache": "^1.0 || ^2.0 || ^3.0",
         "ext-pcntl": "*",
         "ext-posix": "*",
         "ext-sockets": "*",
-        "phasync/net": "^2.0.0-alpha4"
+        "phasync/net": "^2.0"
     },
     "bin": [
         "bin/swerve"
