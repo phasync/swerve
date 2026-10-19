@@ -765,7 +765,7 @@ dataset('modes', ['plain' => [[]], 'ext' => [['--ext']]]);
 function ws_start(array $mode, int $workers = 1, array $env = []): array
 {
     [$process, $addr, $log] = swerve_start($mode, $workers, env: $env, fixture: 'realtime.php');
-    expect(probe($addr, '/ext'))->toBe($mode ? '1' : '0');
+    expect(probe($addr, '/ext'))->toBe($mode || extension_loaded('phasync') ? '1' : '0'); // or loaded by php.ini
 
     return [$process, $addr, $log];
 }

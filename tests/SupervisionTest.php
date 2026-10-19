@@ -944,6 +944,9 @@ test('a log reader that stops reading stops neither the server nor its shutdown'
     fclose($reader);
 });
 
+// The signal must not cut a blocking call short (EINTR). Without the extension usleep() blocks,
+// so the request finishes; with it, usleep() is a wait like any other, and a stop (reload,
+// shutdown) ends the request there with a whole 503. A recycle lingers: the request finishes.
 test('a drain does not cut short a blocking call in a request in flight', function (?int $signal, array $args) {
     [$process, $addr, $log] = swerve_start($args, workers: 1, env: ['SWERVE_TEST_DIR' => test_dir()]);
     if (null === $signal) {
@@ -955,8 +958,13 @@ test('a drain does not cut short a blocking call in a request in flight', functi
     if (null !== $signal) {
         swerve_signal($process, $signal);
     }
-    $body = native_read_response($conn)['body'];
-    expect((float) $body)->toBeGreaterThanOrEqual(1.99);
+    $response = native_read_response($conn);
+    if (null !== $signal && 503 === $response['status']) {
+        expect(extension_loaded('phasync') || in_array('--ext', $args, true))->toBeTrue();
+    } else {
+        expect($response['status'])->toBe(200);
+        expect((float) $response['body'])->toBeGreaterThanOrEqual(1.99);
+    }
     log_wait($log, '/Draining/', 2);
     native_stop($process);
 })->with([
