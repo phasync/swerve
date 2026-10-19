@@ -1121,6 +1121,18 @@ test('a request head arriving a byte at a time takes linear time, not quadratic'
     expect($time(60000) / $time(6000))->toBeLessThan(13.0);
 });
 
+test('on a TCP address every worker listens on the port and serves, and none fails to bind', function () {
+    [$process, $addr, $log] = swerve_start([], 3);
+
+    $seen     = [];
+    $deadline = microtime(true) + 5;
+    while (count($seen) < 3 && microtime(true) < $deadline) {
+        $seen[probe($addr, '/pid')] = true;
+    }
+    expect($seen)->toHaveCount(3);
+    expect(file_get_contents($log))->not->toContain('Address already in use');
+});
+
 test('on a unix: address every worker accepts from one socket, a reload brings new workers to it, and stopping removes the file', function () {
     $dir  = temp_path(true);
     $addr = "unix:$dir/s.sock";
