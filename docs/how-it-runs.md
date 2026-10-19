@@ -56,7 +56,7 @@ With [phasync-ext](production.md#phasync-ext) loaded, almost all of that waits a
 instead of blocking the process: sockets and TLS, MySQL through mysqli or PDO, `curl_exec()`
 and curl-multi loops such as Guzzle's, `file_get_contents('https://...')`, pipes and child
 processes, file and DNS functions, `sleep()` and `usleep()`. The
-[extension's README](https://github.com/phasync/phasync-ext#readme) has the full list.
+[extension's README](https://github.com/phasync/ext-phasync#readme) has the full list.
 CPU-bound code still blocks, and so do clients with their own network code instead of PHP's
 streams, such as PostgreSQL's libpq (pdo_pgsql, pgsql) and phpredis.
 

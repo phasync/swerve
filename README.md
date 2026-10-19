@@ -107,7 +107,7 @@ it needs phasync-ext, which waits with epoll.
    [How swerve runs your application](docs/how-it-runs.md).
 3. **Return a `Swerve\RequestHandler`** from `swerve.php`. A framework gets an adapter that turns
    the `ClientRequest` into its own request and response.
-4. **Load phasync-ext** in production (it ships inside phasync: start swerve with `--ext`, or `pie install phasync/phasync-ext`). Blocking calls in
+4. **Load phasync-ext** in production (it ships inside phasync: start swerve with `--ext`, or `pie install phasync/ext-phasync`). Blocking calls in
    libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
    coroutine instead of stalling the worker, and a worker can hold far more than 1,024
    connections.

@@ -66,6 +66,6 @@ Where:
   <https://github.com/phasync/swerve/issues>
 - phasync (coroutines, channels, timeouts):
   <https://github.com/phasync/phasync/issues>
-- phasync-ext (the extension): <https://github.com/phasync/phasync-ext/issues>
+- phasync-ext (the extension): <https://github.com/phasync/ext-phasync/issues>
 
 When unsure which, file it with swerve.

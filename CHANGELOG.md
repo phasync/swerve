@@ -5,7 +5,7 @@
 ### Changed (breaking)
 
 - `"extra": {"phasync": {"ext": true}}` in composer.json no longer loads phasync-ext: phasync 2.0 drops
-  the setting. Start swerve with `--ext`, or install the extension with `pie install phasync/phasync-ext`.
+  the setting. Start swerve with `--ext`, or install the extension with `pie install phasync/ext-phasync`.
 
 ## 0.1.0-beta7 (2026-10-15)
 
