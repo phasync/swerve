@@ -156,7 +156,6 @@ final class Cluster
         private readonly ?string $monitorDir,
         private readonly string $serving,
         int $cacheBytes = 64 << 20,
-        bool $extInComposer = false,
         private readonly ?\Closure $restart = null,
     ) {
         // A master started by a reload: it reports the reload complete, and keeps restarting
@@ -174,9 +173,7 @@ final class Cluster
         OrderedLog::directory();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
         if (!\extension_loaded('phasync')) {
-            $this->logger->notice($extInComposer
-                ? 'phasync-ext is enabled in composer.json but did not load: phasync ships no binary for this PHP build (or PHASYNC_EXT_SO is wrong); see https://github.com/phasync/phasync/issues'
-                : 'phasync-ext is not loaded: fine for development, but in production it lifts the limit of 512 connections per worker and speeds up waiting. It ships inside phasync: start swerve with --ext, or install it with pie install phasync/ext-phasync');
+            $this->logger->notice('The phasync extension is not loaded: fine for development, but in production it lifts the limit of 512 connections per worker and speeds up waiting. It ships inside phasync: start swerve with --ext, or install it with pie install phasync/ext-phasync');
         }
         if ('0' === \trim((string) @\file_get_contents('/proc/sys/net/ipv4/tcp_migrate_req'))) {
             $this->logger->info('net.ipv4.tcp_migrate_req=0: connections queued on a closing listener are reset during reload/recycle; set it to 1 for lossless handovers');

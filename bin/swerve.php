@@ -118,7 +118,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
 /**
  * Ensure we don't pollute the global namespace.
  */
-(function () use ($argv, $extInComposer) {
+(function () use ($argv) {
     /**
      * Colorful terminal.
      */
@@ -294,7 +294,6 @@ foreach ([\STDOUT, \STDERR] as $out) {
             \implode(', ', \array_map(static fn ($a) => 'http' . (\str_starts_with($a, 'unix:') ? '+unix://' . \substr($a, 5) : "://$a"), $addresses)),
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
         (int) \ini_parse_quantity($args->cacheSize),
-        $extInComposer,
         static function () use ($logger): void {
             // A reload: start over as a fresh process, from the operator's command line
             System::closeListeners();
