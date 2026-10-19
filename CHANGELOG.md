@@ -28,7 +28,7 @@ Runs on the released stack: phasync 2.0.0, phasync/net 2.0.0 and ext-phasync 2.0
   waited for the 10 s head timeout and a `408` (#43).
 - With phasync/net 2.0.0 only one worker could bind a TCP `--http` address; the others failed
   with "Address already in use" and were restarted over and over (#57).
-- `examples/websocket-chat` started: it used a PSR-15 handler and `Swerve\Http\WebSocket`,
+- `examples/websocket-chat` failed at start: it used a PSR-15 handler and `Swerve\Http\WebSocket`,
   neither of which exists (#56). `examples/sse-chat` uses `ServerSentEvents`, as
   docs/realtime.md shows.
 - The docs said requests in flight finish on a shutdown; since 0.1.0-beta7 they get a
