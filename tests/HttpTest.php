@@ -108,6 +108,18 @@ test('a malformed request gets 400 and the connection ends', function () {
     expect(native_read_response($conn))->toBeNull();
 });
 
+test('bytes that cannot start a request line (a TLS ClientHello) get 400 at once, not at the head timeout', function () {
+    foreach (["\x16\x03\x01\x02\x00\x01\x00\x01\xfc\x03\x03", "GET\t/ HTTP/1.1", "{\"json\": 1}"] as $start) {
+        $conn  = native_connect($this->addr);
+        $begin = microtime(true);
+        fwrite($conn, $start);
+
+        expect(native_read_response($conn)['status'])->toBe(400);
+        expect(microtime(true) - $begin)->toBeLessThan(1.0);
+        expect(native_read_response($conn))->toBeNull();
+    }
+});
+
 test('requests on different connections are handled concurrently', function () {
     $conns = [];
     for ($i = 1; $i <= 20; ++$i) {
