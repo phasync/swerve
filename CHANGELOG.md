@@ -2,10 +2,35 @@
 
 ## Unreleased
 
+Runs on the released stack: phasync 2.0.0, phasync/net 2.0.0 and ext-phasync 2.0.0.
+
 ### Changed (breaking)
 
-- `"extra": {"phasync": {"ext": true}}` in composer.json no longer loads phasync-ext: phasync 2.0 drops
-  the setting. Start swerve with `--ext`, or install the extension with `pie install phasync/ext-phasync`.
+- Requires `phasync/phasync` `^2.0` (was `dev-main`) and `phasync/net` `^2.0` (was
+  `^2.0.0-alpha4`). Tagged releases up to 0.1.0-beta7 fatal at start with phasync 2.0.0
+  (`Call to undefined function phasync\ext_enabled()`, #55): upgrade swerve with phasync.
+- `"extra": {"phasync": {"ext": true}}` in composer.json no longer loads the extension: phasync
+  2.0 drops the setting. Start swerve with `--ext`, or install the extension with
+  `pie install phasync/ext-phasync`. The extension is called ext-phasync everywhere (was
+  phasync-ext), also in `--version` and `--help`.
+- phasync/net 2.0 turns `SO_REUSEPORT` off by default; swerve now asks for it on each worker's
+  TCP listener, so workers still share a port, and a second swerve on an address already
+  served is still refused. An application that listens with phasync/net itself (`listen()`,
+  `serve()`, `dial()`) follows net's new options: one flat array with PHP's stream-context
+  names (`so_reuseport`, `tcp_nodelay`, `backlog`, plus `keepalive`, `max_connections` and
+  `context`), unknown names throw, and `dial()` returns a `Duplex`. The listen backlog is net's
+  default: `net.core.somaxconn` on Linux (was 65535).
+
+### Fixed
+
+- With phasync/net 2.0.0 only one worker could bind a TCP `--http` address; the others failed
+  with "Address already in use" and were restarted over and over (#57).
+- `examples/websocket-chat` started: it used a PSR-15 handler and `Swerve\Http\WebSocket`,
+  neither of which exists (#56). `examples/sse-chat` uses `ServerSentEvents`, as
+  docs/realtime.md shows.
+- The docs said requests in flight finish on a shutdown; since 0.1.0-beta7 they get a
+  `WorkerStoppingException` at their wait (a `503` for a response not begun, otherwise the
+  response is cut), and so does a `Swerve::subscribe()` loop (#44).
 
 ## 0.1.0-beta7 (2026-10-15)
 
