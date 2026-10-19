@@ -518,6 +518,12 @@ final class HttpConnection
         $deadline = null;
         while (false === ($end = \strpos($this->buffer, "\r\n\r\n", $from))) {
             $have = \strlen($this->buffer) - $this->offset;
+            // What can't become a request line is answered now, not at the timeout: a request
+            // line starts with a token method and a space (a TLS ClientHello starts with 0x16)
+            $method = \strspn($this->buffer, self::TOKEN, $this->offset);
+            if ($method < $have && (0 === $method || ' ' !== $this->buffer[$this->offset + $method])) {
+                throw new HttpError('Bad Request', 400);
+            }
             if ($have > self::MAX_HEAD) {
                 throw new HttpError('Request Header Fields Too Large', 431);
             }

@@ -23,6 +23,9 @@ Runs on the released stack: phasync 2.0.0, phasync/net 2.0.0 and ext-phasync 2.0
 
 ### Fixed
 
+- Bytes that cannot start an HTTP request line, such as a TLS ClientHello sent to the plain
+  `--http` listener (an application probing its own `https://` URL), get `400` at once; they
+  waited for the 10 s head timeout and a `408` (#43).
 - With phasync/net 2.0.0 only one worker could bind a TCP `--http` address; the others failed
   with "Address already in use" and were restarted over and over (#57).
 - `examples/websocket-chat` started: it used a PSR-15 handler and `Swerve\Http\WebSocket`,
