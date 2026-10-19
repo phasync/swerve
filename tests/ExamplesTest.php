@@ -27,7 +27,6 @@ test('the SSE chat: messages posted reach every listener, and bad ones are refus
             $conn = native_connect($addr);
             fwrite($conn, "GET /events HTTP/1.1\r\nHost: t\r\n\r\n");
             expect(native_read_head($conn)['headers']['content-type'])->toBe('text/event-stream');
-            expect(native_read_chunk($conn))->toBe("retry: 1000\n\n");
             $listeners[] = $conn;
         }
         $post = static function (string $json) use ($addr): int {
@@ -42,11 +41,12 @@ test('the SSE chat: messages posted reach every listener, and bad ones are refus
             $event = json_decode(substr(native_read_chunk($conn), 6), true);
             expect([$event['name'], $event['text']])->toBe(['ann', 'hi']);
         }
-        // A drain ends the subscriptions, so the event streams end at once, not at the deadline
+        // A worker stops at once: the event streams are cut (the browsers reconnect), not left
+        // open until the deadline
         $start = microtime(true);
         swerve_signal($process, SIGINT);
         foreach ($listeners as $conn) {
-            expect(native_read_chunk($conn))->toBe('');
+            expect(native_read_chunk($conn))->toBeNull();
             fclose($conn);
         }
         expect(microtime(true) - $start)->toBeLessThan(1.0);

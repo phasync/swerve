@@ -11,21 +11,22 @@
 use phasync\IOException;
 use Swerve\ClientRequest;
 use Swerve\RequestHandler;
+use Swerve\ServerSentEvents;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
 
 return new RequestHandler(static function (ClientRequest $request) {
     switch ([$request->getMethod(), \strtok($request->getTarget(), '?')]) {
         case ['GET', '/events']:
-            // A null every 15 s without a message, for a keep-alive; the loop ends when the worker
-            // drains (a shutdown or reload), and the browser reconnects to another
+            // A null every 15 s without a message, for a keep-alive. When the worker stops (a
+            // shutdown or reload), the loop throws a WorkerStoppingException, swerve cuts the
+            // stream, and the browser reconnects to another
             $subscription = Swerve::subscribe('chat', heartbeat: 15);
-            $request->sendResponseHeaders(200, ['Content-Type' => 'text/event-stream', 'Cache-Control' => 'no-cache']);
+            $sse          = new ServerSentEvents($request);   // the head goes out now
             try {
-                $request->write("retry: 1000\n\n");
                 foreach ($subscription as $message) {
                     // The keep-alive makes sure a client that left is noticed: this write fails
-                    $request->write(null === $message ? ": keep-alive\n\n" : "data: $message\n\n");
+                    null === $message ? $sse->comment('keep-alive') : $sse->send($message);
                 }
             } catch (IOException) {
                 // The client left

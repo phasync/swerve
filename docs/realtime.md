@@ -15,8 +15,9 @@ when it ends. From [`examples/sse-chat/swerve.php`](../examples/sse-chat/swerve.
 use phasync\IOException;
 use Swerve\ServerSentEvents;
 
-// A null every 15 s without a message, for a keep-alive; the loop ends when the worker
-// drains (a shutdown or reload), and the browser reconnects to another
+// A null every 15 s without a message, for a keep-alive. When the worker stops (a
+// shutdown or reload), the loop throws a WorkerStoppingException, swerve cuts the
+// stream, and the browser reconnects to another
 $subscription = Swerve::subscribe('chat', heartbeat: 15);
 $sse = new ServerSentEvents($request);   // the head goes out now
 try {
