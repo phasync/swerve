@@ -19,7 +19,7 @@
 <text x="160" y="108.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#0D1B2E">OpenSwoole 26.2</text>
 <rect x="170" y="93" width="334.4" height="22" rx="3" fill="#B6C2CF"/>
 <text x="511.4" y="108.5" font-size="12" fill="#0D1B2E">557k</text>
-<text x="160" y="137.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + phasync-ext</text>
+<text x="160" y="137.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + ext-phasync</text>
 <rect x="170" y="122" width="300.5" height="22" rx="3" fill="#5B93CC"/>
 <text x="477.5" y="137.5" font-size="12" fill="#0D1B2E">501k</text>
 <text x="160" y="166.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#0D1B2E">ReactPHP 1.11</text>

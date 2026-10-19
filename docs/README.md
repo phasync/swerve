@@ -20,7 +20,7 @@ Read in this order when you build an application on swerve:
 6. [Publish and subscribe](publish-subscribe.md): messages between the workers; and the
    [shared cache](../README.md#shared-cache), `Swerve::cache()` and [`Swerve::claim()`](../README.md#claims).
 7. [Command line](command-line.md): every option.
-8. [Production](production.md): sizing, phasync-ext, systemd, Docker, nginx and TLS,
+8. [Production](production.md): sizing, ext-phasync, systemd, Docker, nginx and TLS,
    reloads, limits.
 9. [Troubleshooting and reporting bugs](troubleshooting.md).
 

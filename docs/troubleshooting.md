@@ -45,7 +45,7 @@ see [Production](production.md#sizing).
 ## Seeing more
 
 - `-v` logs what swerve does (workers starting, ready, draining), `-vv` also debug.
-- `--version` prints the versions of swerve, PHP, phasync and phasync-ext.
+- `--version` prints the versions of swerve, PHP, phasync and ext-phasync.
 - `kill -QUIT <worker pid>` makes a worker log the requests it is serving and where its code
   is (the watchdog does this before killing a stuck worker).
 
@@ -58,7 +58,7 @@ reproduced gets fixed; please include:
 2. `vendor/bin/swerve --version`.
 3. The smallest `swerve.php` that shows it, the command line you ran it with, and the request
    (a `curl` command, or a few lines of client code).
-4. Whether it happens with and without phasync-ext, if you can try both.
+4. Whether it happens with and without ext-phasync, if you can try both.
 
 Where:
 
@@ -66,6 +66,6 @@ Where:
   <https://github.com/phasync/swerve/issues>
 - phasync (coroutines, channels, timeouts):
   <https://github.com/phasync/phasync/issues>
-- phasync-ext (the extension): <https://github.com/phasync/ext-phasync/issues>
+- ext-phasync (the extension): <https://github.com/phasync/ext-phasync/issues>
 
 When unsure which, file it with swerve.

@@ -58,41 +58,41 @@ the other, over loopback ([method, scripts and raw results](benchmarks/servers/S
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/hello-dark.svg">
-  <img alt="Hello world, requests per second: Swoole 1.01M, OpenSwoole 966k, swerve 860k, swerve + phasync-ext 846k, ReactPHP 617k, FrankenPHP 457k, RoadRunner 144k at 8 workers" src="benchmarks/charts/hello-light.svg">
+  <img alt="Hello world, requests per second: Swoole 1.01M, OpenSwoole 966k, swerve 860k, swerve + ext-phasync 846k, ReactPHP 617k, FrankenPHP 457k, RoadRunner 144k at 8 workers" src="benchmarks/charts/hello-light.svg">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/page-dark.svg">
-  <img alt="10 KB page, requests per second at 8 workers: Swoole 220k, OpenSwoole 215k, swerve + phasync-ext 214k, swerve 213k, ReactPHP 200k, FrankenPHP 135k, RoadRunner 85k" src="benchmarks/charts/page-light.svg">
+  <img alt="10 KB page, requests per second at 8 workers: Swoole 220k, OpenSwoole 215k, swerve + ext-phasync 214k, swerve 213k, ReactPHP 200k, FrankenPHP 135k, RoadRunner 85k" src="benchmarks/charts/page-light.svg">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/wait-dark.svg">
-  <img alt="10 ms wait, 10,000 connections, 8 workers: Swoole 621k, OpenSwoole 557k, swerve + phasync-ext 501k, ReactPHP 223k, FrankenPHP 706, RoadRunner 701 requests per second" src="benchmarks/charts/wait-light.svg">
+  <img alt="10 ms wait, 10,000 connections, 8 workers: Swoole 621k, OpenSwoole 557k, swerve + ext-phasync 501k, ReactPHP 223k, FrankenPHP 706, RoadRunner 701 requests per second" src="benchmarks/charts/wait-light.svg">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/websocket-dark.svg">
-  <img alt="Time for a message to reach the last of 50,000 WebSockets: swerve + phasync-ext 78 ms, ReactPHP 150 ms, Swoole 199 ms, OpenSwoole 203 ms" src="benchmarks/charts/websocket-light.svg">
+  <img alt="Time for a message to reach the last of 50,000 WebSockets: swerve + ext-phasync 78 ms, ReactPHP 150 ms, Swoole 199 ms, OpenSwoole 203 ms" src="benchmarks/charts/websocket-light.svg">
 </picture>
 
 The same framework applications on each server they have an integration for
-([method and results](benchmarks/frameworks/SUMMARY.md)). With phasync-ext, Symfony on swerve
+([method and results](benchmarks/frameworks/SUMMARY.md)). With ext-phasync, Symfony on swerve
 also overlaps requests that wait: 10,455 req/s with a 10 ms wait at 8 workers, where one request
 per worker at a time gives about 780.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/frameworks-lean-dark.svg">
-  <img alt="JSON route, 8 workers. Slim: Swoole 834k, swerve 705k, swerve + phasync-ext 699k, ReactPHP 546k, FrankenPHP 366k, RoadRunner 132k. Symfony: Swoole 206k, swerve + phasync-ext 96.6k, swerve 94.6k, FrankenPHP 88.9k, RoadRunner 57.6k. Yii 3: swerve 197k, swerve + phasync-ext 192k, RoadRunner 80k" src="benchmarks/charts/frameworks-lean-light.svg">
+  <img alt="JSON route, 8 workers. Slim: Swoole 834k, swerve 705k, swerve + ext-phasync 699k, ReactPHP 546k, FrankenPHP 366k, RoadRunner 132k. Symfony: Swoole 206k, swerve + ext-phasync 96.6k, swerve 94.6k, FrankenPHP 88.9k, RoadRunner 57.6k. Yii 3: swerve 197k, swerve + ext-phasync 192k, RoadRunner 80k" src="benchmarks/charts/frameworks-lean-light.svg">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/charts/frameworks-full-dark.svg">
-  <img alt="JSON route, 8 workers. Laravel: FrankenPHP 21.5k, Swoole 21.1k, RoadRunner 19.2k (all Octane), swerve 18.5k, swerve + phasync-ext 18.4k. CodeIgniter: swerve 20.6k, swerve + phasync-ext 20.2k, FrankenPHP 17.6k. Spiral: RoadRunner 21.4k, swerve + phasync-ext 19.8k, swerve 19.8k" src="benchmarks/charts/frameworks-full-light.svg">
+  <img alt="JSON route, 8 workers. Laravel: FrankenPHP 21.5k, Swoole 21.1k, RoadRunner 19.2k (all Octane), swerve 18.5k, swerve + ext-phasync 18.4k. CodeIgniter: swerve 20.6k, swerve + ext-phasync 20.2k, FrankenPHP 17.6k. Spiral: RoadRunner 21.4k, swerve + ext-phasync 19.8k, swerve 19.8k" src="benchmarks/charts/frameworks-full-light.svg">
 </picture>
 
 Up to 512 connections per worker swerve runs on PHP's own `stream_select()`; above that
-it needs phasync-ext, which waits with epoll.
+it needs ext-phasync, which waits with epoll.
 
 
 ### Coming from PHP-FPM
@@ -107,7 +107,7 @@ it needs phasync-ext, which waits with epoll.
    [How swerve runs your application](docs/how-it-runs.md).
 3. **Return a `Swerve\RequestHandler`** from `swerve.php`. A framework gets an adapter that turns
    the `ClientRequest` into its own request and response.
-4. **Load phasync-ext** in production (it ships inside phasync: start swerve with `--ext`, or `pie install phasync/ext-phasync`). Blocking calls in
+4. **Load ext-phasync** in production (it ships inside phasync: start swerve with `--ext`, or `pie install phasync/ext-phasync`). Blocking calls in
    libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
    coroutine instead of stalling the worker, and a worker can hold far more than 1,024
    connections.
@@ -199,7 +199,7 @@ Serving:
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
 
 Extension:
-  --ext                            Load phasync-ext (bundled with phasync); swerve stops if it cannot
+  --ext                            Load ext-phasync (bundled with phasync); swerve stops if it cannot
 
 Development:
   --watch                          Restart all workers when a PHP file of the application changes
@@ -221,7 +221,7 @@ Limits:
 
 Information:
   -h, --help                       This help
-  --version                        The versions of swerve, PHP, phasync and phasync-ext
+  --version                        The versions of swerve, PHP, phasync and ext-phasync
 ```
 
 Options and the application file may come in any order; an option's value is attached
@@ -412,7 +412,7 @@ body (`''` only at its end) and `write()` sends the response body. The module do
   the `Scope` that registered it, which holds it weakly: one whose request has ended is dropped (it relies on phasync's garbage collection, about half a
   second after a coroutine ends) and never runs. An exception in a callback is logged and
   stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
-- **Many connections.** Without phasync-ext a worker serves at most 512 connections, whatever
+- **Many connections.** Without ext-phasync a worker serves at most 512 connections, whatever
   `ulimit -n` says: add workers or install the extension for many of them.
 - **Server-Sent Events and WebSockets** are in core: `Swerve\ServerSentEvents` and `Swerve\WebSocket`,
   specified in [WebSockets and Server-Sent Events](docs/websocket.md); see also [Realtime](docs/realtime.md).
@@ -610,7 +610,7 @@ Operating notes:
   block the server; with `--log` they go to a file, which never blocks. A line that can't be
   written (a full disk, a log reader gone) is dropped without a PHP warning, which an
   application's error handler could turn into an exception.
-- A worker at its limit of connections (its open-file limit less 64, and without phasync-ext at most 512) logs a
+- A worker at its limit of connections (its open-file limit less 64, and without ext-phasync at most 512) logs a
   warning, at most once a minute.
 - Options go before the swerve file: anything after it is refused.
 - The listeners and the workers' pipes to the master are close-on-exec (this needs the

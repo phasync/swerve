@@ -1690,10 +1690,10 @@ test('a usage error is one line on stderr, pointing at --help, with exit code 2'
     'unknown host'   => ['--http=no-such-host.invalid:80', "Illegal value for option: --http: can't resolve no-such-host.invalid"],
 ]);
 
-test('--version names swerve, PHP, phasync and phasync-ext', function () {
+test('--version names swerve, PHP, phasync and ext-phasync', function () {
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' --version', $out, $code);
     expect($code)->toBe(0);
-    expect($out[0])->toMatch('/^swerve \S+ \(PHP \S+, phasync \S+, phasync-ext .+\)$/');
+    expect($out[0])->toMatch('/^swerve \S+ \(PHP \S+, phasync \S+, ext-phasync .+\)$/');
 });
 
 test('each request is logged with its worker\'s slot, method, target, status and time; --no-access-log turns that off', function (array $args, int $lines) {
@@ -1740,9 +1740,9 @@ test('a worker\'s accepts leave no error behind for the application\'s shutdown 
     expect(\array_filter($recorded))->toBe([]); // phasync/swerve#2: "stream_socket_accept(): Accept failed"
 });
 
-test('startup: the log recommends phasync-ext when it is not loaded, and says nothing when it is', function () {
+test('startup: the log recommends the extension when it is not loaded, and says nothing when it is', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);
     native_stop($process);
-    $notice = '/phasync-ext is not loaded/';
+    $notice = '/The phasync extension is not loaded/';
     expect(log_count($log, $notice))->toBe(extension_loaded('phasync') ? 0 : 1, file_get_contents($log));
 });

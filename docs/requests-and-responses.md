@@ -147,7 +147,7 @@ Limits, all answered with the proper status:
 | body | `--max-body`, 8 MiB (413) |
 | each wait while reading a body or writing a response | 60 s |
 
-A worker serves at most 512 connections at once without phasync-ext (see
+A worker serves at most 512 connections at once without ext-phasync (see
 [Production](production.md#sizing)); past that, new connections wait in the kernel's queue
 while connections that sit idle are closed to make room.
 

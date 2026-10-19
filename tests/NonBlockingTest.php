@@ -4,7 +4,7 @@
  * A client that is slow, or reads nothing, must not stall the worker: while it holds a stream
  * open (Server-Sent Events, a WebSocket, a large response), a quick request in the same worker
  * is answered at once. A blocking call anywhere in the stream's path would show here, most
- * plainly without phasync-ext, where nothing is turned into a wait for the application.
+ * plainly without ext-phasync, where nothing is turned into a wait for the application.
  */
 
 /** The slowest of $times quick requests to a one-worker server, in milliseconds. */

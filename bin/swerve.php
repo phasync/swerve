@@ -92,7 +92,7 @@ if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
     \pcntl_exec(\PHP_BINARY, [...$flags, ...phasync\ext\_original_args()]);
 }
 
-// Load phasync-ext (it ships inside phasync) with --ext: swerve stops if it cannot. May restart this process once.
+// Load ext-phasync (it ships inside phasync) with --ext: swerve stops if it cannot. May restart this process once.
 if (\in_array('--ext', $argv, true)) {
     try {
         phasync\ext\ensure_loaded();
@@ -144,7 +144,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         exit(0);
     }
     if ($args->version) {
-        echo 'swerve ', Swerve::getVersion(), ' (PHP ', \PHP_VERSION, ', phasync ', \Composer\InstalledVersions::getPrettyVersion('phasync/phasync'), ', phasync-ext ', \phpversion('phasync') ?: 'not loaded', ")\n";
+        echo 'swerve ', Swerve::getVersion(), ' (PHP ', \PHP_VERSION, ', phasync ', \Composer\InstalledVersions::getPrettyVersion('phasync/phasync'), ', ext-phasync ', \phpversion('phasync') ?: 'not loaded', ")\n";
         exit(0);
     }
     if (!$args->quiet && \stream_isatty(\STDOUT)) {

@@ -53,7 +53,7 @@ needs them before that waits for it, and carries on once the worker serves. `Swe
 
 Directly in `swerve.php` waiting could never end: the worker serves after the file returns, so
 that is the one place with an immediate error. Move the call into a coroutine. This is the same
-with and without phasync-ext. A subscription made while loading receives what any worker
+with and without ext-phasync. A subscription made while loading receives what any worker
 publishes afterwards.
 
 ## One copy per worker

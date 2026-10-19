@@ -2,7 +2,7 @@
 
 /*
  * Swerve\WebSocket, the contract of docs/websocket.md, tested from the outside with raw sockets
- * against tests/Fixtures/realtime.php: once without and once with phasync-ext, and nothing may differ.
+ * against tests/Fixtures/realtime.php: once without and once with ext-phasync, and nothing may differ.
  *
  * Nothing is slept for: a test waits for the condition it needs, with a generous deadline.
  */

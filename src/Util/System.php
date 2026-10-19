@@ -143,7 +143,7 @@ final class System {
      * can't be done (then the process stays as it was: the same, only slower on a machine with
      * several sockets). Only the CPUs the process inherited are used: pinning never widens
      * them. Call right after fork, before the process allocates much: memory then comes from the
-     * node's own, and threads started later (phasync-ext's) inherit the pinning.
+     * node's own, and threads started later (ext-phasync's) inherit the pinning.
      *
      * With several sockets, a scheduler free to move a worker between them takes it away from
      * the memory it allocated; pinned, swerve served about a quarter more at 10,000 connections

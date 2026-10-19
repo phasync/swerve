@@ -749,7 +749,7 @@ function read_to_end($conn, float $timeout = 5): array
 }
 
 /*
- * Helpers of the WebSocket and Server-Sent Events tests (tests/Fixtures/realtime.php): swerve without and with phasync-ext.
+ * Helpers of the WebSocket and Server-Sent Events tests (tests/Fixtures/realtime.php): swerve without and with ext-phasync.
  */
 
 dataset('modes', ['plain' => [[]], 'ext' => [['--ext']]]);

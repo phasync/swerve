@@ -22,7 +22,7 @@
 <text x="160" y="130.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">OpenSwoole 26.2</text>
 <rect x="170" y="115" width="413.3" height="22" rx="3" fill="#46586E"/>
 <text x="590.3" y="130.5" font-size="12" fill="#E6EEF8">215k</text>
-<text x="160" y="159.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<text x="160" y="159.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + ext-phasync</text>
 <rect x="170" y="144" width="409.9" height="22" rx="3" fill="#5E8DC2"/>
 <text x="586.9" y="159.5" font-size="12" fill="#E6EEF8">214k</text>
 <text x="160" y="188.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>
@@ -44,7 +44,7 @@
 <text x="160" y="373.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#E6EEF8">OpenSwoole 26.2</text>
 <rect x="170" y="358" width="108.9" height="22" rx="3" fill="#46586E"/>
 <text x="285.9" y="373.5" font-size="12" fill="#E6EEF8">56.7k</text>
-<text x="160" y="402.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + phasync-ext</text>
+<text x="160" y="402.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve + ext-phasync</text>
 <rect x="170" y="387" width="110.6" height="22" rx="3" fill="#5E8DC2"/>
 <text x="287.6" y="402.5" font-size="12" fill="#E6EEF8">57.6k</text>
 <text x="160" y="431.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#E6EEF8">swerve</text>

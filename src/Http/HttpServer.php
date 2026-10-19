@@ -27,7 +27,7 @@ final class HttpServer implements ServerInterface
 {
     /**
      * File descriptors left for the listener, logs and the application's own files and
-     * connections, below the connection limit. (Without phasync-ext the limit is half of
+     * connections, below the connection limit. (Without ext-phasync the limit is half of
      * FD_SETSIZE, which leaves far more.)
      */
     private const RESERVED_FDS = 64;

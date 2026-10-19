@@ -22,7 +22,7 @@
 <text x="160" y="130.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve</text>
 <rect x="170" y="115" width="338.6" height="22" rx="3" fill="#2F6FAE"/>
 <text x="515.6" y="130.5" font-size="12" fill="#0D1B2E">705k</text>
-<text x="160" y="159.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + phasync-ext</text>
+<text x="160" y="159.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + ext-phasync</text>
 <rect x="170" y="144" width="335.4" height="22" rx="3" fill="#5B93CC"/>
 <text x="512.4" y="159.5" font-size="12" fill="#0D1B2E">699k</text>
 <text x="160" y="188.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#0D1B2E">ReactPHP</text>
@@ -38,7 +38,7 @@
 <text x="160" y="315.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#0D1B2E">Swoole (runtime/swoole)</text>
 <rect x="170" y="300" width="99.0" height="22" rx="3" fill="#B6C2CF"/>
 <text x="276.0" y="315.5" font-size="12" fill="#0D1B2E">206k</text>
-<text x="160" y="344.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + phasync-ext</text>
+<text x="160" y="344.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + ext-phasync</text>
 <rect x="170" y="329" width="46.4" height="22" rx="3" fill="#5B93CC"/>
 <text x="223.4" y="344.5" font-size="12" fill="#0D1B2E">96.6k</text>
 <text x="160" y="373.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve</text>
@@ -54,7 +54,7 @@
 <text x="160" y="500.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve</text>
 <rect x="170" y="485" width="94.5" height="22" rx="3" fill="#2F6FAE"/>
 <text x="271.5" y="500.5" font-size="12" fill="#0D1B2E">197k</text>
-<text x="160" y="529.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + phasync-ext</text>
+<text x="160" y="529.5" font-size="12.5" font-weight="600" text-anchor="end" fill="#0D1B2E">swerve + ext-phasync</text>
 <rect x="170" y="514" width="92.3" height="22" rx="3" fill="#5B93CC"/>
 <text x="269.3" y="529.5" font-size="12" fill="#0D1B2E">192k</text>
 <text x="160" y="558.5" font-size="12.5" font-weight="400" text-anchor="end" fill="#0D1B2E">RoadRunner</text>

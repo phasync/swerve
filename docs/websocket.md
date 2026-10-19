@@ -4,7 +4,7 @@
 and `Swerve\ServerSentEvents` writes an event stream on one. Both are in swerve itself, so the adapters
 (swerve-psr15, Symfony, Tether) share one implementation. This page is their contract; the tests in
 `tests/WebSocketTest.php` and `tests/ServerSentEventsTest.php` pin every line of it, over raw sockets, with and
-without phasync-ext, and nothing differs.
+without ext-phasync, and nothing differs.
 
 ## WebSocket
 
@@ -174,7 +174,7 @@ wire. `send()` throws `ValueError` for text that is not UTF-8; use `sendBinary()
 - **Drain.** A shutdown or reload closes every open WebSocket with 1001, so the process exits within its grace
   period, with status 0 and a clean log. Clients reconnect, as they must after any 1001.
 - **Many sockets.** A socket costs a coroutine and no thread; a worker serves ordinary requests promptly with 200
-  open (the test), and holds 512 connections without phasync-ext, see [Production](production.md#sizing).
+  open (the test), and holds 512 connections without ext-phasync, see [Production](production.md#sizing).
 
 ### Pings
 

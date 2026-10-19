@@ -78,7 +78,7 @@ return (function () {
 
     $args->section('Extension');
     $args->add('ext', new Flag(
-        '', 'ext', 'Load phasync-ext (bundled with phasync) even if composer.json does not enable it; swerve stops if it cannot'
+        '', 'ext', 'Load ext-phasync (bundled with phasync); swerve stops if it cannot'
     ));
 
     $args->section('Development');
@@ -169,7 +169,7 @@ return (function () {
 
     $args->section('Information');
     $args->add('help', new Flag('h', 'help', 'This help'));
-    $args->add('version', new Flag('', 'version', 'The versions of swerve, PHP, phasync and phasync-ext'));
+    $args->add('version', new Flag('', 'version', 'The versions of swerve, PHP, phasync and ext-phasync'));
 
     return $args;
 })();

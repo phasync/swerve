@@ -52,7 +52,7 @@ A call that blocks the process, instead of letting phasync switch coroutines, st
   `mail()`
 - CPU-heavy work: a long loop, image processing, a big `json_decode()`
 
-With [phasync-ext](production.md#phasync-ext) loaded, almost all of that waits as a coroutine
+With [ext-phasync](production.md#ext-phasync) loaded, almost all of that waits as a coroutine
 instead of blocking the process: sockets and TLS, MySQL through mysqli or PDO, `curl_exec()`
 and curl-multi loops such as Guzzle's, `file_get_contents('https://...')`, pipes and child
 processes, file and DNS functions, `sleep()` and `usleep()`. The
@@ -108,7 +108,7 @@ Every worker runs this at start, at the same time: keep it idempotent (`IF NOT E
 SQLite query blocks the worker while it runs, usually well under a millisecond; a writer waiting
 for the lock blocks it up to the busy timeout. For many concurrent writers, a database server
 (MySQL, PostgreSQL) does better. Its queries block the worker the same way, for their duration,
-unless phasync-ext is loaded and the database is MySQL: then they wait as a coroutine.
+unless ext-phasync is loaded and the database is MySQL: then they wait as a coroutine.
 
 ## Things that work differently from PHP-FPM
 

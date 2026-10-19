@@ -7,7 +7,7 @@
  */
 
 /*
- * A watchdog per test: #49 (a worker crash under phasync-ext) can leave a test stuck well past
+ * A watchdog per test: #49 (a worker crash under ext-phasync) can leave a test stuck well past
  * any timeout it reads its sockets with. Past 25 s, the swerve it started is killed (the same
  * groups tests/Pest.php's own afterEach kills) and the test fails instead of hanging the whole
  * run, where an outer timeout killing *this* process would leave that swerve orphaned (it runs

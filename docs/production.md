@@ -1,14 +1,14 @@
 # Production
 
-## phasync-ext
+## ext-phasync
 
-phasync-ext is an optional PHP extension that ships inside [phasync](https://github.com/phasync/phasync),
+ext-phasync is an optional PHP extension that ships inside [phasync](https://github.com/phasync/phasync),
 with prebuilt binaries for PHP 8.3 to 8.5 on Linux and macOS. Swerve loads it when you start it with
 `--ext`, and uses one installed with `pie install phasync/ext-phasync` as it is:
 
 ```bash
 vendor/bin/swerve --ext          # swerve stops if it cannot load it
-vendor/bin/swerve --version      # ... phasync-ext 0.5.0-beta5
+vendor/bin/swerve --version      # ... ext-phasync 2.0.0
 ```
 
 Swerve runs without it, which is fine for development; the master logs a notice at start, saying how
@@ -66,14 +66,14 @@ shows each worker's CPUs.
 
 **Connections per worker.**
 
-- *Without phasync-ext*, a worker holds at most **512 connections**: half of PHP's `stream_select()`
+- *Without ext-phasync*, a worker holds at most **512 connections**: half of PHP's `stream_select()`
   limit of 1024 descriptors, because your application opens files and connections of its own,
   about one per client on average. Long-lived
   connections (SSE, long polling, upgraded ones) use one each for as long as they are open. For
   many of them, run more workers than cores: **`--workers` of four times the cores** is a good
   start (4 cores: 16 workers, about 8,000 connections). Idle connections cost almost no CPU,
   so the extra workers don't compete much; they cost memory, one application each.
-- *With phasync-ext*, the limit is the open-file limit less 64 (`ulimit -n`; `LimitNOFILE` under
+- *With ext-phasync*, the limit is the open-file limit less 64 (`ulimit -n`; `LimitNOFILE` under
   systemd). Past a few hundred **busy** connections per worker, waiting on them gets
   expensive; more workers help here too.
 

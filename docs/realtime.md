@@ -72,7 +72,7 @@ spoken over it with `read()` and `write()`; a client that stops reading is dropp
   2 s so that your goodbye arrives.
 - A recycled worker keeps its upgraded connections up to `--linger` seconds instead of draining
   them; see [Production](production.md#sizing).
-- Without phasync-ext a worker holds 512 connections; see [Production](production.md#sizing).
+- Without ext-phasync a worker holds 512 connections; see [Production](production.md#sizing).
 
 ## WebSockets
 
