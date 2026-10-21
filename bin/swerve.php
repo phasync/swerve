@@ -19,6 +19,7 @@ use Swerve\Swerve;
 use Swerve\Util\Adapters;
 use Swerve\Util\Cluster;
 use Swerve\Util\Logger;
+use Swerve\Util\Plug;
 use Swerve\Util\System;
 use Swerve\Util\Worker;
 
@@ -29,14 +30,26 @@ use Swerve\Util\Worker;
 // Otherwise: that autoloader, or swerve's own vendor directory in a checkout, or the project's
 // when installed at vendor/phasync/swerve.
 require_once __DIR__ . '/../src/Util/WorkerAutoloader.php';
-if (isset($GLOBALS['_composer_autoload_path']) && \Swerve\Util\WorkerAutoloader::applies(\dirname($GLOBALS['_composer_autoload_path']))) {
-    $vendorDir = \dirname($GLOBALS['_composer_autoload_path']);
-    \Swerve\Util\WorkerAutoloader::register($vendorDir, (require "$vendorDir/composer/installed.php")['root']['install_path']);
-    unset($vendorDir);
+require_once __DIR__ . '/../src/Util/Plug.php';
+$vendorDir = isset($GLOBALS['_composer_autoload_path'])
+    ? \dirname($GLOBALS['_composer_autoload_path'])
+    : (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor' : \dirname(__DIR__, 3));
+$rootInstallPath = \is_file("$vendorDir/composer/installed.php")
+    ? ((require "$vendorDir/composer/installed.php")['root']['install_path'] ?? \getcwd())
+    : \getcwd();
+// Without the extension, application code (the adapters, the frameworks they run, every other
+// vendor package -- never phasync, swerve, phasync/net or the plug's own babel/hooked) is
+// translated by the plug to call phasync/hooked's cooperative replacements instead of blocking.
+// Installed here, before the fork: see Plug's own docblock for why this can't wait for a worker.
+Plug::installIfNeeded($vendorDir, $rootInstallPath);
+if (isset($GLOBALS['_composer_autoload_path']) && \Swerve\Util\WorkerAutoloader::applies($vendorDir)) {
+    \Swerve\Util\WorkerAutoloader::register($vendorDir, $rootInstallPath);
 } else {
-    require $GLOBALS['_composer_autoload_path']
+    $autoload = $GLOBALS['_composer_autoload_path']
         ?? (\is_file(__DIR__.'/../vendor/autoload.php') ? __DIR__.'/../vendor/autoload.php' : __DIR__.'/../../../autoload.php');
+    require Plug::path($autoload, \dirname($autoload));
 }
+unset($vendorDir, $rootInstallPath);
 
 // swerve is a long-running process, like Node.js: php.ini's limits for shared hosting don't apply,
 // and memory is the container's to bound. These settings override php.ini (which still loads the
@@ -320,6 +333,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
      */
     $logger = $worker->logger;
     Swerve::setLog($logger);
+    $logger->info(Plug::isInstalled()
+        ? 'ext-phasync is not loaded: application code runs through the plug (phasync/babel + phasync/hooked), cache in {dir}'
+        : 'ext-phasync is loaded', ['dir' => Plug::cacheDir() ?? '']);
     Worker::refreshAutoloader();
     // Loaded in the worker's event loop: the application may start coroutines as it loads,
     // such as a subscriber that runs for the worker's whole life
@@ -348,7 +364,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
                     }
                 }
             }
-            $app           = null === $entry ? require $swerveFile : $entry($appDir, ...$entryArgs);
+            $app           = null === $entry ? require Plug::path($swerveFile, $appDir) : $entry($appDir, ...$entryArgs);
             Cache::$loader = null;
         } catch (\Throwable $e) {
             $logger->critical('Loading {what} failed: {exception}', ['what' => null === $entry ? $swerveFile : "the adapter $adapter", 'exception' => $e]);

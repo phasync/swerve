@@ -11,7 +11,8 @@
         "ext-pcntl": "*",
         "ext-posix": "*",
         "ext-sockets": "*",
-        "phasync/net": "^2.0"
+        "phasync/net": "^2.0",
+        "phasync/plug": "*"
     },
     "bin": [
         "bin/swerve"
@@ -28,12 +29,17 @@
             "email": "frode@ennerd.com"
         }
     ],
-    "minimum-stability": "stable",
+    "minimum-stability": "dev",
     "prefer-stable": true,
     "require-dev": {
         "friendsofphp/php-cs-fixer": "dev-master",
         "pestphp/pest": "^3.0 || ^4.0"
     },
+    "repositories": [
+        {"type": "path", "url": "/home/frode/dev/phasync-plug", "options": {"symlink": true}},
+        {"type": "path", "url": "/home/frode/dev/phasync-babel", "options": {"symlink": true}},
+        {"type": "path", "url": "/home/frode/dev/phasync-hooked", "options": {"symlink": true}}
+    ],
     "config": {
         "allow-plugins": {
             "pestphp/pest-plugin": true
