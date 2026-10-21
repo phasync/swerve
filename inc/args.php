@@ -76,6 +76,25 @@ return (function () {
         placeholder: 'n'
     ));
 
+    $args->section('Classic mode');
+    $args->add('classic', new Flag(
+        '', 'classic', "Serve the file argument as a front controller through a pool of php -S processes "
+            . '(PHP\'s own per-request lifecycle: fresh statics/globals, native header()/echo/session/exit/uploads), '
+            . 'instead of loading it as swerve.php; needs -t/--docroot, and runs with one worker (see --classic-pool)'
+    ));
+    $args->add('classicPool', new Option(
+        '', 'classic-pool', 'Classic mode: the most php -S processes running at once (one worker, so this is the whole server\'s limit); more requests queue',
+        default: '8',
+        placeholder: 'n',
+        validator: function ($value) {
+            if (false === \filter_var($value, \FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 256]])) {
+                return '1 to 256 required';
+            }
+
+            return null;
+        },
+    ));
+
     $args->section('Extension');
     $args->add('ext', new Flag(
         '', 'ext', 'Load ext-phasync (bundled with phasync); swerve stops if it cannot'

@@ -8,6 +8,8 @@ use phasync\Util\Console;
 use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 use Swerve\Cache;
+use Swerve\Classic\ClassicPool;
+use Swerve\Classic\ClassicProxy;
 use Swerve\CLI\Address;
 use Swerve\CLI\Args;
 use Swerve\ClientRequest;
@@ -156,21 +158,37 @@ foreach ([\STDOUT, \STDERR] as $out) {
      * swerve was loaded from, without loading any of its code. The application directory: the directory of the
      * swerve.php given to the swerve adapter, else the current one.
      */
-    $explicitFile = !$args->isDefault('swervefile');
-    $swerveFile   = \str_starts_with($args->swervefile, '/') ? $args->swervefile : \getcwd() . '/' . $args->swervefile;
-    try {
-        // The vendor directory swerve runs from and its root package (Composer's bin proxy says
-        // where), else the current directory's
-        $proxied   = isset($GLOBALS['_composer_autoload_path']);
-        $rootDir   = $proxied ? \realpath(\Composer\InstalledVersions::getRootPackage()['install_path']) : \getcwd();
-        $installed = Adapters::installed($proxied ? \dirname($GLOBALS['_composer_autoload_path']) : \getcwd() . '/vendor', $rootDir);
-        $adapter   = Adapters::select($installed, $args->adapter ?: null, Adapters::configured($rootDir));
-    } catch (\RuntimeException $e) {
-        \fwrite(\STDERR, 'swerve: ' . $e->getMessage() . "\n");
+    if ($args->classic && '' === $args->docroot) {
+        \fwrite(\STDERR, "swerve: --classic needs -t/--docroot: the document root, as php -S's own -t\n");
         exit(2);
     }
+    $docrootReal  = '' !== $args->docroot ? \realpath($args->docroot) : null;
+    $explicitFile = !$args->isDefault('swervefile');
+    $swerveFile   = match (true) {
+        $args->classic && !\str_starts_with($args->swervefile, '/') => \rtrim((string) $docrootReal, '/') . '/' . $args->swervefile,
+        \str_starts_with($args->swervefile, '/')                    => $args->swervefile,
+        default                                                     => \getcwd() . '/' . $args->swervefile,
+    };
+    if ($args->classic) {
+        // Classic mode never loads an adapter or swerve.php itself: the file argument is a
+        // front controller given to each php -S process, as for php -S itself.
+        $installed = [];
+        $adapter   = null;
+    } else {
+        try {
+            // The vendor directory swerve runs from and its root package (Composer's bin proxy says
+            // where), else the current directory's
+            $proxied   = isset($GLOBALS['_composer_autoload_path']);
+            $rootDir   = $proxied ? \realpath(\Composer\InstalledVersions::getRootPackage()['install_path']) : \getcwd();
+            $installed = Adapters::installed($proxied ? \dirname($GLOBALS['_composer_autoload_path']) : \getcwd() . '/vendor', $rootDir);
+            $adapter   = Adapters::select($installed, $args->adapter ?: null, Adapters::configured($rootDir));
+        } catch (\RuntimeException $e) {
+            \fwrite(\STDERR, 'swerve: ' . $e->getMessage() . "\n");
+            exit(2);
+        }
+    }
     $entry  = $installed[$adapter] ?? null;
-    $appDir = null === $entry && $explicitFile ? \dirname($swerveFile) : \getcwd();
+    $appDir = $args->classic ? $docrootReal : ((null === $entry && $explicitFile) ? \dirname($swerveFile) : \getcwd());
 
     /*
      * Check that the file exists. The application is loaded in each worker, after the fork, so
@@ -178,7 +196,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
      * `current` at a new release, then reloads, runs the new release.
      */
     if ((null === $entry || $explicitFile) && !\is_file($swerveFile)) {
-        \fwrite(\STDERR, "swerve: {$args->swervefile} not found\n");
+        \fwrite(\STDERR, 'swerve: ' . ($args->classic ? "{$args->swervefile} not found in {$args->docroot}" : "{$args->swervefile} not found") . "\n");
         exit(1);
     }
 
@@ -188,12 +206,14 @@ foreach ([\STDOUT, \STDERR] as $out) {
      */
     $entryArgs = [];
     if ('' !== $args->docroot) {
-        if (null === $entry) {
+        if (null === $entry && !$args->classic) {
             \fwrite(\STDERR, "swerve: -t {$args->docroot} is for an adapter that serves a document root; "
                 . "swerve.php is the application itself: to serve the files in {$args->docroot} before it, use --public={$args->docroot}\n");
             exit(2);
         }
-        $entryArgs['docroot'] = \realpath($args->docroot);
+        if (null !== $entry) {
+            $entryArgs['docroot'] = \realpath($args->docroot);
+        }
     }
     if (null !== $entry && $explicitFile) {
         $entryArgs['file'] = \realpath($swerveFile);
@@ -219,6 +239,10 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     $workerCount = 'auto' === $args->workers ? System::getCPUCount() : (int) $args->workers;
+    if ($args->classic) {
+        // One pool of php -S processes, owned by the one worker that proxies to it; see ClassicPool.
+        $workerCount = 1;
+    }
     // The column after the time: a worker's slot number, right-aligned; blank for the master
     $source = \str_repeat(' ', \strlen((string) ($workerCount - 1)));
     $access = !$args->noAccessLog;
@@ -244,6 +268,11 @@ foreach ([\STDOUT, \STDERR] as $out) {
         $logger = new NullLogger();
     } else {
         $logger = new Logger(\STDOUT, $source, $logLevel, access: $access);
+    }
+    if ($args->classic) {
+        $logger->notice('classic: {file} in {docroot} through up to {pool} php -S processes, started lazily; one worker owns the pool', [
+            'file' => $args->swervefile, 'docroot' => $args->docroot, 'pool' => $args->classicPool,
+        ]);
     }
 
     if (null !== $entry && \is_file("$appDir/swerve.php") && ($entryArgs['file'] ?? null) !== \realpath("$appDir/swerve.php")) {
@@ -337,30 +366,38 @@ foreach ([\STDOUT, \STDERR] as $out) {
             $logger->critical('A Swerve::onWorkerStart() callback failed: {exception}', ['exception' => $e]);
             exit(Worker::EXIT_BAD_APP);
         }
-        try {
-            Cache::$loader = phasync::getFiber();
-            if (null !== $entry && [] !== $entryArgs) {
-                $parameters = \array_map(static fn (\ReflectionParameter $p) => $p->getName(), (new \ReflectionFunction($entry))->getParameters());
-                foreach (['docroot' => 'document root (-t)', 'file' => 'file argument'] as $name => $what) {
-                    if (isset($entryArgs[$name]) && !\in_array($name, $parameters, true)) {
-                        $logger->critical('The adapter {adapter} takes no {what}: its entry {entry} has no ${name} parameter', ['adapter' => $adapter, 'what' => $what, 'entry' => $entry, 'name' => $name]);
-                        exit(Worker::EXIT_BAD_APP);
+        if ($args->classic) {
+            // No swerve.php, no adapter: each request goes to a php -S process of the pool,
+            // started lazily and reaped after it sits idle; see ClassicPool and ClassicProxy.
+            $pool = new ClassicPool($appDir, $swerveFile, (int) $args->classicPool);
+            Swerve::onShutdown(static fn () => $pool->stopAll());
+            $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
+            $app = (new ClassicProxy($pool))->handler();
+        } else {
+            try {
+                Cache::$loader = phasync::getFiber();
+                if (null !== $entry && [] !== $entryArgs) {
+                    $parameters = \array_map(static fn (\ReflectionParameter $p) => $p->getName(), (new \ReflectionFunction($entry))->getParameters());
+                    foreach (['docroot' => 'document root (-t)', 'file' => 'file argument'] as $name => $what) {
+                        if (isset($entryArgs[$name]) && !\in_array($name, $parameters, true)) {
+                            $logger->critical('The adapter {adapter} takes no {what}: its entry {entry} has no ${name} parameter', ['adapter' => $adapter, 'what' => $what, 'entry' => $entry, 'name' => $name]);
+                            exit(Worker::EXIT_BAD_APP);
+                        }
                     }
                 }
+                $app           = null === $entry ? require $swerveFile : $entry($appDir, ...$entryArgs);
+                Cache::$loader = null;
+            } catch (\Throwable $e) {
+                $logger->critical('Loading {what} failed: {exception}', ['what' => null === $entry ? $swerveFile : "the adapter $adapter", 'exception' => $e]);
+                exit(Worker::EXIT_BAD_APP);
             }
-            $app           = null === $entry ? require $swerveFile : $entry($appDir, ...$entryArgs);
-            Cache::$loader = null;
-        } catch (\Throwable $e) {
-            $logger->critical('Loading {what} failed: {exception}', ['what' => null === $entry ? $swerveFile : "the adapter $adapter", 'exception' => $e]);
-            exit(Worker::EXIT_BAD_APP);
+            if (!$app instanceof RequestHandler) {
+                $logger->critical('{what} returned {value}; it must return a Swerve\\RequestHandler', ['what' => null === $entry ? $args->swervefile : "The entry $entry of the adapter $adapter", 'value' => \get_debug_type($app)]);
+                exit(Worker::EXIT_BAD_APP);
+            }
+            $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
+            $app = $app->handler;
         }
-        if (!$app instanceof RequestHandler) {
-            $logger->critical('{what} returned {value}; it must return a Swerve\\RequestHandler', ['what' => null === $entry ? $args->swervefile : "The entry $entry of the adapter $adapter", 'value' => \get_debug_type($app)]);
-            exit(Worker::EXIT_BAD_APP);
-        }
-        $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
-
-        $app = $app->handler;
         if (null !== $files) {
             $app = $files->wrap($app); // files first; the application gets what is not one
         }
