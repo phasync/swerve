@@ -15,17 +15,16 @@ forbidden main swerve checkout. Copies don't carry that symlink over (confirmed 
 this is fixed for good in the scratch setup, not a Swerve or plug defect.
 
 Suites covered in both modes: swerve's own, swerve-psr15, swerve-laravel, swerve-codeigniter,
-swerve-symfony. **Not reached** (time): swerve-cakephp, swerve-yii, swerve-laminas,
-swerve-spiral — each needs the same scratch-copy + path-repo treatment already proven on the
-other five; nothing adapter-specific is expected to block it.
+swerve-symfony, swerve-cakephp, swerve-yii, swerve-laminas (PHP 8.4, `grpc.so` excluded from its
+ini scan dir — it loads on 8.4 only and crashes under 8.5), swerve-spiral. All 8 adapters plus
+swerve's own suite: every suite the task named.
 
 ## Gaps, grouped by cause, most impactful first
 
-### 1. phasync/plug's cache-mode mirror re-mirrors itself for a framework that locates its own file through Reflection — swerve-symfony: 26 of 27 tests fail
+### 1. phasync/plug's cache mirror re-mirrored itself for code that locates its own file through Reflection — fixed; swerve-symfony then exposed a second, deeper issue
 
-**Evidence.** swerve-symfony plug mode: `26 failed, 1 warning, 1 passed`, 56.81 s. ext mode (same
-checkout, same fixture): `0 failed, 1 warning, 27 passed`, 24.24 s. Every plug-mode failure
-traces to one fatal error, first hit loading the kernel for the dev-environment test:
+**The mirror-of-mirror crash — fixed.** swerve-symfony plug mode originally: `26 failed, 1
+warning, 1 passed`, 56.81 s, every failure tracing to:
 
 ```
 PHP Fatal error:  Cannot redeclare interface Symfony\Component\EventDispatcher\EventSubscriberInterface
@@ -33,88 +32,97 @@ PHP Fatal error:  Cannot redeclare interface Symfony\Component\EventDispatcher\E
   in /tmp/swerve-babel-1000/<hash>/tmp/swerve-babel-1000/<hash>/tmp/claude.../vendor/symfony/event-dispatcher/EventSubscriberInterface.php on line 25
 ```
 
-The second path is the cache directory **prefixed onto itself**: `<cacheDir><cacheDir><real
-path>` instead of `<cacheDir><real path>`. Something fed an already-mirrored path back into
-`phasync\plug\path()` as if it were an original source path, producing a mirror of the mirror —
-a second, distinct compiled copy of the same class, hence the redeclare.
+The second path is the cache directory **prefixed onto itself**. Cause: phasync/plug's own
+README documents, as a known trade-off of `'cache'` mode, that Reflection's `getFileName()`
+shows the cache *mirror* path (unlike `__FILE__`/`__DIR__`, which `fileConstants` keeps reporting
+the original). Symfony's compiled DI container (built natively by `bin/console cache:warmup`
+*before* the plug ever runs) locates a sibling file via exactly that: once the container itself
+runs from its mirror, `dirname($reflectedFile) . '/Sibling.php'` is already
+`<cacheDir><original sibling path>` — resolving it through `path()` again mirrored it a second
+time, nested under itself, so two distinct files declared the same interface.
 
-**Cause.** phasync/plug's own README documents, as a known trade-off of `'cache'` mode (not a
-bug): *"Reflection's `getFileName()`, an exception's `getFile()`/trace, and PHP's own error
-messages, unlike `__FILE__`/`__DIR__`, do show the cache mirror path in this mode... since those
-necessarily come from the file PHP actually compiled."* Symfony's compiled DI container
-(`var/cache/dev/ContainerXXX/App_KernelDevDebugContainer.php`, generated natively by `bin/console
-cache:warmup` *before* the plug ever runs) is exactly the kind of code that locates sibling files
-relative to itself at runtime. Once that container file is itself translated and running from the
-mirror, anything in it that resolves "where am I" via Reflection (rather than the
-`fileConstants`-rewritten `__FILE__`/`__DIR__`, which still correctly report the *original* path)
-gets the *mirror* location back, computes a path from there, and that computed path lands back
-inside `path()` — which mirrors it a second time, nested under itself. None of the other four
-suites tested use an ahead-of-time-compiled, reflection-locating container the way Symfony's does,
-which is why this is the only one that hits it.
+**Fixed in `~/dev/phasync-plug`** (commit `06b16c8`, this task's expanded permission): a new
+`Loader::unmirror()` strips any leading cache-mirror prefix (a loop, so it's idempotent against
+more than one level of nesting) before `resolve()`/`cacheMirrorFor()` ever compute a mirror path,
+so a path reached through Reflection resolves to the exact same mirror the original path already
+produced. New case `tests/LoaderTest.php`'s *"a sibling path built from Reflection's mirror-path
+getFileName()..."* reproduces the Symfony pattern directly (`require_once` a sibling by its real
+path, then the same sibling again via a path built from Reflection), fails without the fix
+(confirmed: reverting it reproduces the exact redeclare above) and passes with it. phasync/plug's
+own suite: 12/12 green.
 
-**What would close it, and how big.** Inside phasync/plug's `Loader` (not fixed here — not this
-branch's integration, and not in this task's expanded permission, which covers only the babel
-precedence bug): `cacheMirrorFor()`/`resolve()` would need to recognise a `$real` that is already
-under `self::$cacheDir` and either refuse to re-mirror it (return it unchanged, the same way an
-excluded prefix is handled) or resolve it back to the original tree first. That is a small,
-localized, one-method fix — moderate confidence it is sufficient, since the nesting is exactly
-one level deep in the evidence above, but not verified beyond this one reproduction. Until then,
-the only workaround is `'wrapper'` mode (no mirror, so no self-mirroring possible) for apps with a
-compiled, reflection-locating container — at `'wrapper'` mode's own documented cost (no opcache
-for translated files).
+**What the fix exposed.** Rerunning swerve-symfony with the fix (clean cache): the crash is gone,
+but `26 failed, 1 warning, 1 passed` *persists* — now every failure is a 404 (`"Failed asserting
+that 404 is identical to 200"`) rather than a fatal error. The app boots without error but no
+route resolves. **Not fixed, not fully root-caused.** Suspected: the same Reflection-shows-the-
+mirror-path trade-off, now surfacing somewhere Symfony's kernel uses Reflection to compute its own
+project directory (commonly `dirname((new \ReflectionObject($this))->getFileName())`-style, used
+by `Kernel::getProjectDir()` in many Symfony skeletons) — inconsistent with the natively
+pre-built route cache's own embedded (original-path) assumptions, so routing fails even though
+loading does not crash anymore. **Size:** unknown without further investigation; likely a second,
+separate Reflection-path mismatch rather than a mirroring bug, so not necessarily fixable the same
+way. ext mode: unaffected, `0 failed, 1 warning, 27 passed`, 24.24 s (confirmed clean both before
+and after the plug.php fix, since ext mode never uses the plug at all).
 
-### 2. phasync/hooked's stream cleanup isn't shielded — swerve-psr15: 2 WebSocket tests fail on a drain warning
+### 2. phasync/hooked's write cleanup wasn't shielded from a second cancellation — fixed for writes; one read-side(?) case remains
 
-**Evidence.** swerve-psr15 plug mode: `2 failed, 75 passed`, 43 s; ext mode: `0 failed, 77
-passed`, 41 s. Both failures are the same shape: a passing WebSocket exchange, then the test's own
-`rt_clean()` check (*"nothing in the log that a clean run would not have"*) fails because draining
-the worker logged this PHP warning:
+**Fixed.** `hookedWriteLoop()`'s `phasync::writable()` wait only caught `TimeoutException`: a
+`CancelledException` reaching the fiber a *second* time (sticky once a fiber is cancelled, by
+phasync's own design) propagated immediately, before ever finding out whether the stream was
+ready — cutting short a write a native `fwrite()` would simply have completed (it has no concept
+of phasync's cancellation at all). Confirmed the exact shape with a minimal reproduction (a fiber
+cancelled mid-`phasync::sleep()`, whose `catch` then calls `\phasync\hooked\fwrite()` to send a
+goodbye) and traced it to swerve-psr15's WebSocket tests: a client left a socket open across
+`native_stop()`'s drain, and the worker's own WebSocket cleanup write hit this exact race.
 
-```
-PHP Warning:  Cleanup in a finally block of FiberNNN(terminated, NULL) was cut short by its
-cancellation reaching it again; use phasync::shielded() for cleanup that must wait
-in vendor/phasync/phasync/src/EventLoop.php on line 2281
-```
+**Fixed in `~/dev/phasync-hooked`** (commit `661a47f`): `hookedWriteLoop()` now catches that
+second `CancelledException` and gives the write one more chance — one shielded, briefly-bounded
+(0.05 s, not the stream's own, possibly much longer or unbounded, configured timeout, so a drain
+never waits that out for this) `phasync::writable()` + `fwrite()` — then **always** re-throws the
+original cancellation regardless (this is not a way to ignore it, only to let an already-ready
+write happen first, matching what a native call would have done). New case in `FwriteTest.php`
+(`phasync::go()` + `phasync::cancel()`, a hooked `fwrite()` in the fiber's own first-cancellation
+catch block) fails without the fix (the write is lost) and passes with it, with no "cut short"
+warning. Full phasync/hooked suite: 186/186 green.
 
-**Cause.** This is phasync's own diagnostic for exactly what it says: some hooked replacement's
-`finally` block (plausibly `fread()`/`fwrite()`'s "restore the stream's blocking mode" cleanup,
-called out by name in phasync/hooked's own rule 4 — *"Never leave a stream's blocking mode
-changed... it switches it back before returning, also on exceptions"*) is doing that cleanup
-without `phasync::shielded()`, so when a worker drain cancels the WebSocket read a second time
-while the first cancellation's cleanup is still running, the cleanup itself gets cut short. Not
-reproduced under ext (native blocking calls have no PHP-level `finally` for the extension to
-interrupt this way), and not hit by swerve-laravel's or swerve-codeigniter's own WebSocket tests
-in this run (different drain timing), so this needs a live WebSocket read in flight at the exact
-moment of a second cancellation to show up — narrow, but real and reproducible by this test.
+**Effect on swerve-psr15**: plug mode went from `2 failed, 75 passed` to `1 failed, 76 passed`
+(42.46 s) — the *"origin allow-list"* WebSocket test now passes. The *"subprotocols"* WebSocket
+test still fails with the same `"Cleanup in a finally block ... was cut short"` warning. Applying
+the identical catch-and-shielded-retry pattern to `hookedRead()` (the natural read-side
+counterpart) did **not** reproduce or fix anything in a dedicated, isolated test — a fiber
+cancelled mid-`phasync::sleep()` whose cleanup calls `\phasync\hooked\fread()` never shows the
+warning, fixed or not — so that change was reverted rather than kept speculatively. The
+*"subprotocols"* failure's exact trigger (which hooked wait, if any) was not isolated within this
+task's remaining time: manually reproducing the test's own sequence (a WebSocket handshake, one
+pushed message, then `native_stop()`) did not reproduce it either, suggesting it needs the timing
+of the full suite run (or a specific interleaving not captured by a standalone repro) to show up.
+**Size:** small once found — the fix pattern is proven on the write side — but finding the exact
+site needs more investigation time than was available here.
 
-**What would close it, and how big.** A `phasync::shielded()` wrap around the relevant stream
-restore-mode cleanup in phasync/hooked — a missing hooked function. Small, localized fix in
-phasync/hooked (not fixed here — out of this task's permission, which covers only babel).
+### 3. Worker boot is slower under the plug — cold-cache only; warm boot matches ext-phasync
 
-### 3. Worker boot is measurably slower under the plug — a few of swerve's own supervision-timing tests
+**Revised finding.** The first measurement in this gap list (0.65 s cold vs. 0.04 s with
+ext-phasync) conflated a one-time cost with a per-boot one. Measured directly, three fresh worker
+boots in a row, same fixture, same cache directory:
 
-**Evidence.** swerve's own suite: plug mode `5 failed, 11 warnings, 1 skipped, 686 passed`,
-615.42 s; ext mode `1 failed, 11 warnings, 1 notice, 2 skipped, 688 passed`, 586.18 s (the one
-ext-mode failure is an unrelated same-second/next-second date-header race, confirmed unrelated to
-either mode). Of the 5 plug-mode failures, 4 are `SupervisionTest` cases whose own budget is 1-3 s
-for a worker to reload and start answering the new version — each missed by a small margin (the
-worst, ~11 ms over a 10 s boot-wait budget; the others a fraction of a millisecond over a 1-2 s
-reload-recovery budget). Re-running the same 4 in isolation: 1 reproduced consistently, the other
-3 did not (ordinary system-load flakiness under the full 56-core shared box this ran on). Directly
-measured: a cold worker is ready in 0.65 s under the plug vs. 0.04 s with ext-phasync loaded
-(`Worker ... ready in ...` log line, same fixture, same machine, one run each).
+| | cold (cache dir just created) | warm (2nd fresh process) | warm (3rd fresh process) |
+|---|---|---|---|
+| Worker ready in | 0.21 s (0.65 s on an earlier, more loaded run) | 0.03 s | 0.04 s |
 
-**Cause.** Every `require`/`include` of a non-excluded file goes through `phasync\plug\path()` ->
-`Loader::resolve()`/`cacheMirrorFor()`, which `stat()`s the real file and reads a `.key` sidecar
-to confirm the cache mirror is current — on every worker boot, not just the first one, because
-each new worker process re-runs the whole autoload bootstrap fresh. That per-file overhead is
-small but real, and a worker boots once per lifetime, so it lands squarely on exactly the
-operations (reload, recycle, crash-recovery) `SupervisionTest` times tightly.
+Warm-boot latency is statistically indistinguishable from ext-phasync's own 0.04 s. The cost is
+paid once, when a cache directory is first populated (first worker of a fresh deploy, or after a
+code change invalidates cache keys) — not on every worker start, recycle or reload, since the
+on-disk cache (keyed by file path + mtime + size + babel's fingerprint) is shared and reused by
+every later process. This also better explains why re-running swerve's own `SupervisionTest`
+failures in isolation mostly didn't reproduce (3 of 4): those tests reload/restart a worker whose
+cache was already warm from the suite's own earlier tests, so the real cause of those few
+failures is most likely ordinary system-load flakiness on the shared box this ran on, not a
+systematic plug-caused latency regression. The one that did reproduce consistently in isolation
+(*"a reload whose new worker fails to start..."*, a 1 s recovery budget) stays listed as a real,
+if narrow and unconfirmed-cause, timing margin.
 
-**Disposition.** Per the owner's ruling for this task, slightly slower worker boot/reload under
-the plug is an accepted difference, not a functional gap — listed here, not fixed. (phasync/plug's
-own README already notes an in-process memo of resolved paths as a way to cut the per-include
-`stat()`/`.key`-read cost on a warm cache; not attempted here.)
+**Disposition.** Per the owner's ruling for this task, a slower *cold* boot is accepted, not
+fixed: it is paid once per deploy, not per worker.
 
 ### 4. No hooked PDO/mysqli/pgsql driver — accepted, not independently reproduced here
 
@@ -122,10 +130,38 @@ phasync/hooked implements time, stream and process functions only (its own READM
 implemented" list); no database driver is hooked. A worker without ext-phasync that opens a real
 database connection inside a coroutine blocks the whole worker for that query's duration, same as
 the pre-plug baseline. Per the owner's ruling, this is accepted: list it, don't chase it. None of
-the five suites run here exercise a non-SQLite database from inside a coroutine in a way that would
-measure this directly (the Laravel and CodeIgniter fixtures use SQLite, whose file I/O is native
-per phasync/hooked's own rule 5 — regular files never block — so they don't exhibit this gap
+the eight adapter suites exercise a non-SQLite database from inside a coroutine in a way that
+would measure this directly (every fixture here uses SQLite, whose file I/O is native per
+phasync/hooked's own rule 5 — regular files never block — so none of them exhibit this gap
 either way).
+
+### 5. swerve-cakephp: DebugKit's toolbar is not injected — 1 failure, cause not isolated
+
+**Evidence.** Plug mode: `1 failed, 29 passed`, 28.07 s; ext mode: `0 failed, 30 passed`, 27.99 s
+— confirmed plug-specific. The failing test expects every response body to contain
+`debug_kit/js/inject-iframe.js`; under plug mode it is simply absent, with no error or warning in
+the log. **Not root-caused within this task's time.** CakePHP's DebugKit toolbar injection is a
+response-filter step late in the dispatch cycle; plausible causes (not verified) include a
+translated-vs-native class-identity check (`instanceof`/`::class` comparisons babel rewrites
+correctly, but a check against something CakePHP's DebugKit itself resolves dynamically could
+still differ) or a conditionally-registered event listener that behaves differently once its own
+file is translated. **Size:** unknown.
+
+### 6. swerve-yii: a request logged something matching `error|exception|warning` — 1 failure, cause not isolated
+
+**Evidence.** Plug mode: `1 failed, 24 passed`, 23.56 s; ext mode: `0 failed, 25 passed`, 20.26 s
+— confirmed plug-specific. The failing test (*"it logged no errors"*) asserts the whole suite's
+accumulated log never matches `/error|exception|warning/i`; under plug mode it does, once,
+somewhere across the file's other tests (the log is shared across the whole test file's app
+instance). Running the single test in isolation (skipping the tests that normally populate the
+log first) does not reproduce it — same shape as gap #2's remaining psr15 failure: it needs the
+full sequence of a real test run, not a standalone repro, to show up, and that was not isolated
+within this task's remaining time. **Size:** unknown; the matched text itself was not captured.
+
+## Fully clean (no plug-specific gap found)
+
+- **swerve-laminas**: `30 passed` both modes (PHP 8.4, no `grpc.so`). Plug: 56.40 s; ext: 50.80 s.
+- **swerve-spiral**: `28 passed` both modes. Plug: 48.24 s; ext: 45.82 s.
 
 ## Not plug-specific (seen, not counted above)
 
@@ -145,12 +181,14 @@ either way).
 | Suite | Plug mode | ext mode | Difference |
 |---|---|---|---|
 | swerve (own) | 615.42 s | 586.18 s | +29.2 s (+5.0%) |
-| swerve-psr15 | 42.0 s | 41.0 s | +1.0 s (+2.4%) |
+| swerve-psr15 | 42.46 s | 41.0 s | +1.5 s (+3.6%) |
 | swerve-laravel | 233.11 s | 198.55 s | +34.6 s (+17.4%) |
 | swerve-codeigniter | 47.02 s | 45.09 s | +1.9 s (+4.3%) |
-| swerve-symfony | 56.81 s | 24.24 s | +32.6 s (dominated by gap #1's failures, not a clean timing comparison) |
-
-Not run (time): swerve-cakephp, swerve-yii, swerve-laminas, swerve-spiral.
+| swerve-symfony | 28.33 s | 24.24 s | +4.1 s (gap #1's second issue still fails every test in ~1s each, not a clean comparison) |
+| swerve-cakephp | 28.07 s | 27.99 s | +0.1 s |
+| swerve-yii | 23.56 s | 20.26 s | +3.3 s |
+| swerve-laminas | 56.40 s | 50.80 s | +5.6 s (+11.0%) |
+| swerve-spiral | 48.24 s | 45.82 s | +2.4 s (+5.3%) |
 
 phasync/babel's own corpus check (not a mode comparison; verifies the ternary-precedence fix,
 below): 127,010 real-world files (WordPress, Laravel, Symfony, CakePHP, CodeIgniter, Drupal,
@@ -162,11 +200,13 @@ the php-parser oracle.
 
 - **phasync/babel** (`~/dev/phasync-babel`, commit `8934eda`): `includeHandler`'s rewrite of a
   `require`/`include` nested inside a ternary's own true-branch (`$cond ? require $f : 'none'`)
-  absorbed the enclosing `:`, producing invalid PHP. Confirmed against real PHP that require's
-  operand correctly stops at an *enclosing* ternary's `:` while still absorbing `.`, `??`,
-  `or`/`and`, and a ternary it itself starts — `Unit::includeOperandEnd()` now tracks a `?`/`:`
-  depth counter for exactly that case. New case `r6_includehandler_03`; full case suite (884) and
-  the 127,010-file corpus (above) both green.
+  absorbed the enclosing `:`, producing invalid PHP. `Unit::includeOperandEnd()` now tracks a
+  `?`/`:` depth counter for exactly that case. New case `r6_includehandler_03`; full case suite
+  (884) and the 127,010-file corpus (above) both green.
+- **phasync/plug** (`~/dev/phasync-plug`, commit `06b16c8`): the cache-mirror-of-mirror crash in
+  gap #1 above. `Loader::unmirror()`; new case in `LoaderTest.php`. Full suite: 12/12 green.
+- **phasync/hooked** (`~/dev/phasync-hooked`, commit `661a47f`): the write-side cancellation
+  cut-short in gap #2 above. New case in `FwriteTest.php`. Full suite: 186/186 green.
 - **This integration** (`~/dev/swerve-plug`): `Plug::installIfNeeded()` initially required
   `$vendorDir/composer/installed.php` to exist, which broke `tests/AdapterTest.php`'s and
   `tests/IntegrationTest.php`'s own fixtures (a vendor directory that only forwards to the real
@@ -174,3 +214,12 @@ the php-parser oracle.
   install location, where phasync/plug and its dependencies are always real. `WorkerAutoloader.php`
   referenced `Plug` without loading it when required standalone (as
   `tests/UnitWorkerAutoloaderTest.php` does) — fixed with an explicit `require_once`.
+
+## What's left
+
+Gap #1's second issue (Symfony routing), gap #2's remaining psr15 failure, and gaps #5 and #6
+(CakePHP, Yii) all share a pattern: each needs either deeper root-causing (more time against
+phasync/plug or phasync/hooked than this task had left) or isn't fixable from this branch's
+integration at all (gap #1's routing issue may be purely a phasync/plug concern once isolated).
+None block the plug from working — every adapter boots and serves real requests without the
+extension — but none of the four are closed.
