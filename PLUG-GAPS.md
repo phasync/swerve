@@ -21,70 +21,98 @@ swerve's own suite: every suite the task named.
 
 ## Gaps, grouped by cause, most impactful first
 
-### 1. phasync/hooked's "cut short" diagnostic warning survives a successful shielded retry — write-side data loss fixed; the warning itself is not suppressible from here
+### 1. phasync/hooked waited before trying: cancellation surfaced where ext-phasync's own fwrite() never would have waited at all — fixed; one swerve-psr15 WebSocket test still fails intermittently, now traced to a different, deeper cause
 
-**Fixed.** `hookedWriteLoop()`'s `phasync::writable()` wait only caught `TimeoutException`: a
-`CancelledException` reaching the fiber a *second* time (sticky once a fiber is cancelled, by
-phasync's own design) propagated immediately, before ever finding out whether the stream was
-ready — cutting short a write a native `fwrite()` would simply have completed (it has no concept
-of phasync's cancellation at all). Confirmed the exact shape with a minimal reproduction (a fiber
-cancelled mid-`phasync::sleep()`, whose `catch` then calls `\phasync\hooked\fwrite()` to send a
-goodbye) and traced it to swerve-psr15's WebSocket tests: a client left a socket open across
-`native_stop()`'s drain, and the worker's own WebSocket cleanup write hit this exact race.
+**Root cause, corrected from the previous round.** The previous round's fix (commit `661a47f`,
+a shielded retry after a second `CancelledException`) treated this as a phasync-core limitation
+(the "cut short" warning's flag only clears on a real suspend/resume cycle, which a shielded
+retry cannot force). That framing was wrong. Measured directly against ext-phasync: a coroutine
+blocked in `fread()` is cancelled, `fread()` throws `CancelledException` (expected — that read
+really was waiting); its `finally` then calls `fwrite()` on a socket that already has room, and
+the extension's own `fwrite()` **returns the byte count, no exception** — because it tries the
+native, non-blocking write first and only waits (checking cancellation) when that attempt cannot
+make progress. phasync/hooked's `hookedWriteLoop()` did the opposite: it called
+`phasync::writable()` — which checks cancellation — *before* ever attempting the native
+`fwrite()`, even when the socket was already writable. The "cut short" warning was a true
+symptom of a real semantic gap from the extension, not an unavoidable core behaviour.
 
-**Fixed in `~/dev/phasync-hooked`** (commit `661a47f`): `hookedWriteLoop()` now catches that
-second `CancelledException` and gives the write one more chance — one shielded, briefly-bounded
-(0.05 s, not the stream's own, possibly much longer or unbounded, configured timeout, so a drain
-never waits that out for this) `phasync::writable()` + `fwrite()` — then **always** re-throws the
-original cancellation regardless (this is not a way to ignore it, only to let an already-ready
-write happen first, matching what a native call would have done). New case in `FwriteTest.php`
-(`phasync::go()` + `phasync::cancel()`, a hooked `fwrite()` in the fiber's own first-cancellation
-catch block) fails without the fix (the write is lost) and passes with it, with no "cut short"
-warning. Full phasync/hooked suite: 186/186 green.
+**Fixed in `~/dev/phasync-hooked`** (commit `472d438`): every hooked stream function that reads
+or writes now makes one native, non-blocking attempt *first*; only when that attempt signals
+"would block" (`fread`/`fgetc`/`fgets`'s own `''`/`false` on a read that isn't at EOF, `0` bytes
+written on a write — confirmed empirically distinct from a real failure) does it wait through
+phasync, then try the same native call again. This covers `hookedRead()` (`fread`/`fgetc`),
+`hookedLineRead()` (`fgets`/`fgetcsv`), `hookedReadLoop()` (`stream_get_contents`/`fpassthru`/
+`stream_copy_to_stream`'s read side), `hookedWriteLoop()` (`fwrite`/`fputs`/`stream_copy_to_stream`'s
+write side) and `stream_get_line()`'s own loop. This also subsumes the old separate "skip the
+wait when `unread_bytes > 0`" special case (README's rule 6): trying first picks up buffered data
+without any extra check. `661a47f`'s shielded-retry patch is removed — it worked around the
+symptom (a lost write) without fixing why the wait happened when the socket was already writable.
+New test in `FreadTest.php` reproduces the exact reference scenario (cancelled `fread()`, the
+`finally`'s `fwrite()` to a writable socket returns the byte count, no exception);
+`FwriteTest.php`'s old cut-short test updated to the corrected expectation, plus a new
+complementary case confirming cancellation still throws when a write genuinely has no room to
+wait for (so the fix narrows *where* cancellation surfaces, not *whether* it ever does). Full
+suite: 188/188 green.
 
-**Effect on swerve-psr15, revisited.** A single rerun right after the fix showed `1 failed, 76
-passed` (the *"origin allow-list"* WebSocket test passing, *"subprotocols"* still failing). Two
-more reruns since (same code, same scratch copy, nothing else changed) both show `2 failed, 75
-passed` (43.5-45.0 s), *"origin allow-list"* failing again alongside *"subprotocols"* — same
-`"Cleanup in a finally block ... was cut short"` warning on both, confirmed deterministic across
-those two reruns. **Root-caused**, and it is not a bug in the fix: it's a property of the warning
-itself that `phasync/hooked` cannot control from userland.
+**Effect on swerve-psr15.** Five reruns after the fix: `0 failed, 77 passed` once (45.22 s,
+matching ext mode's own `77 passed` exactly), `1 failed, 76 passed` the other four times
+(44-45 s each) — the *"subprotocols"* WebSocket test, which failed on every prior round's run,
+now passes consistently in all five; the *"origin allow-list"* test still fails intermittently
+(4 of 5 reruns), same `"Cleanup in a finally block ... was cut short"` warning as before.
 
-phasync core (`~/dev/phasync`, out of scope to modify) marks a fiber's
-`cutShortCleanup[$fiber] = true` the moment `checkCancelled()` throws a *second* time for that
-fiber (`EventLoop.php:2030`), and only clears it when the fiber is next **resumed through the
-normal tick/wake path** (`EventLoop.php:712` and `:837`, both commented "a cut-short mark... only
-still matters if nothing ran for this fiber since: it really suspended and resumed again"). The
-warning itself fires at fiber termination if the flag is still set
-(`EventLoop.php:2276-2283`). `phasync::shielded()` (`phasync.php:971`) only suspends *new*
-cancellations from reaching the wrapped closure (`$driver->shield($fiber)`); it does not itself
-clear the flag, touch `EventLoop`'s internal state, or force a resume cycle — clearing only
-happens as a side effect of the shielded wait actually suspending the fiber and the event loop
-resuming it. Whether `phasync::writable()` suspends at all depends on whether the poller resolves
-the stream as already-writable synchronously (common for a short local socket write): when it
-does, no resume cycle runs, the flag set by the *original* (pre-shield) cancellation stays set
-through to the retried write's success and the subsequent (deliberate) re-throw of that original
-cancellation, and the fiber terminates with the flag still set — so the warning fires regardless
-of whether the write itself succeeded. This is why the very first rerun showed the fix "working"
-(lucky timing: that particular write happened to suspend) and both reruns since do not: there is
-no public phasync API from `phasync::shielded()`/`phasync::writable()` to request or detect an
-actual suspend, so `phasync/hooked` cannot make the flag clear deterministically, and cannot
-silence the warning once it has been set, without a phasync core change.
+**A sibling instance of the identical "wait before trying" shape exists in swerve-plug's own
+code (`src/Util/Worker.php`'s `awaitMaster()`/`awaitInbox()`, the worker's always-running
+master-pipe/inbox event loop, written directly against `phasync::readable()`/`writable()`
+rather than through any hooked PHP builtin) — found, fixed the same way, and then reverted
+after it proved to regress something else without fixing this failure.** Applying the identical
+"try the native call first" pattern there seemed promising (a worker's own long-lived loop
+coroutine is exactly the kind of fiber whose cancellation during a drain could show this race),
+and passed every test tried at first (`PubSubTest.php`, `UnitWorkerAutoloaderTest.php`: `25
+passed`; `LingerTest.php`: all green). But a full run of `SupervisionTest.php` then showed a new
+failure, *"SIGHUP stops every worker, then restarts swerve... running the new code"*, asserting
+`'v1'` where `'v2'` was expected — confirmed, by isolating just that one test, to reproduce
+deterministically with the fix in place and disappear the moment it was reverted: removing
+`awaitMaster()`'s unconditional wait meant that loop no longer has a guaranteed suspension point
+on every iteration when the master sends several commands back to back (a reload followed
+immediately by other traffic), so other coroutines — including the one serving the *new*
+worker's first requests — got no chance to run in between, and a probe landed on code that
+hadn't taken over yet. Rule 3's "try first" is sound for a single operation call site, but
+`awaitMaster()`/`awaitInbox()` are not single calls: they are a worker's whole cooperative
+scheduling backbone, and losing their one guaranteed yield point is a correctness issue, not
+just an efficiency one. **Reverted** (swerve-plug, uncommitted — the repo is back to its prior
+`Worker.php`), and did not fix the *"origin allow-list"* failure anyway (confirmed: it still
+failed, twice, with the fix in place, before the regression was found and the revert decided).
+A *second*, unrelated, pre-existing failure surfaced in the same `SupervisionTest.php` run
+(*"a SIGHUP during a reload is not lost..."*, a tight 1 s timing deadline) and was confirmed, by
+reproducing it twice more on the fully reverted code, to be pre-existing flakiness, not caused by
+this round's changes either way.
 
-**Disposition.** The write itself is fixed and proven (`FwriteTest.php`'s isolated case, no
-timing dependency, 186/186 green): no `fwrite()` is ever lost to a second cancellation anymore.
-The *diagnostic warning* survives regardless, timing-dependently, and both WebSocket tests that
-happen to hit this cleanup path (*"origin allow-list"*, *"subprotocols"*) fail swerve-psr15's own
-`rt_clean()` assertion (no `Warning:`/`error`/etc. anywhere in the log) because of it — not because
-anything is actually broken. Applying the identical catch-and-shielded-retry pattern to
-`hookedRead()` (the natural read-side counterpart) did **not** reproduce or fix anything in a
-dedicated, isolated test, so that change was reverted rather than kept speculatively; the read
-side evidently isn't where either of these two tests' own cut-short originates. **Size:** the data-
-loss half is fixed and closed. The warning half is a phasync core behaviour with no suppression
-hook exposed to callers — not fixable from `phasync/hooked`, `phasync/plug` or `phasync/babel`;
-would need a phasync core change (out of this task's permitted scope) such as an explicit "this
-cleanup finished, don't warn" acknowledgement, or `shielded()` itself clearing the flag
-unconditionally on exit.
+**The remaining *"origin allow-list"* failure's real site, traced one level further: swerve's
+own `phasync::shielded()`-wrapped connection-draining cleanup, not a "wait before trying" bug at
+all.** `src/WebSocket.php`'s `put()` (every close-frame write) and `src/Http/HttpConnection.php`'s
+`serve()` (every connection's own lingering-drain cleanup) both wrap their cleanup in
+`phasync::shielded()` deliberately, so a cancelled fiber can still finish saying goodbye to its
+client. This is correct by design — but `phasync::shielded()` only keeps a *new* cancellation
+from reaching the wrapped closure; it does not, by itself, clear phasync core's own
+`cutShortCleanup` flag (see the previous round's own analysis of `EventLoop.php`, still accurate
+for this case even though it was wrongly generalised to the hooked write bug too): that only
+happens if the wrapped wait actually suspends the fiber and the event loop resumes it through the
+normal tick path. Whether the shielded write/read inside `put()`/`serve()`'s cleanup needs to
+suspend at all depends on whether the socket happens to already have room/data at that exact
+moment — which is exactly why this one test's failure is intermittent rather than constant: the
+race is in phasync core's warning bookkeeping around an intentional, correct use of
+`phasync::shielded()`, not an avoidable "didn't try first" bug like the one fixed in
+phasync/hooked and (unsuccessfully) attempted in `Worker.php`.
+
+**Disposition.** The `fread`-cancelled-then-`fwrite`-to-writable-socket reference case (this
+round's actual target) is closed and tested; four of swerve-psr15's five reruns above are fully
+clean except for this one, now-better-understood, pre-existing intermittent failure, down from
+the two consistently-failing WebSocket cancellation tests before this round. Fixing the
+remaining failure for good would mean either making `phasync::shielded()` itself guarantee its
+flag clears (a phasync core change, out of this task's permitted scope — same conclusion as last
+round, now correctly scoped to just this one case instead of the whole gap) or restructuring
+`put()`/`serve()`'s cleanup to avoid the shield, which is a larger, riskier change to swerve's own
+connection-draining correctness than this round's time allows to make carefully.
 
 ### 2. Worker boot is slower under the plug — cold-cache only; warm boot matches ext-phasync
 
@@ -169,7 +197,7 @@ left this exact failure unchanged, same test, same message shape, both before an
 | Suite | Plug mode | ext mode | Difference |
 |---|---|---|---|
 | swerve (own) | 615.42 s | 586.18 s | +29.2 s (+5.0%) |
-| swerve-psr15 | 42.46 s | 41.0 s | +1.5 s (+3.6%) |
+| swerve-psr15 | ~45.0 s (4 of 5 reruns this round; 1 ran clean at 45.22 s, matching ext mode's own count exactly) | 40.97 s | ~+4 s (+10%); gap #1's one remaining intermittent failure, not a clean comparison every run |
 | swerve-laravel | 233.11 s | 198.55 s | +34.6 s (+17.4%) |
 | swerve-codeigniter | 47.02 s | 45.09 s | +1.9 s (+4.3%) |
 | swerve-symfony | 27.07 s | 24.24 s | +2.8 s (+11.7%) |
@@ -194,9 +222,15 @@ the php-parser oracle.
 - **phasync/plug** (`~/dev/phasync-plug`, commit `06b16c8`): the cache-mirror-of-mirror crash,
   originally this list's gap #1. `Loader::unmirror()`; new case in `LoaderTest.php`. Full suite:
   12/12 green.
-- **phasync/hooked** (`~/dev/phasync-hooked`, commit `661a47f`): the write-side cancellation
-  cut-short, the data-loss half of this list's current gap #1. New case in `FwriteTest.php`.
-  Full suite: 186/186 green.
+- **phasync/hooked** (`~/dev/phasync-hooked`, commit `661a47f`, superseded this round by
+  `472d438` below): the write-side cancellation cut-short, the data-loss half of this list's
+  gap #1. New case in `FwriteTest.php`. Full suite: 186/186 green at the time.
+- **phasync/hooked, round 2** (`~/dev/phasync-hooked`, commit `472d438`): `661a47f`'s
+  shielded-retry patch replaced with the real fix: every hooked stream read/write function now
+  tries its native, non-blocking call first and waits through phasync only when that attempt
+  signals it would block, matching ext-phasync's own `fread()`/`fwrite()` exactly (see gap #1
+  above for the measured reference case and the full list of functions touched). Full suite:
+  188/188 green.
 - **phasync/plug, round 2** (`~/dev/phasync-plug`, commits `e1daab1`, `fd4c367`): the deeper
   issue the mirror-of-mirror fix exposed. `Kernel::getProjectDir()`-style code
   (`dirname((new \ReflectionObject($this))->getFileName())`) resolved to the cache mirror, not
@@ -245,9 +279,14 @@ the php-parser oracle.
 
 ## What's left
 
-Gap #1's warning-suppression half (root-caused as a phasync core behaviour with no suppression
-hook — see above) and gap #4 (Yii's logged warning, cause still not isolated) are what remain
-open. Gaps #2 and #3 are accepted by the owner's own ruling, not open questions. Symfony and
-CakePHP's Reflection-path issues, and the `ReflectionMethod`/`WrapsClassAccessors` traps found
-along the way, are now closed and tested. None of the open items block the plug from working —
-every adapter boots and serves real requests without the extension.
+Gap #1's *"origin allow-list"* intermittent failure (root-caused to `phasync::shielded()`'s own
+flag-clearing gap in swerve's legitimate connection-draining cleanup, not fixable from
+phasync/hooked/plug/babel — see above) and gap #4 (Yii's logged warning, cause still not
+isolated) are what remain open. Gaps #2 and #3 are accepted by the owner's own ruling, not open
+questions. Symfony and CakePHP's Reflection-path issues, the `ReflectionMethod`/
+`WrapsClassAccessors` traps found along the way, and the `fread`-cancelled-then-`fwrite`
+reference case this round targeted, are now closed and tested. A same-shaped fix attempted in
+swerve-plug's own `Worker.php` (`awaitMaster()`/`awaitInbox()`) was reverted after it regressed
+a `SupervisionTest.php` reload case without fixing the target failure — recorded above as a
+negative result, not applied. None of the open items block the plug from working — every adapter
+boots and serves real requests without the extension.
