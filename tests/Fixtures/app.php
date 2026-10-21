@@ -28,14 +28,7 @@ if ($testDir && \file_exists("$testDir/crash")) {
 if ($testDir && \file_exists("$testDir/load-ms")) {
     \usleep((int) \file_get_contents("$testDir/load-ms") * 1000);
 }
-// Not `$cond ? require $f : 'none'`: phasync/babel's includeHandler rewrite of a `require`/
-// `include` used as a ternary's own operand is mis-parsed (confirmed, reported in PLUG-GAPS.md);
-// this is otherwise exactly that expression.
-if ($testDir && \file_exists("$testDir/version.php")) {
-    $version = require "$testDir/version.php";
-} else {
-    $version = 'none';
-}
+$version = $testDir && \file_exists("$testDir/version.php") ? require "$testDir/version.php" : 'none';
 if ($testDir && \file_exists("$testDir/record-last-error")) {
     // As frameworks' shutdown handlers report error_get_last(), such as Spiral's
     \register_shutdown_function(static function () use ($testDir) {

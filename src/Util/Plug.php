@@ -48,6 +48,14 @@ final class Plug
 
         $installedFile = "$vendorDir/composer/installed.php";
         if (!\is_file($installedFile)) {
+            // $vendorDir can be a stand-in that only forwards to the real one (Joomla's
+            // libraries/vendor/autoload.php, a test fixture's own autoload.php) rather than a
+            // real Composer install: phasync/plug and its own dependencies are swerve's, always
+            // resolvable from swerve's own install location regardless of where the application
+            // keeps its vendor directory.
+            $installedFile = \dirname(__DIR__, 2) . '/vendor/composer/installed.php';
+        }
+        if (!\is_file($installedFile)) {
             throw new \RuntimeException("Swerve\\Util\\Plug: $installedFile not found; phasync/plug must be installed alongside swerve");
         }
         $versions = (require $installedFile)['versions'] ?? [];
