@@ -29,6 +29,12 @@ use Swerve\Util\Classic\Runner;
  */
 final class Dispatcher
 {
+    /** $_SERVER entries of the worker's command line, which no request has. */
+    private const COMMAND_LINE = [
+        'argv' => 0, 'argc' => 0, 'PHP_SELF' => 0, 'SCRIPT_NAME' => 0, 'SCRIPT_FILENAME' => 0,
+        'PATH_TRANSLATED' => 0, 'DOCUMENT_ROOT' => 0, 'REQUEST_TIME' => 0, 'REQUEST_TIME_FLOAT' => 0,
+    ];
+
     private readonly Router $router;
 
     /** @var list<array{Adapter, object, bool}> per async route: its adapter, its handler, whether it is a script */
@@ -44,7 +50,11 @@ final class Dispatcher
     /** Without the extension, through the plug: translated code reads PHP_SAPI per request */
     private readonly bool $plug;
 
-    /** @var array<string, string> what every request's $_SERVER starts from: the environment */
+    /**
+     * @var array<string, mixed> what every request's $_SERVER starts from: $_SERVER as the application
+     *                           left it while booting (its .env values, a framework's flags), without
+     *                           the command line's own entries
+     */
     private readonly array $server;
 
     private readonly string $documentRoot;
@@ -78,7 +88,8 @@ final class Dispatcher
         $this->persistent   = $mode instanceof PersistentMode;
         $this->sapi         = \function_exists('phasync\ext\sapi');
         $this->plug         = Plug::isInstalled();
-        $this->server       = \getenv();
+        // Made after swerve.php ran: what the application put in $_SERVER while booting stays
+        $this->server       = \array_diff_key($_SERVER, self::COMMAND_LINE);
         $this->documentRoot = $mode->publicRoot ?? \dirname($swerveFile);
     }
 
@@ -145,7 +156,8 @@ final class Dispatcher
         }
         [$remoteAddr, $remotePort] = self::address($request->peer());
         [$localAddr, $localPort]   = self::address($request->local());
-        $server += [
+        // The request's own values win over what the application left in $_SERVER while booting
+        $server = \array_replace($server, [
             'SERVER_SOFTWARE'    => 'Swerve',
             'GATEWAY_INTERFACE'  => 'CGI/1.1',
             'SERVER_PROTOCOL'    => 'HTTP/' . $request->getProtocolVersion(),
@@ -165,9 +177,11 @@ final class Dispatcher
             'PHP_SELF'           => '',
             'REQUEST_TIME_FLOAT' => $now,
             'REQUEST_TIME'       => (int) $now,
-        ];
+        ]);
         if ('https' === $server['REQUEST_SCHEME']) {
             $server['HTTPS'] = 'on';
+        } else {
+            unset($server['HTTPS']);
         }
         $_SERVER = $server;
         \parse_str($query, $_GET);
