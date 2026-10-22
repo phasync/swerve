@@ -5,8 +5,8 @@
  * ServerSentEvents served as an application would serve them.
  */
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\ServerSentEvents;
 use Swerve\Swerve;
 use Swerve\WebSocket;
@@ -21,7 +21,7 @@ function rt_send(ClientRequest $r, int $status, string $body): void
     $r->write($body);
 }
 
-return new RequestHandler((new class {
+return AsyncMode::serve(null, (new class {
     /** WebSocket and SSE handlers still running, see /live. */
     private array $live = ['news' => 0, 'sse' => 0];
 

@@ -80,12 +80,20 @@ function temp_path(bool $dir = false): string
 
 /**
  * Start bin/swerve.php in a process group of its own, and register the group to be killed
- * after the test. $fixture is a file in tests/Fixtures, or a path when it has a slash.
+ * after the test. Swerve only ever loads `./swerve.php` of its working directory: $fixture is a
+ * file in tests/Fixtures, or a path when it has a slash. A path with a slash already named
+ * `swerve.php` is used as it is (so an application with its own `public/` is served as it is,
+ * e.g. examples/*\/swerve.php); one named otherwise is a file the test built and controls (so it
+ * may later rewrite it, watch its directory, follow a symlink it repoints, ...): it is symlinked
+ * as `swerve.php` right beside itself, and that directory becomes the working directory. A bare
+ * name (no slash, resolved under tests/Fixtures/) is symlinked into a fresh temporary directory
+ * instead, never into tests/Fixtures/ itself, which stays shared and unwritten. $cwd overrides
+ * all of this, for a fixture that itself needs a particular working directory.
  *
  * @param string[]              $php  arguments for PHP itself, such as ['-d', 'memory_limit=32M']
  * @param array<string, string> $env  more environment variables
  * @param array<int, mixed>     $out  descriptors for stdout and stderr
- * @param string|null           $cwd  the working directory; with $fixture null (no swerve.php argument), the application directory
+ * @param string|null           $cwd  the working directory; default: see above
  * @param string[]              $wrap a command that execs PHP, such as ['taskset', '-c', '0,1']
  *
  * @return resource the process; its pid is the master's, and the process group's
@@ -97,9 +105,19 @@ function swerve_spawn(array $args, ?string $fixture, array $php = [], array $env
         // test fails as "swerve did not start serving", with an empty log
         throw new RuntimeException('--ext needs a phasync extension binary: set PHASYNC_EXT_SO to one');
     }
-    $path    = null === $fixture ? [] : [str_contains($fixture, '/') ? $fixture : __DIR__ . "/Fixtures/$fixture"];
+    if (null !== $fixture && null === $cwd) {
+        if (str_contains($fixture, '/')) {
+            $cwd = dirname($fixture);
+            if ('swerve.php' !== basename($fixture) && !file_exists("$cwd/swerve.php")) {
+                symlink($fixture, "$cwd/swerve.php");
+            }
+        } else {
+            $cwd = temp_path(true);
+            symlink(__DIR__ . "/Fixtures/$fixture", "$cwd/swerve.php");
+        }
+    }
     $process = proc_open(
-        ['setsid', ...$wrap, PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args, ...$path],
+        ['setsid', ...$wrap, PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args],
         $out + [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
         $cwd,

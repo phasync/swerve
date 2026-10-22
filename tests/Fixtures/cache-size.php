@@ -5,11 +5,11 @@
  * milliseconds it took, /get?size=N reads it back and answers [its length, milliseconds].
  */
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\Swerve;
 
-return new RequestHandler(static function (ClientRequest $r) {
+return AsyncMode::serve(null, static function (ClientRequest $r) {
     $path = \parse_url($r->getTarget(), \PHP_URL_PATH);
     \parse_str((string) \parse_url($r->getTarget(), \PHP_URL_QUERY), $query);
     $size = (int) ($query['size'] ?? 0);

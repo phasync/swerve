@@ -5,9 +5,9 @@
  * coroutines started here that have not waited yet. /report answers what each of them saw.
  */
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
 use Swerve\OrderedChannel;
-use Swerve\RequestHandler;
 use Swerve\Swerve;
 
 $report = new ArrayObject();
@@ -36,7 +36,7 @@ phasync::service(static function () use ($attempt) {
 });
 $attempt('load', static fn () => Swerve::cache()->get('early'));
 
-return new RequestHandler(static function (ClientRequest $r) use ($report) {
+return AsyncMode::serve(null, static function (ClientRequest $r) use ($report) {
     for ($waited = 0; \count($report) < 5 && $waited < 200; ++$waited) {
         phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
     }

@@ -347,13 +347,8 @@ test('a child the master did not start ending (a wrapper\'s background job, an o
     $addr    = free_address();
     $log     = temp_path();
     // `job & exec swerve`, a common entrypoint: the job becomes the master's child
-    $process = proc_open(
-        ['setsid', 'sh', '-c', 'sleep 1 & exec "$@"', 'sh', PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=2', "--log=$log", '-vv', '--grace=2', __DIR__ . '/Fixtures/app.php'],
-        [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-        $pipes,
-    );
-    $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
-    $deadline                   = microtime(true) + 5;
+    $process  = swerve_spawn(["--http=$addr", '--workers=2', "--log=$log", '-vv', '--grace=2'], 'app.php', wrap: ['sh', '-c', 'sleep 1 & exec "$@"', 'sh']);
+    $deadline = microtime(true) + 5;
     while ('Hello' !== probe($addr, '/hello')) {
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(20_000);
@@ -534,13 +529,8 @@ test('a worker at its connection limit says so in the log', function () {
     $addr    = free_address();
     $log     = temp_path();
     // 100 descriptors: the worker serves at most 36 connections
-    $process = proc_open(
-        ['setsid', 'sh', '-c', 'ulimit -n 100 && exec "$@"', 'sh', PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', "--log=$log", '--grace=2', __DIR__ . '/Fixtures/app.php'],
-        [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-        $pipes,
-    );
-    $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
-    $deadline                   = microtime(true) + 5;
+    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '--grace=2'], 'app.php', wrap: ['sh', '-c', 'ulimit -n 100 && exec "$@"', 'sh']);
+    $deadline = microtime(true) + 5;
     while ('Hello' !== probe($addr, '/hello')) {
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(20_000);
@@ -557,15 +547,10 @@ test('a worker at its connection limit without the phasync extension does not ad
     if (extension_loaded('phasync')) {
         $this->markTestSkipped('the phasync extension is loaded');
     }
-    $addr    = free_address();
-    $log     = temp_path();
-    $process = proc_open(
-        ['setsid', 'sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh', PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', "--log=$log", '--grace=2', __DIR__ . '/Fixtures/app.php'],
-        [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-        $pipes,
-    );
-    $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
-    $deadline                   = microtime(true) + 5;
+    $addr     = free_address();
+    $log      = temp_path();
+    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '--grace=2'], 'app.php', wrap: ['sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh']);
+    $deadline = microtime(true) + 5;
     while ('Hello' !== probe($addr, '/hello')) {
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(20_000);
@@ -588,13 +573,8 @@ test('a worker at its connection limit without the phasync extension does not ad
 test('a worker serves at most half of PHP_FD_SETSIZE connections without the phasync extension, the open-file limit less 64 with it', function () {
     $addr    = free_address();
     $log     = temp_path();
-    $process = proc_open(
-        ['setsid', 'sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh', PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', '-v', "--log=$log", '--grace=2', __DIR__ . '/Fixtures/app.php'],
-        [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
-        $pipes,
-    );
-    $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
-    $max                        = extension_loaded('phasync') ? 4096 - 64 : PHP_FD_SETSIZE / 2;
+    $process = swerve_spawn(["--http=$addr", '--workers=1', '-v', "--log=$log", '--grace=2'], 'app.php', wrap: ['sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh']);
+    $max     = extension_loaded('phasync') ? 4096 - 64 : PHP_FD_SETSIZE / 2;
     [[$line]] = log_wait($log, '/at most \d+ connections/', 5);
     expect($line)->toContain("at most $max connections");
     native_stop($process);
@@ -1468,8 +1448,12 @@ test('--help exits 0; an empty --log and a repeated address are refused', functi
     expect($code)->toBe(2);
     expect(implode("\n", $out))->toContain('Value required for option: --log=<path>');
 
+    // A fresh directory, no swerve.php: the router positional only needs to exist for the
+    // duplicate-address check (earlier in startup) to be reached
+    $dir = temp_path(true);
+    touch("$dir/router.php");
     $out = [];
-    exec("timeout 5 $swerve --http=$addr --http=$addr " . escapeshellarg(__DIR__ . '/Fixtures/app.php') . ' 2>&1', $out, $code);
+    exec('cd ' . escapeshellarg($dir) . " && timeout 5 $swerve --http=$addr --http=$addr router.php 2>&1", $out, $code);
     expect($code)->toBe(2);
     expect(implode("\n", $out))->toContain("$addr more than once");
 });
@@ -1480,19 +1464,62 @@ test('--watchdog below a second is refused', function () {
     expect(implode("\n", $out))->toContain('Seconds: 1 or more, or 0 for off');
 });
 
-test('options may follow the swerve file; a second file is refused', function () {
-    $addr    = free_address();
-    $log     = temp_path();
-    $process = proc_open(['setsid', PHP_BINARY, __DIR__ . '/../bin/swerve.php', __DIR__ . '/Fixtures/app.php', "--http=$addr", '-w', '1', "--log=$log"], [], $pipes);
-    try {
-        expect(log_wait($log, '/with 1 worker$/m', 10))->not->toBeEmpty();
-        expect(probe($addr, '/hello'))->toBe('Hello');
-    } finally {
-        native_stop($process);
-    }
+test('a swerve.php exists: a positional argument or -t is refused, naming where to configure the public root and router instead', function (array $args) {
+    $dir = temp_path(true);
+    mkdir("$dir/public");
+    file_put_contents("$dir/swerve.php", "<?php return Swerve\\AsyncMode::serve(null, static fn () => null);\n");
+    $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
+    $cli    = implode(' ', array_map('escapeshellarg', $args));
+    exec('cd ' . escapeshellarg($dir) . " && $swerve $cli 2>&1", $out, $code);
+    expect($code)->toBe(2);
+    expect(implode("\n", $out))->toContain("$dir/swerve.php exists; configure the public root and the router there");
+})->with([
+    'a directory'  => [['public']],
+    'a file'       => [['router.php']],
+    '-t'           => [['-t', 'public']],
+]);
 
-    exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php') . ' ' . escapeshellarg(__DIR__ . '/Fixtures/app.php') . ' other.php 2>&1', $out, $code);
-    expect([$code, $out[0]])->toBe([2, 'swerve: Unknown argument: other.php']);
+test('a positional argument that is neither a directory nor a file that exists exits 2', function () {
+    $dir    = temp_path(true);
+    $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
+    exec('cd ' . escapeshellarg($dir) . " && $swerve nope.php 2>&1", $out, $code);
+    expect($code)->toBe(2);
+    expect(implode("\n", $out))->toContain('swerve: nope.php is not a directory or a file that exists');
+});
+
+test('no swerve.php and no index.php, with none above either, exits 2 without naming one', function () {
+    $dir    = temp_path(true);
+    $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
+    exec('cd ' . escapeshellarg($dir) . " && $swerve 2>&1", $out, $code);
+    expect($code)->toBe(2);
+    expect(implode("\n", $out))->toContain('index.php not found')->not->toContain('there is one in');
+});
+
+test('no swerve.php and no index.php, but a parent directory has one, names it', function () {
+    $dir = temp_path(true);
+    mkdir("$dir/sub");
+    file_put_contents("$dir/swerve.php", "<?php return Swerve\\AsyncMode::serve(null, static fn () => null);\n");
+    $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
+    exec('cd ' . escapeshellarg("$dir/sub") . " && $swerve 2>&1", $out, $code);
+    expect($code)->toBe(2);
+    expect(implode("\n", $out))->toContain("(there is one in $dir)");
+});
+
+test('swerve with only index.php in the current directory serves it as Classic, no swerve.php needed', function () {
+    $dir = temp_path(true);
+    file_put_contents("$dir/index.php", "<?php echo 'Hello from Classic shorthand';\n");
+    $addr     = free_address();
+    $log      = temp_path();
+    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '-vv', '--grace=2'], null, cwd: $dir);
+    $deadline = microtime(true) + 10;
+    while ('Hello from Classic shorthand' !== probe($addr, '/')) {
+        if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
+            throw new RuntimeException("swerve did not start serving:\n" . file_get_contents($log));
+        }
+        usleep(20_000);
+    }
+    expect(file_get_contents($log))->toContain('Classic (');
+    native_stop($process);
 });
 
 test('--http takes an IPv6 address', function () {

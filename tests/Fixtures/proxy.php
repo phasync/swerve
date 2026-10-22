@@ -5,10 +5,10 @@
  * through a proxy shows them.
  */
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
-return new RequestHandler(static function (ClientRequest $r) {
+return AsyncMode::serve(null, static function (ClientRequest $r) {
     $host = $r->getRequestHeaders()['host'][0];
     $body = \json_encode([
         'remote' => \trim(\substr($r->peer(), 0, \strrpos($r->peer(), ':')), '[]'),

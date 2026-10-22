@@ -4,8 +4,8 @@
  * The application the tests serve, returned the way a project's swerve.php returns it.
  */
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\StopReason;
 use Swerve\Swerve;
 use Swerve\WorkerStoppingException;
@@ -193,7 +193,7 @@ function fx_ws_echo(ClientRequest $r, bool $bye): void
     }
 }
 
-return new RequestHandler((new class($version) {
+return AsyncMode::serve(null, (new class($version) {
     /** @var string[] what /leak keeps */
     private array $leaked = [];
 
@@ -977,3 +977,4 @@ return new RequestHandler((new class($version) {
         }
     }
 })->handle(...));
+

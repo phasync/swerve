@@ -8,7 +8,7 @@
 function example_start(string $name): array
 {
     $dir = __DIR__ . "/../examples/$name";
-    [$process, $addr, $log] = swerve_start(["--public=$dir/public"], 2, fixture: "$dir/swerve.php", wait: false);
+    [$process, $addr, $log] = swerve_start([], 2, fixture: "$dir/swerve.php", wait: false);
     $deadline = microtime(true) + 10;
     while (null === probe($addr, '/')) {
         expect(microtime(true))->toBeLessThan($deadline, file_get_contents($log));

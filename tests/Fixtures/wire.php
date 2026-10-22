@@ -5,8 +5,8 @@
  * and takes off the wire, whatever the application is written in.
  */
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
 function wire_send(ClientRequest $r, int $status, array $headers, string $body): void
 {
@@ -14,7 +14,7 @@ function wire_send(ClientRequest $r, int $status, array $headers, string $body):
     $r->write($body);
 }
 
-return new RequestHandler((new class {
+return AsyncMode::serve(null, (new class {
     /** Producers of /chunked still running, see /live. */
     private int $live = 0;
 
@@ -118,3 +118,4 @@ return new RequestHandler((new class {
         }
     }
 })->__invoke(...));
+
