@@ -13,7 +13,7 @@ use phasync\IOException;
  * written as one chunk. The stream ends when the handler returns.
  *
  * ```php
- * return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+ * return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
  *     $sse = new Swerve\ServerSentEvents($request);
  *     foreach (Swerve::subscribe('news', $sse->lastEventId()) as $message) {
  *         $sse->send($message);

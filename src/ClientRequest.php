@@ -6,7 +6,7 @@ use phasync\Net\Duplex;
 
 /**
  * One HTTP exchange with a client: the request to read, and the response to write. The
- * application's {@see RequestHandler} is called once for each, and may keep it for as long as
+ * application's handler is called once for each, and may keep it for as long as
  * it likes (an event stream, a long download) by simply not returning.
  *
  * As a {@see Duplex}, read() is the request body ('' only once it ended) and write() the
@@ -21,7 +21,7 @@ use phasync\Net\Duplex;
  * is the same as none; any other value throws.
  *
  * ```php
- * return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+ * return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
  *     $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream']);
  *     foreach ([1, 2, 3] as $n) {
  *         $request->write("data: $n\n\n");
@@ -35,7 +35,7 @@ use phasync\Net\Duplex;
  * is aborted. After a `101`, the ClientRequest is the raw connection, and read() returns first
  * what the client sent behind its Upgrade request.
  *
- * @see RequestHandler
+ * @see Handlers
  *
  * @topic request-handlers
  *

@@ -14,7 +14,7 @@ use phasync\Util\Event;
  * A WebSocket connection (RFC 6455), server side, on a {@see ClientRequest} or any {@see Duplex}.
  *
  * ```php
- * return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+ * return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
  *     Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
  *         $ws->onMessage->listen(function (string $data) {      // inbound: events
  *             Swerve::publish('chat', $data);

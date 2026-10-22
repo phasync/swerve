@@ -6,7 +6,7 @@ namespace Swerve;
  * A protocol server, such as HTTP/1.1 (`--http`).
  *
  * It turns what arrives on its listener into {@see ClientRequest}s and gives each to the
- * application's {@see RequestHandler}. A worker calls `listen()`, then
+ * application's handler. A worker calls `listen()`, then
  * `run()` inside `phasync::run()`, and `drain()` when it is to stop.
  *
  * ```php
