@@ -33,7 +33,9 @@ final class Backend
         if (false === $stream) {
             throw new IOException("Can't connect to the request server at $socket: $error");
         }
-        \stream_set_blocking($stream, false);
+        // Blocking, with no timeout of its own: ext-phasync makes the waits cooperative, and a script
+        // runs as long as its max_execution_time lets it
+        \stream_set_timeout($stream, 86400 * 365);
 
         return new self($stream);
     }
@@ -51,17 +53,12 @@ final class Backend
         foreach ($frames as [$type, $payload]) {
             $bytes .= \pack('CN', $type, \strlen($payload)) . $payload;
         }
-        while ('' !== $bytes) {
-            $n = @\fwrite($this->stream, $bytes);
-            if (false === $n) {
-                throw new IOException('The request server closed the connection');
-            }
-            if ($n < \strlen($bytes)) {
-                $bytes = \substr($bytes, $n);
-                \phasync::writable($this->stream);
-            } else {
-                return;
-            }
+        $written = @\fwrite($this->stream, $bytes);
+        if (false === $written) {
+            throw new IOException('The request server closed the connection');
+        }
+        if (\strlen($bytes) !== $written) {
+            throw new \LogicException("A blocking write to the request server wrote $written of " . \strlen($bytes) . ' bytes');
         }
     }
 
@@ -84,6 +81,20 @@ final class Backend
         return $frame;
     }
 
+    /**
+     * The next frame when it has arrived whole already, without waiting; null otherwise.
+     *
+     * @return array{int, string}|null type and payload
+     */
+    public function buffered(): ?array
+    {
+        if (\strlen($this->buffer) < 5 || \strlen($this->buffer) < 5 + \unpack('N', $this->buffer, 1)[1]) {
+            return null;
+        }
+
+        return $this->receive();
+    }
+
     public function close(): void
     {
         \fclose($this->stream);
@@ -93,12 +104,7 @@ final class Backend
     {
         $bytes = \fread($this->stream, 262144);
         if ('' === $bytes || false === $bytes) {
-            if (\feof($this->stream)) {
-                throw new IOException('The request server closed the connection');
-            }
-            \phasync::readable($this->stream);
-
-            return;
+            throw new IOException('The request server closed the connection');
         }
         $this->buffer .= $bytes;
     }

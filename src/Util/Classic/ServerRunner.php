@@ -118,8 +118,30 @@ final class ServerRunner implements Runner
             foreach ($response['headers'] as [$name, $value]) {
                 $out[\strtolower($name)][] = $value;
             }
-            $request->sendResponseHeaders($response['status'], $out);
-            while (true) {
+            // What arrived with the head: a response complete already (a small page, which the
+            // server sends at the end in one batch) goes out with a Content-Length in one write
+            $body     = '';
+            $complete = false;
+            while (null !== $frame = $backend->buffered()) {
+                if (Backend::STOP === $frame[0]) {
+                    $pump?->stop();
+                } elseif ('' === $frame[1]) {
+                    $complete = true;
+                    break;
+                } else {
+                    $body .= $frame[1];
+                }
+            }
+            $status = $response['status'];
+            if ($complete && !isset($out['content-length']) && !isset($out['transfer-encoding'])
+                && $status >= 200 && 204 !== $status && 304 !== $status && 'HEAD' !== $request->getMethod()) {
+                $out['content-length'] = [(string) \strlen($body)];
+            }
+            $request->sendResponseHeaders($status, $out);
+            if ('' !== $body) {
+                $request->write($body);
+            }
+            while (!$complete) {
                 [$type, $payload] = $backend->receive();
                 if (Backend::STOP === $type) {
                     $pump?->stop();
