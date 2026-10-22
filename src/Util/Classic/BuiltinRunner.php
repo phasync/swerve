@@ -21,7 +21,7 @@ use function phasync\Net\dial;
  * BuiltinRunner::IDLE} seconds is stopped by a sweeper coroutine started once, in the worker's
  * own frame (not a request's, which a `phasync::go()` here would make wait for it). A process
  * that died while idle is dropped and another is started or waited for in its place; a request
- * that finds `$max` busy waits for a release via {@see \phasync::awaitFlag()}.
+ * that finds `$max` busy waits for one, in the order the requests asked.
  *
  * The router script every process runs is not the Classic application's own router: Swerve's own
  * `Swerve\Util\Router` already chose the script before `forward()` was called, so the one at
@@ -96,6 +96,10 @@ final class BuiltinRunner implements Runner
     private int $open = 0;
 
     /** Whether a coroutine closes idle processes. */
+    /** @var array<int, \stdClass> requests waiting for a process, first first: each gets ->grant, a process or true (start one) */
+    private array $waiting = [];
+    private int $nextWaiter = 0;
+
     private bool $sweeping = false;
 
     /** The worker's own frame and scope, where the sweeper runs: not a request's, which would wait for it. */
@@ -150,48 +154,88 @@ final class BuiltinRunner implements Runner
     /** An idle process (if it is still running), a freshly started one, or waits for a release. */
     private function acquire(): BuiltinProcess
     {
-        while (true) {
-            if ([] !== $this->idle) {
+        if ([] === $this->waiting) {
+            while ([] !== $this->idle) {
                 $process = \array_pop($this->idle);
                 if ($process->isRunning()) {
                     return $process;
                 }
                 --$this->open; // died while idle; try the next one, or start one
-
-                continue;
             }
             if ($this->open < $this->max) {
                 ++$this->open;
-                try {
-                    return $this->start();
-                } catch (\Throwable $e) {
-                    --$this->open;
-                    throw $e;
-                }
+
+                return $this->startInSlot();
             }
-            \phasync::awaitFlag($this);
+        }
+        $id                 = $this->nextWaiter++;
+        $waiter             = new \stdClass();
+        $waiter->grant      = null;
+        $this->waiting[$id] = $waiter;
+        try {
+            while (null === $waiter->grant) {
+                \phasync::awaitFlag($waiter);
+            }
+        } catch (\Throwable $e) {
+            // Given up (the client left): pass on what was granted meanwhile
+            unset($this->waiting[$id]);
+            if ($waiter->grant instanceof BuiltinProcess) {
+                $this->release($waiter->grant);
+            } elseif (true === $waiter->grant) {
+                $this->vacate();
+            }
+            throw $e;
+        }
+
+        return true === $waiter->grant ? $this->startInSlot() : $waiter->grant;
+    }
+
+    /** A new process, in a slot counted in $open already. */
+    private function startInSlot(): BuiltinProcess
+    {
+        try {
+            return $this->start();
+        } catch (\Throwable $e) {
+            $this->vacate();
+            throw $e;
         }
     }
 
-    /** Gives a process back: idle with its reap timer armed, unless it died. */
+    /** A process finished a request: to the first waiting request, else idle; a dead one frees its slot. */
     private function release(BuiltinProcess $process): void
     {
         if (!$process->isRunning()) {
-            --$this->open;
-            \phasync::raiseFlag($this);
+            $this->vacate();
+
+            return;
+        }
+        if ([] !== $this->waiting) {
+            $waiter        = \array_shift($this->waiting);
+            $waiter->grant = $process;
+            \phasync::raiseFlag($waiter);
 
             return;
         }
         $process->idleSince = \microtime(true);
-        $this->idle[]        = $process;
-        \phasync::raiseFlag($this);
+        $this->idle[]       = $process;
         if (!$this->sweeping) {
             $this->sweeping = true;
             \phasync::getLoop()->create($this->sweep(...), [], $this->frame, $this->scope);
         }
     }
 
-    /** Stops the processes idle longer than {@see self::$idleSeconds}, until none is idle. */
+    /** A process's slot came free: the first waiting request may start one. */
+    private function vacate(): void
+    {
+        if ([] !== $this->waiting) {
+            $waiter        = \array_shift($this->waiting);
+            $waiter->grant = true;
+            \phasync::raiseFlag($waiter);
+        } else {
+            --$this->open;
+        }
+    }
+
     private function sweep(): void
     {
         try {

@@ -34,6 +34,10 @@ final class ServerRunner implements Runner
     /** Connections open, busy or idle. */
     private int $open = 0;
 
+    /** @var array<int, \stdClass> requests waiting for a connection, first first: each gets ->grant, a connection or true (open one) */
+    private array $waiting = [];
+    private int $nextWaiter = 0;
+
     /** Whether a coroutine closes idle connections. */
     private bool $sweeping = false;
 
@@ -86,8 +90,7 @@ final class ServerRunner implements Runner
             $this->exchange($backend, $request, $script, $scriptName, $pathInfo);
         } catch (\Throwable $e) {
             $backend->close();
-            --$this->open;
-            \phasync::raiseFlag($this);
+            $this->vacate();
             if (!$e instanceof IOException) {
                 throw $e;
             }
@@ -103,13 +106,7 @@ final class ServerRunner implements Runner
 
             return;
         }
-        $backend->idleSince = \microtime(true);
-        $this->idle[]       = $backend;
-        \phasync::raiseFlag($this);
-        if (!$this->sweeping) {
-            $this->sweeping = true;
-            \phasync::getLoop()->create($this->sweep(...), [], $this->frame, $this->scope);
-        }
+        $this->release($backend);
     }
 
     private function exchange(Backend $backend, ClientRequest $request, string $script, string $scriptName, ?string $pathInfo): void
@@ -178,23 +175,83 @@ final class ServerRunner implements Runner
         }
     }
 
-    /** A connection: an idle one, a new one, or the first that becomes idle. */
+    /**
+     * A connection: an idle one or a new one, or, when the worker's share is busy, the first that
+     * comes free, in the order the requests asked: a request arriving meanwhile doesn't overtake
+     * those waiting.
+     */
     private function acquire(): Backend
     {
-        while (true) {
+        if ([] === $this->waiting) {
             if ([] !== $this->idle) {
                 return \array_pop($this->idle);
             }
             if ($this->open < $this->max) {
                 ++$this->open;
-                try {
-                    return Backend::connect($this->socket);
-                } catch (\Throwable $e) {
-                    --$this->open;
-                    throw $e;
-                }
+
+                return $this->connect();
             }
-            \phasync::awaitFlag($this);
+        }
+        $id                 = $this->nextWaiter++;
+        $waiter             = new \stdClass();
+        $waiter->grant      = null;
+        $this->waiting[$id] = $waiter;
+        try {
+            while (null === $waiter->grant) {
+                \phasync::awaitFlag($waiter);
+            }
+        } catch (\Throwable $e) {
+            // Given up (the client left): pass on what was granted meanwhile
+            unset($this->waiting[$id]);
+            if ($waiter->grant instanceof Backend) {
+                $this->release($waiter->grant);
+            } elseif (true === $waiter->grant) {
+                $this->vacate();
+            }
+            throw $e;
+        }
+
+        return true === $waiter->grant ? $this->connect() : $waiter->grant;
+    }
+
+    /** A new connection, in a slot counted in $open already. */
+    private function connect(): Backend
+    {
+        try {
+            return Backend::connect($this->socket);
+        } catch (\Throwable $e) {
+            $this->vacate();
+            throw $e;
+        }
+    }
+
+    /** A connection finished a request: to the first waiting request, else idle. */
+    private function release(Backend $backend): void
+    {
+        if ([] !== $this->waiting) {
+            $waiter        = \array_shift($this->waiting);
+            $waiter->grant = $backend;
+            \phasync::raiseFlag($waiter);
+
+            return;
+        }
+        $backend->idleSince = \microtime(true);
+        $this->idle[]       = $backend;
+        if (!$this->sweeping) {
+            $this->sweeping = true;
+            \phasync::getLoop()->create($this->sweep(...), [], $this->frame, $this->scope);
+        }
+    }
+
+    /** A connection's slot came free: the first waiting request may open one. */
+    private function vacate(): void
+    {
+        if ([] !== $this->waiting) {
+            $waiter        = \array_shift($this->waiting);
+            $waiter->grant = true;
+            \phasync::raiseFlag($waiter);
+        } else {
+            --$this->open;
         }
     }
 
