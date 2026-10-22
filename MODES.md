@@ -42,8 +42,14 @@ return AsyncMode::serve('public', $app);
 - `$publicRoot = null` (Persistent and Async only) serves no static files. There is no default:
   a project root is rarely safe to publish (`composer.json`, `vendor/`, `storage/`). Adapters
   pass their framework's directory.
-- `withAsync(string $prefix, object $handler)` returns a new instance (immutable, as PSR-7's
-  `with*`). The longest matching prefix wins; adding the same prefix twice throws.
+- `withAsync(string $pattern, object $handler)` returns a new instance (immutable, as PSR-7's
+  `with*`). The pattern is a regular expression body matched against the path, anchored at its
+  start; Swerve adds the delimiters and `^`. So `'/ws/'` is a prefix, and `'.*\.scss$'` or
+  `'/assets/.*\.css$'` are patterns (escape `.` in plain prefixes). The first match in declaration
+  order wins; adding the same pattern twice throws. Async routes come before static files, so a
+  pattern can take over existing files (compile `.scss` on request) or paths that don't exist
+  (build `style.css` from `style.scss`). With many patterns, Swerve can combine them into one
+  alternation, as FastRoute does, without changing the API.
 - `swerve.php` is evaluated in each worker, after the fork, never in the master: the master holds
   no application code or state (clean hard reloads, nothing shared across forks by accident). The
   master learns what it needs (mode, public root, router, async prefixes) from the first worker.
@@ -80,7 +86,7 @@ Paths on the command line are relative to the current directory, as with `php -S
 
 The same order in every mode, nginx's `try_files $uri $uri/ /index.php`:
 
-1. a matching async prefix: its handler;
+1. the first matching async pattern: its handler;
 2. an existing file under the public root that isn't `.php`: served by Swerve;
 3. Classic: an existing `.php` file runs as itself; a directory runs its `index.php` or serves its
    `index.html`;
