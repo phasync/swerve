@@ -19,7 +19,7 @@ In the directory with its `index.php`, as with `php -S`:
 
 ```
 > vendor/bin/swerve public
-2026-10-22 10:18:22.42 0 Classic (the extension's request server, up to 32 processes)
+2026-10-22 10:18:22.42 0 Classic (the extension's request server, up to 8 processes)
 2026-10-22 10:18:22.61   swerve 0.2.0 serving /srv/app/public through /srv/app/public/index.php on http://127.0.0.1:8080 with 8 workers
 2026-10-22 10:18:22.71 3 GET / 200 3.0ms
 ```

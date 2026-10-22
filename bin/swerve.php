@@ -281,8 +281,8 @@ foreach ([\STDOUT, \STDERR] as $out) {
      * request server, which the master starts once the first worker reports a Classic
      * application; without, a php -S pool per worker.
      */
-    $maxProcesses = 'auto' === $args->maxProcesses ? 4 * System::getCPUCount() : (int) $args->maxProcesses;
-    $classic      = \extension_loaded('phasync') ? new ServerProcess($logger, $maxProcesses) : null;
+    $classicWorkers = 'auto' === $args->classicWorkers ? $workerCount : (int) $args->classicWorkers;
+    $classic        = \extension_loaded('phasync') ? new ServerProcess($logger, $classicWorkers) : null;
 
     /*
      * The master process forks the workers, and supervises them until stopped.
@@ -329,7 +329,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
     // Loaded in the worker's event loop: the application may start coroutines as it loads,
     // such as a subscriber that runs for the worker's whole life
-    phasync::run(static function () use ($swerveFile, $root, $router, $args, $logger, $worker, $http, $proxies, $workerCount, $maxProcesses) {
+    phasync::run(static function () use ($swerveFile, $root, $router, $args, $logger, $worker, $http, $proxies, $workerCount, $classicWorkers) {
         // A coroutine of the worker or a service (each request's frame has its own handler, see
         // HttpConnection) that fails with nobody awaiting it is logged, and the worker serves on:
         // without a handler the failure would end this run() once every other coroutine had
@@ -354,16 +354,15 @@ foreach ([\STDOUT, \STDERR] as $out) {
                 $mode = new ClassicMode($root, $router);
             }
             Cache::$loader = null;
-            // Each worker's share of the processes running Classic scripts
-            $share  = \max(1, \intdiv($maxProcesses, $workerCount));
             $runner = null;
             if ($mode instanceof ClassicMode) {
                 if (\extension_loaded('phasync')) {
                     (Topics::$toMaster)(ServerProcess::TOPIC, \serialize([$mode->publicRoot, $mode->router]));
-                    $runner = new ServerRunner(ServerProcess::$socket, $share);
+                    $runner = new ServerRunner(ServerProcess::$socket);
                     $runner->awaitServer();
                 } else {
-                    $runner = new BuiltinRunner($mode->publicRoot, $share);
+                    // php -S: a pool per worker, each its share
+                    $runner = new BuiltinRunner($mode->publicRoot, \max(1, \intdiv($classicWorkers, $workerCount)));
                 }
             }
             $dispatcher = new Dispatcher($mode, $swerveFile ?? $mode->router, $runner);
@@ -373,7 +372,7 @@ foreach ([\STDOUT, \STDERR] as $out) {
         }
         if (0 === $worker->slot) {
             $logger->notice('{mode}', ['mode' => match (true) {
-                $mode instanceof ClassicMode => 'Classic (' . (null !== $runner && $runner instanceof ServerRunner ? 'the extension\'s request server' : 'php -S') . ", up to $maxProcesses processes)",
+                $mode instanceof ClassicMode => 'Classic (' . (null !== $runner && $runner instanceof ServerRunner ? 'the extension\'s request server' : 'php -S') . ", up to $classicWorkers processes)",
                 $mode instanceof PersistentMode => "Persistent, $workerCount worker" . (1 === $workerCount ? "" : "s"),
                 default => "Async, $workerCount worker" . (1 === $workerCount ? "" : "s"),
             } . ([] === $mode->asyncRoutes() ? '' : ', async routes ' . \implode(' ', \array_map(static fn ($r) => $r[0], $mode->asyncRoutes())))]);

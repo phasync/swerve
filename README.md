@@ -91,7 +91,7 @@ vendor/bin/swerve --watch                # with a swerve.php: reload when a PHP 
 
 ```
 > vendor/bin/swerve public
-2026-10-22 10:18:22.42 0 Classic (the extension's request server, up to 32 processes)
+2026-10-22 10:18:22.42 0 Classic (the extension's request server, up to 8 processes)
 2026-10-22 10:18:22.61   swerve 0.2.0 serving /srv/app/public through /srv/app/public/index.php on http://127.0.0.1:8080 with 8 workers
 2026-10-22 10:18:22.71 3 GET / 200 3.0ms
 ```
@@ -116,7 +116,7 @@ Serving:
   --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
   --trusted-proxy=<ip|range|unix>  HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
-  --max-processes=<n>              Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core (default: auto)
+  --classic-workers=<n>            Classic: the most PHP processes running scripts at once, as PHP-FPM's pm.max_children with pm = ondemand; auto is the number of workers (default: auto)
 
 Extension:
   --ext                            Load ext-phasync (bundled with phasync); swerve stops if it cannot

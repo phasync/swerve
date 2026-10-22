@@ -158,14 +158,17 @@ Swerve's workers accept HTTP (and TLS), serve static files and run async routes,
 other request to a **request runner**:
 
 1. **ext-phasync's request server** when the extension is loaded (`phasync.serve`): a master that
-   listens on a private Unix socket and forks one child per connection from Swerve; each child
-   serves request after request on its connection with PHP's real request lifecycle (fresh state,
-   native `header()`, `echo`, sessions, `exit()`), blocking. Swerve decides how many processes run:
-   it opens a connection when every open one is busy, up to a limit, and closes connections that
-   stay idle for 10 seconds, which ends their processes. The children are forked from a master that
-   never runs a request, so they share its opcache.
-2. **A pool of `php -S` processes** when the extension isn't available: the same growth and idle
-   rules, HTTP on loopback, about 15% more CPU per request than PHP-FPM on WordPress.
+   listens on a private Unix socket and works as PHP-FPM with `pm = ondemand`: its children accept
+   connections on that socket and run each request with PHP's real request lifecycle (fresh state,
+   native `header()`, `echo`, sessions, `exit()`), blocking. The master forks a child when a
+   connection waits and none is idle, up to `--classic-workers` (`pm.max_children`, default: the
+   number of Swerve workers); a child idle for 30 seconds exits. Swerve opens a connection per
+   request (a Unix socket: about 3 µs), so the kernel's accept queue is one FIFO queue for every
+   worker and no child is tied to a worker. The children are forked from a master that never runs a
+   request, so they share its opcache.
+2. **A pool of `php -S` processes** when the extension isn't available: per worker (each its share
+   of `--classic-workers`), HTTP on loopback, about 15% more CPU per request than PHP-FPM on
+   WordPress.
 
 ### Who starts what
 
@@ -176,18 +179,19 @@ other request to a **request runner**:
   reports the `ClassicMode` description; the master starts the server, waits until its socket
   listens, then lets the workers accept traffic. On a hard reload the master starts a new server,
   new connections go to it, and the old one drains and exits; on shutdown the master stops it.
-- **The server's first process only accepts, forks and reaps.** It never runs PHP code, so it
+- **The server's first process only forks and reaps.** It never runs PHP code, so it
   practically never dies; Swerve's master supervises only it (restarts it if it does, loudly).
 - **A child that dies** (segfault, OOM killer; a fatal PHP error is not that, it ends in a 500 and
   the child serves on) is reaped by the first process, nothing more: its connection is gone with
   it. The Swerve worker sees the connection close: 502 if no response had started, otherwise the
-  client connection closes. The pool drops that connection; the next request that finds every
-  connection busy opens a new one, which forks a new child.
-- **Each Swerve worker owns its connections:** it opens one when all of its own are busy, up to the
-  global cap divided by the number of workers, and closes those idle for 10 s. The server's
-  `serve_max_children` is the global cap; connections beyond it wait in its listen backlog.
+  client connection closes. The next request is taken by another child, forked if none is free.
+- **One queue for all workers:** an earlier design gave each worker a fixed share of persistent
+  connections (the cap divided by the workers); measured on WordPress it queued requests in a busy
+  worker while another's processes idled (p50 352 ms against 260 with one worker). Connections per
+  request through one accept queue have no such split.
 - **The `php -S` fallback is per worker:** each `php -S` has its own opcache anyway, so each worker
-  grows its own pool.
+  grows its own pool, its share of `--classic-workers`, idle processes stopped after 30 seconds;
+  the split between workers remains there.
 
 ### Protocol between Swerve and the request server
 
@@ -201,7 +205,8 @@ Frames: `[type: 1 byte][length: 4 bytes, big-endian][payload]`.
 | `STOP` | server → Swerve | send no more request body (the script ended without reading it); Swerve sends the end-of-body frame at once, the server discards frames in flight until it |
 | `ABORT` | Swerve → server | the client is gone (later: `connection_aborted()` as under FPM) |
 
-Rules: the server reads up to the request's end-of-body frame before the next request; a fatal
+Rules: one request per connection (the server also serves several in a row on one connection);
+the server reads up to the request's end-of-body frame before the next request; a fatal
 error still ends with a response `HEAD` (500 if nothing was sent) and the end frame; the response
 never closes the connection (a `Connection: close` from the script or the client is Swerve's
 business on the client side); response output is batched in 64 KiB frames, sent when full, on

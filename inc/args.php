@@ -66,8 +66,8 @@ return (function () {
         placeholder: 'n'
     ));
 
-    $args->add('maxProcesses', new Option(
-        '', 'max-processes', 'Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core',
+    $args->add('classicWorkers', new Option(
+        '', 'classic-workers', 'Classic: the most PHP processes running scripts at once, as PHP-FPM\'s pm.max_children with pm = ondemand; auto is the number of workers',
         default: 'auto',
         placeholder: 'n',
         validator: fn ($value) => 'auto' === $value || false !== \filter_var($value, \FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ? null : 'auto, or 1 or more, required',

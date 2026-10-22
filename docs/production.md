@@ -61,9 +61,9 @@ most requests with 16 workers. Measure with your own application. Each worker ho
 of your application in memory.
 
 **Classic processes.** A Classic application's scripts run in PHP processes outside the workers,
-one request at a time each, as PHP-FPM's `pm.max_children`: `--max-processes` (4 per CPU by
-default) bounds them, shared evenly by the workers. Processes start on demand and end after 10
-seconds idle; a request that finds the worker's share busy waits for one. `memory_limit` from
+one request at a time each, as PHP-FPM with `pm = ondemand`: `--classic-workers` (the number of
+workers by default) is `pm.max_children`, and a process exits after 30 seconds idle. Requests from
+every worker wait in one queue, in arrival order, for the first free process. `memory_limit` from
 php.ini applies per process, as under PHP-FPM: swerve's own overrides (below) are for its workers.
 
 **Several sockets.** On a machine with more than one NUMA node, worker *i* pins itself to node

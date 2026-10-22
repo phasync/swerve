@@ -5,8 +5,8 @@ namespace Swerve\Util\Classic;
 use phasync\IOException;
 
 /**
- * One connection to ext-phasync's request server, which a process of its own serves, one
- * request at a time. Frames: `[type: 1 byte][length: 4 bytes, big-endian][payload]`.
+ * One connection to ext-phasync's request server, for one request: a child of the server
+ * accepted it and serves it. Frames: `[type: 1 byte][length: 4 bytes, big-endian][payload]`.
  *
  * @internal
  */
@@ -16,9 +16,6 @@ final class Backend
     public const BODY  = 2;
     public const STOP  = 3;
     public const ABORT = 4;
-
-    /** When it last finished a request: see {@see ServerRunner::IDLE}. */
-    public float $idleSince = 0.0;
 
     private string $buffer = '';
 

@@ -29,12 +29,12 @@ outside the public root are never served.
 
 **Classic** runs the scripts in PHP processes of their own, outside the workers. With ext-phasync
 that is the extension's request server, which the master starts once the first worker reports a
-Classic application: its first process forks one child per connection from a worker, and the child
-serves the requests of that connection one at a time, blocking, with a fresh PHP state each. The
-children share one opcache. A worker opens a connection when all of its own are busy, up to its
-share of `--max-processes`, and closes those idle for 10 seconds, which ends their process. A child
-that dies (a segfault, the OOM killer) answers `502`; a fatal PHP error is a `500`, and the child
-serves on. Without the extension, each worker runs a pool of `php -S` processes the same way.
+Classic application. It works as PHP-FPM with `pm = ondemand`: its children take requests from one
+queue, in arrival order, whichever worker sent them, and run each with a fresh PHP state; a child
+is forked when none is free, up to `--classic-workers` (the number of workers by default), and exits
+after 30 seconds idle. The children share one opcache. A child that dies (a segfault, the OOM
+killer) answers `502`; a fatal PHP error is a `500`, and the child serves on. Without the extension,
+each worker runs its own pool of `php -S` processes, its share of `--classic-workers`.
 
 **Persistent** runs the handler in the worker, one request at a time per worker: the next one waits
 for the current one to finish. Async routes and static files are served meanwhile.

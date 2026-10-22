@@ -12,7 +12,7 @@ Serving:
   --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
   --trusted-proxy=<ip|range|unix>  HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
-  --max-processes=<n>              Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core (default: auto)
+  --classic-workers=<n>            Classic: the most PHP processes running scripts at once, as PHP-FPM's pm.max_children with pm = ondemand; auto is the number of workers (default: auto)
 
 Extension:
   --ext                            Load ext-phasync (bundled with phasync); swerve stops if it cannot
@@ -68,8 +68,9 @@ Information:
   The workers share the one socket file, made at start (a stale file is replaced; where anything
   listens, or a file that isn't a socket is in the way, swerve refuses to start) and removed at
   stop. Anyone may connect: limit access with the permissions of the directory it is in.
-- `--max-processes` bounds a Classic application's PHP processes, shared by the workers: each worker
-  opens up to its share as its requests need them, and closes those idle for 10 seconds.
+- `--classic-workers` bounds a Classic application's PHP processes, as PHP-FPM's `pm.max_children`
+  with `pm = ondemand`: they start as requests need them, from any worker, and exit after 30 seconds
+  idle.
 - `--max-body` applies to HTTP, which is all swerve serves; a proxy in front (nginx, HAProxy, Caddy)
   speaks HTTP to it.
 - `--trusted-proxy` names the proxies in front of swerve: an address (`10.0.0.5`, `::1`), a range

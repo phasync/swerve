@@ -54,7 +54,7 @@ use function phasync\Net\dial;
 final class BuiltinRunner implements Runner
 {
     /** Seconds a process may sit idle (no request) before it is stopped. */
-    public const IDLE = 10.0;
+    public const IDLE = 30.0;
 
     /** Seconds to wait for a freshly started process to accept a connection. */
     private const START_TIMEOUT = 5.0;

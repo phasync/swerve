@@ -19,7 +19,7 @@ Breaking: `swerve.php` returns a mode instead of a `Swerve\RequestHandler`.
 - Requests in a worker see `$_SERVER`, `$_GET`, `$_COOKIE` (and, for scripts, `$_POST`, `$_FILES`,
   `php://input`) as under PHP-FPM, and run inside ext-phasync's `sapi()`.
 - Without a `swerve.php`, `swerve [dir] [router.php]` and `-t` serve a Classic application, as
-  `php -S`. `--max-processes` bounds Classic's processes.
+  `php -S`. `--classic-workers` bounds Classic's processes, which run as PHP-FPM's `pm = ondemand`.
 - Removed: `Swerve\RequestHandler`, `Swerve\StaticFiles`, `--public`, `--adapter`, the file
   argument, and adapter discovery through Composer's `extra.swerve`.
 
