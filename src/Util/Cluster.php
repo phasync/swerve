@@ -6,6 +6,7 @@ use phasync\Util\LruCache;
 use Psr\Log\LoggerInterface;
 use Swerve\Cache;
 use Swerve\Claim;
+use Swerve\Util\Classic\ServerProcess;
 
 /**
  * The master process: forks one worker per slot and supervises them until stopped.
@@ -157,6 +158,7 @@ final class Cluster
         private readonly string $serving,
         int $cacheBytes = 64 << 20,
         private readonly ?\Closure $restart = null,
+        private readonly ?ServerProcess $classic = null,
     ) {
         // A master started by a reload: it reports the reload complete, and keeps restarting
         // workers that fail, as a running server does, rather than stopping as at first start
@@ -384,6 +386,9 @@ final class Cluster
                         $this->forgetAll(Topics::frame(Cache::FORGET, \serialize($keys)));
                     });
                     $this->send($w, Topics::frame(Cache::TOPIC, $reply));
+                } elseif (ServerProcess::TOPIC === $topic && null !== $this->classic) {
+                    $requested = false;
+                    $this->classic->request($message);
                 } elseif (Inboxes::TOPIC === $topic) {
                     $reply = $this->inboxes->serve($w->inbox, $message, fn (string $topic) => $this->forgetAll(Topics::frame(Inboxes::FORGET, $topic)));
                     if (null !== $reply) {
@@ -454,6 +459,8 @@ final class Cluster
         while (($pid = \pcntl_waitpid(-1, $status, \WNOHANG)) > 0) {
             if (isset($this->workers[$pid])) {
                 $this->exited($pid, $status);
+            } elseif ($this->classic?->exited($pid, $status, $this->stopSignals > 0)) {
+                // the request server: logged, and started again
             } else {
                 $this->logger->info('Reaped process {pid}, not a worker: {how}', ['pid' => $pid, 'how' => $this->describe($status, false)]);
             }
@@ -651,6 +658,7 @@ final class Cluster
         $this->logger->notice('Reload requested ({why}): stopping {n} workers, then restarting swerve', ['why' => $why, 'n' => \count($this->workers)]);
         $start = \microtime(true);
         $this->drainAll('reload');
+        $this->classic?->stop($this->grace);
         if ($this->stopSignals || null === $this->restart) {
             return; // a stop signal came during the drain: run() stops instead
         }
@@ -754,6 +762,7 @@ final class Cluster
         $start = self::now();
         $this->logger->notice('Shutting down: draining {n} workers (grace {g} s)', ['n' => \count($this->workers), 'g' => self::seconds($this->grace)]);
         $this->drainAll('shutdown');
+        $this->classic?->stop($this->grace);
         $this->logger->notice('Stopped in {s} s', ['s' => \round(self::now() - $start, 2)]);
 
         return $code;

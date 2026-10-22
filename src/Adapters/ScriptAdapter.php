@@ -23,6 +23,9 @@ final class ScriptAdapter implements Adapter
         if (!\function_exists('phasync\ext\sapi')) {
             throw new \LogicException('A function (): void handler needs ext-phasync, whose sapi() gives it its own output and headers');
         }
+        if (\PHP_VERSION_ID < 80400) {
+            throw new \LogicException('A function (): void handler needs PHP 8.4, for request_parse_body()');
+        }
 
         return true;
     }

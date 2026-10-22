@@ -20,17 +20,19 @@ return (function () {
     $args    = new Args();
     $seconds = fn ($value) => \is_numeric($value) && $value >= 0 ? null : 'A number of seconds (0 or more) required';
 
-    $args->section('Application');
-    $args->add('swervefile', new Argument('file', 'With the swerve adapter: swerve.php, a PHP file returning a Swerve\\RequestHandler, which runs once per request with a ClientRequest (default: ./swerve.php). With another adapter: given to it (a router script, say, as for php -S)', './swerve.php'));
+    $args->section('Application (without a swerve.php, as php -S: Classic mode)');
+    $args->add('path', new Argument('dir|router.php', 'A directory: the public root (default: the current directory); a PHP file: the router, run for every path that does not exist (default: index.php in the public root)', ''));
+    $args->add('router', new Argument('router.php', 'After a public root: the router', ''));
     $args->add('docroot', new Option(
-        't', 'docroot', 'The document root, given to the adapter (one serving plain PHP files, say, as php -S does); not for the swerve adapter, see --public',
+        't', 'docroot', 'The public root, as for php -S',
         placeholder: 'dir',
         validator: fn ($value) => \is_dir($value) ? null : "$value is not a directory",
     ));
-
-    $args->add('adapter', new Option(
-        '', 'adapter', 'The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application\'s composer.json, the only installed adapter, else swerve',
-        placeholder: 'name',
+    $args->add('maxProcesses', new Option(
+        '', 'max-processes', 'Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core',
+        default: 'auto',
+        placeholder: 'n',
+        validator: fn ($value) => 'auto' === $value || false !== \filter_var($value, \FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ? null : 'auto, or 1 or more, required',
     ));
 
     $args->section('Serving');
@@ -40,11 +42,6 @@ return (function () {
         placeholder: 'address',
         validator: $addr_validator,
         multiple: true
-    ));
-    $args->add('public', new Option(
-        '', 'public', 'HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application',
-        placeholder: 'dir',
-        validator: fn ($value) => \is_dir($value) ? null : "$value is not a directory",
     ));
     $args->add('trustedProxy', new Option(
         '', 'trusted-proxy', 'HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several',

@@ -1,35 +1,16 @@
 <?php
 
-namespace Swerve;
+namespace Swerve\Util;
+
+use Swerve\ClientRequest;
 
 /**
- * Serves the files of a directory, and passes every other request on to the application's handler.
+ * Sends a file from the public root, as {@see Router} chose it: with its Content-Type (by
+ * extension), Content-Length, Last-Modified and ETag; revalidation and single byte ranges.
  *
- * It is what `--public=<dir>` installs; wrap your own handler for the same behaviour.
- *
- * A GET or HEAD request whose path names a file below the directory gets that file: streamed,
- * with its Content-Type (by extension), Content-Length, Last-Modified and ETag; `304 Not
- * Modified` for If-None-Match or If-Modified-Since; a single byte range (`Range: bytes=`) as
- * `206 Partial Content`, or 416 when it lies past the end. A directory is served by its
- * index.html, after a redirect to the path with a trailing slash.
- *
- * Not served, but passed on to the application: other methods, a path that leaves the
- * directory (`..`, a symlink pointing outside it), a name starting with a dot (`.env`,
- * `.git/`; `.well-known/` is served), a PHP file (`.php`, `.phtml`, `.phar`, `.inc`: a source is
- * never sent), and a directory without index.html. Nothing is ever listed.
- *
- * ```php
- * $files = new Swerve\StaticFiles(__DIR__ . '/public');
- * return new Swerve\RequestHandler($files->wrap(function (Swerve\ClientRequest $request) {
- *     // what is not a file
- * }));
- * ```
- *
- * @topic request-handlers
- *
- * @example examples/StaticFiles/1-public-directory.php Files, and the application for the rest
+ * @internal
  */
-final class StaticFiles
+final class StaticFile
 {
     private const TYPES = [
         'html' => 'text/html; charset=utf-8', 'htm' => 'text/html; charset=utf-8', 'css' => 'text/css; charset=utf-8',
@@ -43,77 +24,19 @@ final class StaticFiles
         'gz' => 'application/gzip', 'webmanifest' => 'application/manifest+json',
     ];
 
-    private readonly string $root;
-
     /**
-     * Serve the files below `$directory`.
-     *
-     * ```php
-     * $files = new StaticFiles(__DIR__ . '/public');
-     * ```
-     *
-     * @param string $directory the document root; resolved to its real path now
-     *
-     * @throws \InvalidArgumentException when `$directory` is not a directory
+     * Send a file: GET and HEAD only (405 otherwise); 304 for a matching If-None-Match or
+     * If-Modified-Since; one byte range as 206 (416 past the end); 403 when it can't be read.
      */
-    public function __construct(string $directory)
+    public static function send(ClientRequest $request, string $file): void
     {
-        $root = \realpath($directory);
-        if (false === $root || !\is_dir($root)) {
-            throw new \InvalidArgumentException("$directory is not a directory");
+        $method = $request->getMethod();
+        if ('GET' !== $method && 'HEAD' !== $method) {
+            $request->sendResponseHeaders(405, ['Allow' => 'GET, HEAD', 'Content-Length' => '0']);
+            $request->end();
+
+            return;
         }
-        $this->root = $root;
-    }
-
-    /**
-     * A handler that answers the requests naming a file from the directory, and calls `$app` for
-     * every other.
-     *
-     * @param \Closure(ClientRequest): void $app the application's handler
-     *
-     * @return \Closure(ClientRequest): void
-     *
-     * @example examples/StaticFiles.wrap/1-ranges-and-revalidation.php Ranges, revalidation, and no PHP sources
-     */
-    public function wrap(\Closure $app): \Closure
-    {
-        return function (ClientRequest $request) use ($app): void {
-            $method = $request->getMethod();
-            $target = $request->getTarget();
-            $path   = \rawurldecode((string) \parse_url($target, \PHP_URL_PATH));
-            if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)|\.(?:php\d?|phps|phtml|phar|inc)$#i', $path)) {
-                $app($request);
-
-                return;
-            }
-            \clearstatcache(true, $this->root . $path);
-            $file = \realpath($this->root . $path);
-            if (false === $file || ($file !== $this->root && !\str_starts_with($file, $this->root . '/'))) {
-                $app($request);
-
-                return;
-            }
-            if (\is_dir($file)) {
-                if (!\is_file("$file/index.html")) {
-                    $app($request);
-
-                    return;
-                }
-                if (!\str_ends_with($path, '/')) {
-                    $query = \parse_url($target, \PHP_URL_QUERY);
-                    $request->sendResponseHeaders(301, ['Location' => \parse_url($target, \PHP_URL_PATH) . '/' . (null !== $query && '' !== $query ? "?$query" : '')]);
-                    $request->end();
-
-                    return;
-                }
-                $file .= '/index.html';
-            }
-            $this->serve($request, $file);
-        };
-    }
-
-    private function serve(ClientRequest $request, string $file): void
-    {
         $stat = @\stat($file);
         $fp   = false !== $stat ? @\fopen($file, 'r') : false;
         if (false === $fp) {

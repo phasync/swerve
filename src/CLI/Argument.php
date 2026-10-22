@@ -14,7 +14,8 @@ final class Argument
     public function __construct(
         public readonly string $name,
         public readonly string $description,
-        public readonly string $default='',
+        /** null: required */
+        public readonly ?string $default = null,
         public readonly bool $multiple = false,
         public readonly ?\Closure $validator = null,
     ) {}

@@ -61,33 +61,15 @@ final class Bridge
     }
 
     /**
-     * The PSR-7 server request for an exchange; its body is not read.
+     * The PSR-7 server request for an exchange; its body is not read. Its server parameters are
+     * the request's `$_SERVER`.
      */
     private static function request(ClientRequest $client): ServerRequestInterface
     {
         $method  = $client->getMethod();
         $target  = $client->getTarget();
         $headers = $client->getRequestHeaders();
-        $now     = \microtime(true);
-        $server  = [
-            'REQUEST_METHOD'     => $method,
-            'REQUEST_URI'        => $target,
-            'QUERY_STRING'       => \parse_url($target, \PHP_URL_QUERY) ?: '',
-            'SERVER_PROTOCOL'    => 'HTTP/' . $client->getProtocolVersion(),
-            'REQUEST_TIME'       => (int) $now,
-            'REQUEST_TIME_FLOAT' => $now,
-        ];
-        if ('https' === $client->getScheme()) {
-            $server['HTTPS'] = 'on';
-        }
-        if (\preg_match('/^\[?(.+?)\]?:(\d+)$/', $client->peer(), $peer)) {
-            $server['REMOTE_ADDR'] = $peer[1];
-            $server['REMOTE_PORT'] = (int) $peer[2];
-        }
-        if (\preg_match('/^\[?(.+?)\]?:(\d+)$/', $client->local(), $local)) {
-            $server['SERVER_ADDR'] = $local[1];
-            $server['SERVER_PORT'] = (int) $local[2];
-        }
+        $server  = $_SERVER; // the request's, filled by the Dispatcher before any suspension
 
         // A request has a body when it says so; its length is known unless it is chunked
         $size    = isset($headers['transfer-encoding']) ? null : (int) ($headers['content-length'][0] ?? 0);

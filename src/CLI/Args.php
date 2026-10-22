@@ -74,7 +74,7 @@ final class Args
                 if (null !== ($e = $arg->isInvalid($words[$i]))) {
                     return $e;
                 }
-            } elseif ('' === $arg->default) {
+            } elseif (null === $arg->default) {
                 return 'Required argument: ' . $arg->name;
             }
         }
@@ -104,7 +104,7 @@ final class Args
         }
         $index = \array_search($name, \array_keys($this->getArguments()), true);
 
-        return $words[$index] ?? $value->default;
+        return $words[$index] ?? $value->default ?? '';
     }
 
     public function isDefault(string $name): bool
@@ -223,7 +223,7 @@ final class Args
     {
         $parts = ['[options]'];
         foreach ($this->getArguments() as $arg) {
-            $parts[] = '' !== $arg->default ? "[$arg->name]" : "<$arg->name>";
+            $parts[] = null !== $arg->default ? "[$arg->name]" : "<$arg->name>";
         }
 
         return \implode(' ', $parts);
@@ -240,7 +240,7 @@ final class Args
     private static function makeArgList(ArgInterface|Argument $value): string
     {
         if ($value instanceof Argument) {
-            return '' === $value->default ? "<$value->name>" : "[$value->name]";
+            return null === $value->default ? "<$value->name>" : "[$value->name]";
         }
         $parts = [];
         if ('' !== $value->getShort()) {
