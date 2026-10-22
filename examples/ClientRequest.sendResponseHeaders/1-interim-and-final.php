@@ -1,9 +1,9 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     // A 1xx goes out at once: here 103 Early Hints, while the page is still being made
     $request->sendResponseHeaders(103, ['link' => '</style.css>; rel=preload; as=style']);
 

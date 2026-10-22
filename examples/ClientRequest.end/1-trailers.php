@@ -1,9 +1,9 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     // Trailers: named in the head, sent after a chunked body, for what is known only at the end
     $request->sendResponseHeaders(200, ['content-type' => 'text/plain', 'trailer' => 'x-checksum']);
     $hash = hash_init('crc32b');

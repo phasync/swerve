@@ -1,10 +1,10 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\WorkerStoppingException;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $request->write("export started\n");
     try {
         phasync::sleep(30);                      // a long job; the worker stops meanwhile

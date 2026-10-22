@@ -2,9 +2,9 @@
 
 use Swerve\ClientRequest;
 use Swerve\Psr\RequestBody;
-use Swerve\RequestHandler;
+use Swerve\AsyncMode;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $length = $request->getRequestHeaders()['content-length'][0] ?? null;
     $body   = new RequestBody($request, null === $length ? null : (int) $length);   // a PSR-7 stream
 

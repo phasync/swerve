@@ -1,10 +1,10 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\ServerSentEvents;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $events = new ServerSentEvents($request);
     for ($i = 0; $i < 2; ++$i) {
         phasync::sleep(0.05);       // in production: some seconds without news

@@ -1,10 +1,10 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\WebSocket;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     WebSocket::from($request, function (WebSocket $ws) {
         $ws->sendBinary(pack('nN', 1, 42));     // bytes, not text: any value
         $ws->send('text must be UTF-8');

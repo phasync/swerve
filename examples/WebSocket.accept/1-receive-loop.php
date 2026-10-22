@@ -1,10 +1,10 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\WebSocket;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     if (null === $ws = WebSocket::accept($request)) {
         return;                                  // refused: swerve answered 426, 400 or 403
     }

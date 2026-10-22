@@ -52,6 +52,8 @@ abstract class Mode
      * @param object $handler what an {@see Adapter} runs: see {@see Handlers}
      *
      * @throws \InvalidArgumentException for an empty or invalid pattern, or one already added
+     *
+     * @example examples/Mode.withAsync/1-websocket-route.php A Classic application with a WebSocket route
      */
     public function withAsync(string $pattern, object $handler): static
     {

@@ -1,11 +1,11 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     WebSocket::from($request, function (WebSocket $ws) {
         Swerve::onShutdown(fn () => phasync::shielded(function () use ($ws) {
             $ws->send('draining: ' . var_export(Swerve::draining(), true));

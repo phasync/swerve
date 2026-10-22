@@ -1,11 +1,11 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\WebSocket;
 
 // What a framework adapter does: decide with handshake(), let middleware add headers, then upgrade()
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $decision = WebSocket::handshake($request->getMethod(), $request->getProtocolVersion(), $request->getRequestHeaders(), false);
     if (!$decision->accepted()) {
         $request->sendResponseHeaders($decision->status, $decision->headers);

@@ -1,11 +1,11 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\StopReason;
 use Swerve\WorkerStoppingException;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $request->write("waiting for news\n");
     try {
         phasync::sleep(30);

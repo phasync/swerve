@@ -5,17 +5,17 @@
  * sends them with POST /messages. Every worker's subscribers get every message, whichever
  * worker received the POST.
  *
- *     vendor/bin/swerve --public=examples/sse-chat/public examples/sse-chat/swerve.php
+ *     cd examples/sse-chat && vendor/bin/swerve
  */
 
 use phasync\IOException;
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\ServerSentEvents;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
 
-return new RequestHandler(static function (ClientRequest $request) {
+return AsyncMode::serve('public', static function (ClientRequest $request) {
     switch ([$request->getMethod(), \strtok($request->getTarget(), '?')]) {
         case ['GET', '/events']:
             // A null every 15 s without a message, for a keep-alive. When the worker stops (a

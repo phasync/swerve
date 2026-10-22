@@ -94,16 +94,29 @@ function websocket(string $app, string $path, array $messages, ?int $stop = null
     }
 }
 
-/** @return array{0: resource, 1: string} swerve's process, and the address it serves */
+/**
+ * Swerve only ever loads `./swerve.php` of its working directory: `$app` is symlinked as
+ * `swerve.php` into a fresh temporary directory, which becomes swerve's working directory.
+ *
+ * @return array{0: resource, 1: string} swerve's process, and the address it serves
+ */
 function swerve_start(string $app): array
 {
     $probe = \stream_socket_server('tcp://127.0.0.1:0');
     $addr  = \stream_socket_get_name($probe, false);
     \fclose($probe);
+    $dir = \sys_get_temp_dir() . '/swerve-example-' . \bin2hex(\random_bytes(8));
+    \mkdir($dir);
+    \symlink($app, "$dir/swerve.php");
+    \register_shutdown_function(static function () use ($dir) {
+        @\unlink("$dir/swerve.php");
+        @\rmdir($dir);
+    });
     $swerve = \proc_open(
-        [\PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', '--grace=2', '-q', $app],
+        [\PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', '--grace=2', '-q'],
         [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
+        $dir,
     );
     $deadline = \microtime(true) + 10;
     while (!($probe = @\stream_socket_client("tcp://$addr", $errno, $error, 1))) {

@@ -1,9 +1,9 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $file = fopen('php://temp', 'w+');
     fwrite($file, "0123456789abcdefghij");
 

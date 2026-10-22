@@ -5,16 +5,16 @@
  * receives everyone's. Messages go through Swerve::publish(), so connections in different
  * workers share the room.
  *
- *     vendor/bin/swerve --public=examples/websocket-chat/public examples/websocket-chat/swerve.php
+ *     cd examples/websocket-chat && vendor/bin/swerve
  */
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
-return new RequestHandler(static function (ClientRequest $request) {
+return AsyncMode::serve('public', static function (ClientRequest $request) {
     if ('/chat' !== \strtok($request->getTarget(), '?')) {
         $request->sendResponseHeaders(404, ['Content-Type' => 'text/plain']);
         $request->write('Not found');

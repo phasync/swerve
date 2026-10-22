@@ -1,10 +1,10 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\ServerSentEvents;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $events = new ServerSentEvents($request);   // the head goes out at once
     foreach (['build started', 'tests passed', 'deployed'] as $n => $status) {
         phasync::sleep(0.05);

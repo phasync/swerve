@@ -1,11 +1,11 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\WebSocket;
 
 // For code that sends the 101 itself: run() takes over the connection after it
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $decision = WebSocket::handshake($request->getMethod(), $request->getProtocolVersion(), $request->getRequestHeaders(), false);
     $request->sendResponseHeaders(101, $decision->headers);
     WebSocket::run($request, function (WebSocket $ws) {

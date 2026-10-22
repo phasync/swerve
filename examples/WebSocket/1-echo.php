@@ -1,10 +1,10 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\WebSocket;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     WebSocket::from($request, function (WebSocket $ws) {
         foreach ($ws as $message) {             // ends when the connection closes
             if ('bye' === $message) {

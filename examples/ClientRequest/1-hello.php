@@ -1,9 +1,9 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $name = $request->getRequestHeaders()['x-name'][0] ?? 'world';
     $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
     $request->write("Hello, $name: {$request->getMethod()} {$request->getTarget()}\n");

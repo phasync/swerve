@@ -1,9 +1,9 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
     $request->flush();                    // the client sees the head now, before any work is done
 

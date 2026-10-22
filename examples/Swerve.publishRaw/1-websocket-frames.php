@@ -1,13 +1,13 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
 // Binary WebSocket frames, forwarded to every worker's subscribers: publish() would fail to
 // encode them as JSON, since a binary frame is not valid UTF-8.
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     WebSocket::from($request, function (WebSocket $ws) {
         $ws->onMessage->listen(function (string $data, bool $binary) {
             if ($binary) {

@@ -1,10 +1,10 @@
 <?php
 
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\ServerSentEvents;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $news   = [1 => 'first', 2 => 'second', 3 => 'third'];
     $events = new ServerSentEvents($request);
     $after  = (int) ($events->lastEventId() ?? 0);   // a reconnecting browser says what it saw last

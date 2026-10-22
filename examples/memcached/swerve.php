@@ -6,13 +6,13 @@
  * client works. The page on swerve's HTTP port shows the port and the counters of the worker
  * that served it.
  *
- *     MEMCACHED_PORT=11211 vendor/bin/swerve examples/memcached/swerve.php
+ *     cd examples/memcached && MEMCACHED_PORT=11211 vendor/bin/swerve
  *     printf 'set a 0 0 1\r\nx\r\nget a\r\n' | nc localhost 11211
  */
 
 use Example\MemcachedServer;
+use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 
 require_once __DIR__ . '/MemcachedServer.php';
 
@@ -20,7 +20,7 @@ $port      = (int) (\getenv('MEMCACHED_PORT') ?: 11211);
 $memcached = new MemcachedServer($port);
 $memcached->start();
 
-return new RequestHandler(static function (ClientRequest $request) use ($memcached, $port) {
+return AsyncMode::serve(null, static function (ClientRequest $request) use ($memcached, $port) {
     $text = "memcached protocol on port $port\n";
     foreach ($memcached->stats() as $name => $value) {
         $text .= "$name $value\n";

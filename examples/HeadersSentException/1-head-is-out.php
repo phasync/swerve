@@ -2,9 +2,9 @@
 
 use Swerve\ClientRequest;
 use Swerve\HeadersSentException;
-use Swerve\RequestHandler;
+use Swerve\AsyncMode;
 
-$app = new RequestHandler(function (ClientRequest $request) {
+$app = AsyncMode::serve(null, function (ClientRequest $request) {
     $request->write("partial output\n");  // commits an implicit 200
     try {
         $request->sendResponseHeaders(500);

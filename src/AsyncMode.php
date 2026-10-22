@@ -16,6 +16,8 @@ namespace Swerve;
  * which an {@see Adapter} runs (see {@see Handlers}).
  *
  * @topic modes
+ *
+ * @example examples/AsyncMode/1-hello-world.php Hello, world
  */
 final class AsyncMode extends Mode
 {
