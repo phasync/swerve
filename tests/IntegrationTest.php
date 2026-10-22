@@ -6,11 +6,16 @@
  */
 
 test('a package\'s integration file sets php.ini settings and runs code in every worker as it starts', function () {
-    $addr    = free_address();
+    // Swerve only ever loads ./swerve.php of its working directory: a fresh directory, with the
+    // fixture symlinked as that, so it is found regardless of where this test happens to run from
+    $addr = free_address();
+    $dir  = temp_path(true);
+    symlink(__DIR__ . '/Fixtures/app.php', "$dir/swerve.php");
     $process = proc_open(
-        ['setsid', PHP_BINARY, __DIR__ . '/Fixtures/integration/launch.php', "--http=$addr", '--workers=2', '--grace=2', __DIR__ . '/Fixtures/app.php'],
+        ['setsid', PHP_BINARY, __DIR__ . '/Fixtures/integration/launch.php', "--http=$addr", '--workers=2', '--grace=2'],
         [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
+        $dir,
     );
     $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
     try {
