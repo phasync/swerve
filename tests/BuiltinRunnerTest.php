@@ -162,7 +162,10 @@ test('with no PATH_INFO, PHP_SELF is just SCRIPT_NAME and PATH_INFO is unset', f
         PHP);
 
     $response = builtin_once($docroot, "$docroot/index.php", '/index.php', null, 'GET', '/index.php');
+    expect(json_decode($response['body'], true))->toBe(['php_self' => '/index.php', 'has_path_info' => false]);
 
+    // The router, for a path that doesn't exist: php -S would make that path its PATH_INFO
+    $response = builtin_once($docroot, "$docroot/index.php", '/index.php', null, 'GET', '/x/y?q=1');
     expect(json_decode($response['body'], true))->toBe(['php_self' => '/index.php', 'has_path_info' => false]);
 });
 

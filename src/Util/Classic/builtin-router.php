@@ -27,8 +27,11 @@ $_SERVER['REMOTE_ADDR']     = $_SERVER['HTTP_X_SWERVE_REMOTE_ADDR'];
 $_SERVER['SERVER_PORT']     = $_SERVER['HTTP_X_SWERVE_SERVER_PORT'];
 $_SERVER['HTTP_HOST']       = $host;
 $_SERVER['SERVER_NAME']     = \strstr($host . ':', ':', true);
+// php -S makes up PATH_INFO for a router from the request's path: only Swerve's counts
 if (null !== $pathInfo) {
     $_SERVER['PATH_INFO'] = $pathInfo;
+} else {
+    unset($_SERVER['PATH_INFO'], $_SERVER['PATH_TRANSLATED']);
 }
 if (isset($_SERVER['HTTP_X_SWERVE_HTTPS'])) {
     $_SERVER['HTTPS'] = $_SERVER['HTTP_X_SWERVE_HTTPS'];
