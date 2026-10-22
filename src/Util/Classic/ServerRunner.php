@@ -27,8 +27,9 @@ final class ServerRunner implements Runner
     }
 
     /**
-     * Wait until the server accepts connections: the master starts it when the first worker reports
-     * a Classic application.
+     * Wait until the server listens: the master starts it when the first worker reports a Classic
+     * application, and removes a stale socket file first. Its socket file is enough: connecting to
+     * find out would make the server fork a child for a connection that carries no request.
      *
      * @throws \RuntimeException when it doesn't within START_TIMEOUT seconds
      */
@@ -36,16 +37,14 @@ final class ServerRunner implements Runner
     {
         $deadline = \microtime(true) + self::START_TIMEOUT;
         while (true) {
-            try {
-                Backend::connect($this->socket)->close();
-
+            \clearstatcache(true, $this->socket);
+            if ('socket' === @\filetype($this->socket)) {
                 return;
-            } catch (IOException $e) {
-                if (\microtime(true) >= $deadline) {
-                    throw new \RuntimeException('The request server did not start within ' . self::START_TIMEOUT . " s: {$e->getMessage()}");
-                }
-                \phasync::sleep(0.02);
             }
+            if (\microtime(true) >= $deadline) {
+                throw new \RuntimeException('The request server did not start within ' . self::START_TIMEOUT . " s: no socket at {$this->socket}");
+            }
+            \phasync::sleep(0.02);
         }
     }
 

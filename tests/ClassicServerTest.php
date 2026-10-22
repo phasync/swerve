@@ -419,24 +419,13 @@ test('a script that SIGKILLs itself after flushing output ends the client connec
  * 7. Process model
  */
 
-// BUG (not fixed, per instructions): the request server already has one idle child at startup.
-// It isn't forked for an application request; ServerRunner::awaitServer() (called by every
-// worker that loads a ClassicMode, see bin/swerve.php) itself opens a bare connection to the
-// backend and closes it at once, only to confirm the socket listens. The server treats that as
-// "a connection waiting" and forks (or reuses) a child for it, before any script ever runs.
-// Reproduced with --workers=2: right after cs_start() returns (so after both workers' probes),
-// the request server has exactly one child, whose cmdline is byte-for-byte its own argv (a
-// fork, never exec'd), and it is still there 2 s later (idle, well under the 30 s timeout) -
-// see this task's report for the debug transcript. MODES.md's "pm = ondemand" description
-// ("forks a child when a connection waits and none is idle") implies zero children until the
-// first real request; in practice there is always (at least) one once the application is ready.
 test('the request server has no children before the first request', function () {
     [$process, $addr, , $pid] = cs_start();
     $serverPid                = cs_server_pid($pid);
     expect(cs_children($serverPid))->toBe([]);
     expect(cs_request($addr, 'GET', '/pid.php')['status'])->toBe(200);
     native_stop($process);
-})->skip(true, "BUG: the request server already has one idle child at startup, forked for ServerRunner::awaitServer()'s own readiness probe rather than for a real request; see the comment above this test");
+});
 
 test('--classic-workers caps concurrent scripts at that many, while still serving every request', function () {
     [$process, $addr, , , $dir] = cs_start(['--classic-workers=2']);
