@@ -85,9 +85,19 @@ FPM with the extension 16.5). End to end, Swerve in front of it serves ~118 req/
 FPM's ~123. Known follow-ups: serve mode skips the extension's coroutine hooks (≈1.5%), Swerve's
 front batches its client writes (≈1.5%).
 
+## The same environment in all three modes
+
+Code sees the same PHP environment whatever mode it runs in: `$_SERVER` with the same keys and
+values (as PHP-FPM behind nginx sets them), `$_GET`/`$_POST`/`$_COOKIE`/`$_FILES`/`$_REQUEST`,
+`php://input`, `header()`/`setcookie()`/`http_response_code()`, output buffering and `ob_*`,
+sessions, the default time zone and locale, per request. Classic gets this from PHP's own request
+lifecycle (the request server and `php -S` are SAPIs). Serialized and Concurrent requests, and the
+concurrent routes of Classic and Serialized apps, get it from `sapi()`, around every request,
+always (measured: ~1.8 µs per request on PHP 8.5 with the JIT).
+
 ## Serialized and Concurrent: every request inside `sapi()`
 
-Each request in a worker runs inside ext-phasync's `sapi()`, so every request has its own output
+Each request in a worker runs inside ext-phasync's `sapi()`, unconditionally, so every request has its own output
 buffers and `ob_*`, `header()`/`setcookie()`/`http_response_code()`, `php://input`, uploads and
 session; and, through `Scope`, its own request superglobals, default time zone and locale. Without
 the extension, application code is loaded through the plug (phasync-babel translation to
