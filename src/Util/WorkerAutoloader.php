@@ -2,6 +2,8 @@
 
 namespace Swerve\Util;
 
+require_once __DIR__ . '/Plug.php'; // Plug::path(), used below: this file is also required standalone (see tests/UnitWorkerAutoloaderTest.php)
+
 /**
  * The autoloader of a swerve installed into an application's own vendor directory: it loads
  * swerve's own dependency closure, never the application's.
@@ -108,7 +110,10 @@ final class WorkerAutoloader
         foreach (require "$vendorDir/composer/autoload_files.php" as $id => $file) {
             if (self::inClosure($file) && empty($GLOBALS['__composer_autoload_files'][$id])) {
                 $GLOBALS['__composer_autoload_files'][$id] = true;
-                (static function () use ($file) { require $file; })();
+                // Through the plug (a no-op when ext-phasync is loaded, or $file is one of its
+                // own excluded paths): this closure is where an adapter's Composer "files" entry
+                // (a framework bootstrap, a helper of its own) first loads.
+                (static function () use ($file) { require Plug::path($file, \dirname($file)); })();
             }
         }
     }
@@ -171,7 +176,11 @@ final class WorkerAutoloader
             }
         }
         if (null !== $file) {
-            (static function () use ($file) { require $file; })();
+            // Through the plug (see register()): this is where the closure's own classes --
+            // the adapters' and the frameworks they bridge to, never phasync/swerve/net/the
+            // plug's own babel/hooked, which the loader excludes -- are compiled, once, before
+            // the fork every worker inherits.
+            (static function () use ($file) { require Plug::path($file, \dirname($file)); })();
         }
     }
 

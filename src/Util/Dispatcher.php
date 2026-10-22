@@ -41,6 +41,9 @@ final class Dispatcher
 
     private readonly bool $sapi;
 
+    /** Without the extension, through the plug: translated code reads PHP_SAPI per request */
+    private readonly bool $plug;
+
     /** @var array<string, string> what every request's $_SERVER starts from: the environment */
     private readonly array $server;
 
@@ -74,6 +77,7 @@ final class Dispatcher
         }
         $this->persistent   = $mode instanceof PersistentMode;
         $this->sapi         = \function_exists('phasync\ext\sapi');
+        $this->plug         = Plug::isInstalled();
         $this->server       = \getenv();
         $this->documentRoot = $mode->publicRoot ?? \dirname($swerveFile);
     }
@@ -181,6 +185,9 @@ final class Dispatcher
         if ($this->sapi) {
             (new Sapi($request, $script))->run($run);
         } else {
+            if ($this->plug) {
+                \phasync\hooked\set_sapi_name(\Scope::getCurrent(), 'swerve');
+            }
             $run();
         }
     }
