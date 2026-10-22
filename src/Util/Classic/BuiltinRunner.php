@@ -59,17 +59,16 @@ final class BuiltinRunner implements Runner
     /** Seconds to wait for a freshly started process to accept a connection. */
     private const START_TIMEOUT = 5.0;
 
-    /** Bounds every wait on the backend or the client: nothing here should ever hang forever. */
-    private const IO_TIMEOUT = 10.0;
+    /** Seconds to connect to a process. A script runs as long as its max_execution_time lets it, and the client's waits are the ClientRequest's. */
+    private const CONNECT_TIMEOUT = 10.0;
 
     /**
      * The `-d` flags given to every process, besides the router: opcache on (incl. for the
-     * cli-server SAPI, which needs both switches), timestamps not checked, and
-     * `output_buffering=0` (see the class docblock).
+     * cli-server SAPI, which needs both switches; loaded when php.ini doesn't), timestamps not
+     * checked, and `output_buffering=0` (see the class docblock). Everything else is php.ini's,
+     * as under PHP-FPM.
      */
     private const INI = [
-        '-d', 'display_errors=1',
-        '-d', 'zend_extension=opcache',
         '-d', 'opcache.enable=1',
         '-d', 'opcache.enable_cli=1',
         '-d', 'opcache.validate_timestamps=0',
@@ -216,7 +215,7 @@ final class BuiltinRunner implements Runner
     {
         $port    = self::freePort();
         $router  = __DIR__ . '/builtin-router.php';
-        $args    = [...self::INI, '-S', "127.0.0.1:$port", '-t', $this->publicRoot, $router];
+        $args    = [...(\extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache']), ...self::INI, '-S', "127.0.0.1:$port", '-t', $this->publicRoot, $router];
         $process = Process::run(\PHP_BINARY, $args, $this->publicRoot);
         $deadline = \microtime(true) + self::START_TIMEOUT;
         while (true) {
@@ -314,7 +313,7 @@ final class BuiltinRunner implements Runner
             return $conn;
         }
         try {
-            return dial("tcp://127.0.0.1:{$process->port}", self::IO_TIMEOUT);
+            return dial("tcp://127.0.0.1:{$process->port}", self::CONNECT_TIMEOUT);
         } catch (\Throwable $e) {
             $process->stop(); // never started talking to it: nothing to release it from either
 
@@ -326,7 +325,7 @@ final class BuiltinRunner implements Runner
     private function backendWrite(Duplex $conn, BuiltinProcess $process, string $data): void
     {
         try {
-            $conn->write($data, self::IO_TIMEOUT);
+            $conn->write($data);
         } catch (\Throwable $e) {
             $process->stop();
 
@@ -338,7 +337,7 @@ final class BuiltinRunner implements Runner
     private function backendRead(Duplex $conn, BuiltinProcess $process): string
     {
         try {
-            return $conn->read(65536, self::IO_TIMEOUT);
+            return $conn->read(65536);
         } catch (\Throwable $e) {
             $process->stop();
 
@@ -371,7 +370,7 @@ final class BuiltinRunner implements Runner
             return;
         }
         try {
-            $conn = dial("tcp://127.0.0.1:{$process->port}", self::IO_TIMEOUT);
+            $conn = dial("tcp://127.0.0.1:{$process->port}", self::CONNECT_TIMEOUT);
         } catch (\Throwable) {
             return;
         }
@@ -443,7 +442,7 @@ final class BuiltinRunner implements Runner
                 if ($sent >= $contentLength) {
                     $release(); // the backend's side is done; free it before the last write, not after
                 }
-                $request->write($take, self::IO_TIMEOUT);
+                $request->write($take);
                 $request->flush();
             }
             $release(); // the backend closed early: also done with it, just short a response
@@ -458,11 +457,11 @@ final class BuiltinRunner implements Runner
         } else {
             // Close-delimited: everything until the backend ends the connection is the body.
             if ('' !== $rest) {
-                $request->write($rest, self::IO_TIMEOUT);
+                $request->write($rest);
                 $request->flush();
             }
             while ('' !== ($next = $this->backendRead($conn, $process))) {
-                $request->write($next, self::IO_TIMEOUT);
+                $request->write($next);
                 $request->flush();
             }
             $release();
@@ -497,7 +496,7 @@ final class BuiltinRunner implements Runner
             while (\strlen($buf) < $size + 2) {
                 $buf .= $this->mustRead($conn, $process);
             }
-            $request->write(\substr($buf, 0, $size), self::IO_TIMEOUT);
+            $request->write(\substr($buf, 0, $size));
             $request->flush();
             $buf = \substr($buf, $size + 2); // the chunk's own trailing CRLF
         }
