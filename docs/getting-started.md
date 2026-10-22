@@ -10,46 +10,61 @@ Recommended, with PHP 8.3 or later: the phasync extension, which ships with phas
 with `--ext`, or install it with `pie install phasync/ext-phasync`. See [Production](production.md#ext-phasync) for what it changes.
 
 ```bash
-vendor/bin/swerve --ext --version   # swerve 0.1.0 (PHP 8.5.11, phasync 2.0.0, ext-phasync 2.0.0)
+vendor/bin/swerve --ext --version   # swerve 0.2.0 (PHP 8.5.12, phasync 2.0.4, ext-phasync 2.0.2)
 ```
 
-## A first application
+## An existing PHP application
 
-Swerve serves a PHP file that returns a `Swerve\RequestHandler` wrapping a closure. By default it
-is `swerve.php` in the current directory. The closure runs once for each HTTP exchange, with a
-`Swerve\ClientRequest`:
+In the directory with its `index.php`, as with `php -S`:
+
+```
+> vendor/bin/swerve public
+2026-10-22 10:18:22.42 0 Classic (the extension's request server, up to 32 processes)
+2026-10-22 10:18:22.61   swerve 0.2.0 serving /srv/app/public through /srv/app/public/index.php on http://127.0.0.1:8080 with 8 workers
+2026-10-22 10:18:22.71 3 GET / 200 3.0ms
+```
+
+This is Classic mode: every request runs the application's scripts from scratch, with PHP's own
+request lifecycle, as under PHP-FPM behind nginx's `try_files $uri $uri/ /index.php`. Files under
+`public/` are served as they are, an existing `.php` file runs, and every other path runs
+`public/index.php`. `swerve router.php` and `swerve public router.php` name another router.
+
+Every log line has the time, the worker (its slot number; blank for the master process), and the
+message. Ctrl+C stops swerve: requests in flight get a `503`.
+
+## swerve.php
+
+An application configures swerve in `swerve.php`, which returns its mode:
 
 ```php
 <?php // swerve.php
 
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-    $request->write("Hello, World\n");
-});
+use Swerve\{ClassicMode, PersistentMode, AsyncMode, ClientRequest};
+
+// Classic, with a WebSocket endpoint that runs in swerve's workers
+return ClassicMode::serve('public')
+    ->withAsync('/ws/', function (ClientRequest $request): void { /* ... */ });
+
+// Persistent: boot once per worker, one request at a time
+return PersistentMode::serve('public', require __DIR__ . '/bootstrap/app.php');
+
+// Async: boot once per worker, requests overlap while they wait
+return AsyncMode::serve('public', $app);
 ```
 
-Reading the request is up to the handler: the method, target and headers are getters, and the
-body is read with `read()`.
-
-```php
-<?php // swerve.php
-
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    parse_str((string) parse_url($request->getTarget(), PHP_URL_QUERY), $query);
-
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-    $request->write('Hello, ' . ($query['name'] ?? 'World') . "\n");
-});
-```
-
-The exchange lasts as long as the closure does, so a handler that waits and writes is a stream:
+Paths are relative to `swerve.php`'s directory. A handler is a PSR-15 request handler, a
+`function (ServerRequestInterface $request): ResponseInterface`, swerve's native
+`function (ClientRequest $request): void`, or a `function (): void` that reads the superglobals and
+echoes like a classic script; framework adapters add their own types. A handler that waits and
+writes is a stream:
 
 ```php
 <?php // swerve.php
 
 use phasync\IOException;
+use Swerve\{AsyncMode, ClientRequest};
 
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+return AsyncMode::serve(null, function (ClientRequest $request): void {
     $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream', 'cache-control' => 'no-cache']);
     $request->flush();                       // the head goes out now
     try {
@@ -63,31 +78,18 @@ return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
 });
 ```
 
-A framework is served through an adapter that turns a `ClientRequest` into the framework's own
-request and response. [Requests and responses](requests-and-responses.md) is the reference for the
-`ClientRequest`.
+`swerve.php` runs once in each worker process, when the worker starts: code outside the handler
+(creating the app, reading configuration) runs once per worker, not once per request. It may also
+start background coroutines and servers of your own, see [swerve.php as bootstrap](bootstrap.md).
+In Classic mode it runs only in swerve's workers, for the async routes: the application's scripts
+run in processes of their own.
 
-The file is loaded once in each worker process, when the worker starts: code outside the
-handler (creating the app, reading configuration, connecting to a database) runs once per
-worker, not once per request. It is the application's bootstrap: it may also start background
-coroutines and servers of your own, see [swerve.php as bootstrap](bootstrap.md).
+[Requests and responses](requests-and-responses.md) is the reference for the `ClientRequest`.
 
-## Run it
-
-```
-> vendor/bin/swerve
-2026-09-26 17:00:30.12    swerve 0.1.0 serving ./swerve.php on http://127.0.0.1:8080 with 8 workers
-2026-09-26 17:00:31.25 3 GET / 200 1.2ms
-```
-
-Every line has the time, the worker (its slot number; blank for the master process), and the
-message. Ctrl+C stops swerve: requests in flight get a `503`.
-
-During development:
+## During development
 
 ```bash
 vendor/bin/swerve --watch                 # reload the workers when a PHP file changes
-vendor/bin/swerve --watch --public=public # also serve the files in public/
 vendor/bin/swerve -w 1 -v                 # one worker, and more log
 ```
 

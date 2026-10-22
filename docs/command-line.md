@@ -1,18 +1,18 @@
 # Command line
 
 ```
-Usage: swerve [options] [file]
+Usage: swerve [options] [dir|router.php] [router.php]
 
-Application:
-  [file]                           With the swerve adapter: swerve.php, a PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest (default: ./swerve.php). With another adapter: given to it (a router script, say, as for php -S)
-  -t, --docroot=<dir>              The document root, given to the adapter (one serving plain PHP files, say, as php -S does); not for the swerve adapter, see --public
-  --adapter=<name>                 The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application's composer.json, the only installed adapter, else swerve
+Application (without a swerve.php, as php -S: Classic mode):
+  [dir|router.php]                 A directory: the public root (default: the current directory); a PHP file: the router, run for every path that does not exist (default: index.php in the public root)
+  [router.php]                     After a public root: the router
+  -t, --docroot=<dir>              The public root, as for php -S
 
 Serving:
   --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
-  --public=<dir>                   HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
   --trusted-proxy=<ip|range|unix>  HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
+  --max-processes=<n>              Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core (default: auto)
 
 Extension:
   --ext                            Load ext-phasync (bundled with phasync); swerve stops if it cannot
@@ -40,7 +40,23 @@ Information:
   --version                        The versions of swerve, PHP, phasync and ext-phasync
 ```
 
-- Options and the application file may come in any order. An option's value is attached
+- With a `swerve.php` in the current directory, `swerve` runs what it returns (see
+  [Getting started](getting-started.md)); a public root or router on the command line beside it is
+  a usage error: configure them in `swerve.php`. swerve never looks in parent directories, and
+  `composer exec swerve` runs in the directory of the nearest `composer.json`.
+- Without one, the command line is shorthand for `ClassicMode`, as with `php -S`; paths are relative
+  to the current directory:
+
+  | Command | Public root | Router |
+  |---|---|---|
+  | `swerve` | `.` | `./index.php` |
+  | `swerve public` or `swerve -t public` | `public/` | `public/index.php` |
+  | `swerve router.php` | `.` | `./router.php` |
+  | `swerve public router.php` | `public/` | `./router.php` |
+
+  A positional argument that is a directory is the public root; a file is the router; anything else
+  is a usage error. Unlike `php -S`, the router runs only for paths that don't exist.
+- Options and arguments may come in any order. An option's value is attached
   (`--workers=4`, `-w4`) or the next word (`--workers 4`, `-w 4`); flags may be grouped
   (`-vv`).
 - A usage error prints one line to stderr and exits with code 2.
@@ -52,10 +68,10 @@ Information:
   The workers share the one socket file, made at start (a stale file is replaced; where anything
   listens, or a file that isn't a socket is in the way, swerve refuses to start) and removed at
   stop. Anyone may connect: limit access with the permissions of the directory it is in.
-- `--adapter` picks what provides the entry point when a package such as a framework adapter is installed, see
-  [Adapters](../README.md#adapters). A `swerve.php` argument cannot be combined with an adapter other than `swerve`.
-- `--public` and `--max-body` apply to HTTP, which is all swerve serves; a proxy in front (nginx,
-  HAProxy, Caddy) speaks HTTP to it.
+- `--max-processes` bounds a Classic application's PHP processes, shared by the workers: each worker
+  opens up to its share as its requests need them, and closes those idle for 10 seconds.
+- `--max-body` applies to HTTP, which is all swerve serves; a proxy in front (nginx, HAProxy, Caddy)
+  speaks HTTP to it.
 - `--trusted-proxy` names the proxies in front of swerve: an address (`10.0.0.5`, `::1`), a range
   (`10.0.0.0/8`, `fd00::/8`) or `unix` for clients on a Unix socket. For a request from one of them,
   `peer()` is the rightmost `X-Forwarded-For` address that is not a trusted proxy, `getScheme()` is
@@ -67,8 +83,8 @@ Information:
 | | |
 |---|---|
 | 0 | stopped by a signal, after draining |
-| 1 | could not start: the address is taken, the log file can't be opened, the application file is missing |
-| 2 | a usage error; or the application can't start: loading it threw, or it returned something other than a `Swerve\RequestHandler` |
+| 1 | could not start: the address is taken, the log file can't be opened |
+| 2 | a usage error (no `index.php` or router to serve); or the application can't start: loading `swerve.php` threw (a public root or router that doesn't exist, a handler no adapter runs), or it returned something other than a mode |
 | 255 | the application can't start because of a PHP fatal error, such as a syntax error (when every worker fails to start, swerve stops with the last one's exit code) |
 
 ## Signals to the master process

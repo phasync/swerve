@@ -9,7 +9,7 @@ without ext-phasync, and nothing differs.
 ## WebSocket
 
 ```php
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
     Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
         foreach ($ws as $message) {          // ends when the connection closes
             $ws->send("echo: $message");
@@ -200,7 +200,7 @@ TLS is the proxy's: the connection swerve sees is `ws://` ([Production](producti
 ## Server-Sent Events
 
 ```php
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
     $sse = new Swerve\ServerSentEvents($request);
     foreach (Swerve::subscribe('news', heartbeat: 15) as $message) {
         null === $message ? $sse->comment('keep-alive') : $sse->send($message, event: 'news');

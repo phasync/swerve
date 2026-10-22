@@ -1,8 +1,8 @@
 # swerve.php is your application's bootstrap
 
 The master never loads your application. Each worker requires `swerve.php` once, when it
-starts, inside its event loop, and the file returns the `Swerve\RequestHandler`. Everything else the
-file does happens in that worker, once per worker, before the handler serves its first request:
+starts, inside its event loop, in its own directory, and the file returns the mode. Everything else
+the file does happens in that worker, once per worker, before the handler serves its first request:
 
 - configuration, dependency injection, database connections;
 - coroutines that live as long as the worker: subscribers, periodic jobs
@@ -33,7 +33,7 @@ phasync::go(function () use ($app) {                          // one worker at a
 
 (new MemcachedServer(11211))->start();                        // a server of your own
 
-return new Swerve\RequestHandler($app->handle(...));          // the handler that serves HTTP
+return Swerve\AsyncMode::serve('public', $app->handle(...));  // the handler that serves HTTP
 ```
 
 [`examples/memcached`](../examples/memcached) is a complete server built this way.

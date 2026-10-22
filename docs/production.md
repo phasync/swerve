@@ -49,12 +49,22 @@ configuration, with one restart at startup. An explicit `-d` on the command line
 | `opcache.save_comments` | 1 | attributes and annotations need doc comments |
 | `opcache.file_cache`, `opcache.file_cache_consistency_checks`, `opcache.consistency_checks`, `opcache.protect_memory` | off | shared memory only; no debugging checks |
 
+A Classic application's PHP processes (ext-phasync's request server) get the opcache settings and
+the extensions loaded on the command line, and nothing else: their scripts run with php.ini's
+`memory_limit`, `max_execution_time` and the rest, as under PHP-FPM.
+
 ## Sizing
 
 **Workers.** `--workers=auto` (the default) is one per CPU (hardware thread). On large machines
 fewer can be faster: on a 2-socket server with 56 hardware threads, a hello-world app served the
 most requests with 16 workers. Measure with your own application. Each worker holds its own copy
 of your application in memory.
+
+**Classic processes.** A Classic application's scripts run in PHP processes outside the workers,
+one request at a time each, as PHP-FPM's `pm.max_children`: `--max-processes` (4 per CPU by
+default) bounds them, shared evenly by the workers. Processes start on demand and end after 10
+seconds idle; a request that finds the worker's share busy waits for one. `memory_limit` from
+php.ini applies per process, as under PHP-FPM: swerve's own overrides (below) are for its workers.
 
 **Several sockets.** On a machine with more than one NUMA node, worker *i* pins itself to node
 *i* mod the number of nodes, so it stays near the memory it allocated: about a quarter more
@@ -119,7 +129,7 @@ After=network.target
 [Service]
 User=myapp
 WorkingDirectory=/srv/myapp/current
-ExecStart=/usr/bin/php vendor/bin/swerve --http=127.0.0.1:8080 --public=public
+ExecStart=/usr/bin/php vendor/bin/swerve --http=127.0.0.1:8080
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 LimitNOFILE=1048576
@@ -142,7 +152,7 @@ FROM php:8.4-cli
 RUN docker-php-ext-install pcntl sockets
 WORKDIR /app
 COPY . .
-CMD ["vendor/bin/swerve", "--http=:8080", "--public=public"]
+CMD ["vendor/bin/swerve", "--http=:8080"]
 ```
 
 `docker stop` sends `SIGTERM` and waits 10 s by default: give it `--time=40` (or

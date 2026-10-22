@@ -28,13 +28,6 @@ return (function () {
         placeholder: 'dir',
         validator: fn ($value) => \is_dir($value) ? null : "$value is not a directory",
     ));
-    $args->add('maxProcesses', new Option(
-        '', 'max-processes', 'Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core',
-        default: 'auto',
-        placeholder: 'n',
-        validator: fn ($value) => 'auto' === $value || false !== \filter_var($value, \FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ? null : 'auto, or 1 or more, required',
-    ));
-
     $args->section('Serving');
     $args->add('http', new Option(
         '', 'http', 'Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several',
@@ -71,6 +64,13 @@ return (function () {
             return null;
         },
         placeholder: 'n'
+    ));
+
+    $args->add('maxProcesses', new Option(
+        '', 'max-processes', 'Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core',
+        default: 'auto',
+        placeholder: 'n',
+        validator: fn ($value) => 'auto' === $value || false !== \filter_var($value, \FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ? null : 'auto, or 1 or more, required',
     ));
 
     $args->section('Extension');

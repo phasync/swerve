@@ -7,12 +7,39 @@ core by default (`--workers`). The master never loads your application; it super
 it restarts a worker that dies, replaces a stuck one (the watchdog) or one that uses too
 much memory (recycling), and reloads by restarting all workers.
 
-Every worker loads your application file once, inside its event loop. The file is the
-application's bootstrap: it sets things up, may start coroutines that run for the worker's
-whole life (a subscriber, a periodic job) and servers of its own, and returns the
-`Swerve\RequestHandler` ([details](bootstrap.md)). Then the worker serves HTTP on the same address as the
-others (`SO_REUSEPORT`): the kernel hands each new connection to one of them. A connection
-stays with its worker until it closes.
+Every worker loads `swerve.php` once, inside its event loop. The file is the application's
+bootstrap: it sets things up, may start coroutines that run for the worker's whole life (a
+subscriber, a periodic job) and servers of its own, and returns the mode
+([details](bootstrap.md)). Then the worker serves HTTP on the same address as the others
+(`SO_REUSEPORT`): the kernel hands each new connection to one of them. A connection stays with its
+worker until it closes.
+
+## Modes
+
+| Mode | Per request | State between requests | Requests at a time |
+|---|---|---|---|
+| **Classic** | the scripts run from scratch, with PHP's own request lifecycle | none | one per PHP process |
+| **Persistent** | the application, booted once per worker, runs its handler | kept | one per worker |
+| **Async** | the same, as coroutines that overlap while they wait | kept and shared | many per worker |
+
+Every mode routes requests the same way, as nginx's `try_files $uri $uri/ /index.php`: an async
+route first, then a file under the public root (served by the worker itself: Content-Type,
+ETag/Last-Modified, `HEAD`, ranges), then the application. Dotfiles, PHP source and anything
+outside the public root are never served.
+
+**Classic** runs the scripts in PHP processes of their own, outside the workers. With ext-phasync
+that is the extension's request server, which the master starts once the first worker reports a
+Classic application: its first process forks one child per connection from a worker, and the child
+serves the requests of that connection one at a time, blocking, with a fresh PHP state each. The
+children share one opcache. A worker opens a connection when all of its own are busy, up to its
+share of `--max-processes`, and closes those idle for 10 seconds, which ends their process. A child
+that dies (a segfault, the OOM killer) answers `502`; a fatal PHP error is a `500`, and the child
+serves on. Without the extension, each worker runs a pool of `php -S` processes the same way.
+
+**Persistent** runs the handler in the worker, one request at a time per worker: the next one waits
+for the current one to finish. Async routes and static files are served meanwhile.
+
+**Async** runs requests as coroutines, below.
 
 ## Coroutines
 
@@ -33,7 +60,7 @@ phasync::go(function () {
 });
 ```
 
-The handler runs in the connection's own coroutine, once per request, in a `Scope` of its own,
+A handler runs in the connection's own coroutine, once per request, in a `Scope` of its own,
 which the coroutines the request starts share: request-scoped state belongs in a `WeakMap` keyed
 by `Scope::getCurrent()`, and is freed with the request. The request is also a nested
 `phasync::run()`, whose frame (`phasync::frame()`) its coroutines join: a coroutine that fails
@@ -110,15 +137,22 @@ for the lock blocks it up to the busy timeout. For many concurrent writers, a da
 (MySQL, PostgreSQL) does better. Its queries block the worker the same way, for their duration,
 unless ext-phasync is loaded and the database is MySQL: then they wait as a coroutine.
 
-## Things that work differently from PHP-FPM
+## The PHP environment
 
-- **Superglobals are not filled**: no `$_GET`, `$_POST`, `$_SERVER`, `$_COOKIE`, `$_FILES`. The
-  request is the `ClientRequest` (see [Requests and responses](requests-and-responses.md)); a
-  framework's adapter builds the framework's own request from it.
-- **`header()`, `echo`, `setcookie()`, `http_response_code()` don't make the response.** Use
-  `sendResponseHeaders()` and `write()`.
-- **PHP's sessions (`session_start()`) don't work.** Use a session library that takes the request,
-  or your framework's.
+In every mode a request sees PHP's own request environment: `$_SERVER` as PHP-FPM behind nginx fills
+it, `$_GET`, `$_COOKIE`, and for a `function (): void` handler also `php://input`, `$_POST` and
+`$_FILES`. In Classic mode the PHP process is the request, so everything is as under PHP-FPM. In a
+worker, every request runs inside ext-phasync's `sapi()`: `echo`, `header()`, `setcookie()`,
+`http_response_code()`, output buffering and sessions are the request's own, and `$_GET`, `$_POST`,
+`$_COOKIE` and `$_FILES`, the default time zone and the locale follow the request's `Scope`.
+`$_SERVER` and `$_REQUEST` are filled at the start of each request but shared by the requests of a
+worker: in Async mode read them before the request first waits. Without the extension, a worker
+fills the superglobals, but `echo` and `header()` don't make the response: answer through the
+`ClientRequest`, PSR-7 or a framework adapter, and a `function (): void` handler needs the
+extension.
+
+What still differs from PHP-FPM in Persistent and Async mode:
+
 - **`exit()` and `die()` end the worker**, and every request it serves. The master starts a
   new one, but the others are cut off.
 - **Uncaught exceptions** become a `500 Internal Server Error` for that request (when nothing was
@@ -143,4 +177,4 @@ The functions an application uses most (all static on `phasync`):
 
 `phasync\TimeoutException` is thrown when a wait takes longer than its timeout.
 
-Next: [The application file](bootstrap.md), then [Requests and responses](requests-and-responses.md).
+Next: [swerve.php as bootstrap](bootstrap.md), then [Requests and responses](requests-and-responses.md).

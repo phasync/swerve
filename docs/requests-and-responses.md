@@ -1,11 +1,11 @@
 # Requests and responses
 
-`swerve.php` returns a `Swerve\RequestHandler` wrapping a closure. Swerve calls the closure once for
-each HTTP exchange with a `Swerve\ClientRequest`: the request to read and the response to write.
-A closure is required; anything else makes the worker exit with code 2 and a message.
+A `function (ClientRequest $request): void` handler is swerve's native one: swerve calls it once for
+each HTTP exchange with a `Swerve\ClientRequest`, the request to read and the response to write.
+PSR-7 and PSR-15 handlers, and framework adapters, are built on it.
 
 ```php
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request): void {
+return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request): void {
     $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
     $request->write("Hello, World\n");
 });
@@ -153,27 +153,15 @@ while connections that sit idle are closed to make room.
 
 ## Static files
 
-`--public=<dir>` serves the files in a directory before your handler sees the request: `/app.js` is
-`<dir>/app.js`, `/` is `<dir>/index.html`. Everything else goes to your handler: paths that are not
-files, methods other than GET and HEAD, names starting with a dot (`.env`; `.well-known/` is
-served), PHP files, and paths leading out of the directory.
+Files under the mode's public root are served before the handler sees the request: `/app.js` is
+`public/app.js`, `/docs/` is `public/docs/index.html` (and `/docs` a `301` to it). Everything else
+goes to the handler: paths that are not files, names starting with a dot (`.env`;
+`.well-known/` is served), PHP source, and paths leading out of the directory. A file answers `GET`
+and `HEAD`; another method gets `405`.
 
 Files are streamed with `Content-Type` (from the extension), `Content-Length`, `Last-Modified` and
 `ETag`; browsers' revalidations get `304 Not Modified`, and a `Range` request `206 Partial Content`.
 Swerve sets no `Cache-Control`.
-
-`Swerve\StaticFiles` is the same without the option:
-
-```php
-$files = new Swerve\StaticFiles(__DIR__ . '/public');
-
-return new Swerve\RequestHandler($files->wrap(function (Swerve\ClientRequest $request): void {
-    // what is not a file
-}));
-```
-
-`wrap(Closure $app): Closure` returns a handler that answers file requests and calls `$app` for the
-rest.
 
 ## Logging
 

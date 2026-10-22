@@ -2,160 +2,121 @@
 
 ![SWERVE](swerve-logo.png)
 
-**A PHP application server for connections that stay open.**
+**A PHP application server for traditional, persistent and asynchronous applications.**
 
 ```php
 <?php // swerve.php
 
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-    $request->write("Hello, World\n");
-});
+use Swerve\{ClassicMode, ClientRequest, Swerve, WebSocket};
+
+// WordPress as under PHP-FPM, with a WebSocket endpoint beside it
+return ClassicMode::serve('public')
+    ->withAsync('/ws/', function (ClientRequest $request): void {
+        WebSocket::from($request, function (WebSocket $ws) {
+            foreach (Swerve::subscribe('notifications') as $message) {
+                $ws->send($message);
+            }
+        });
+    });
 ```
 
-Swerve is a PHP application server, built on [phasync](https://github.com/phasync/phasync)
-coroutines. Your application stays loaded between requests, every worker serves many requests
-and connections at once, and request and response bodies stream. A handler gets a
-`ClientRequest`: the request to read and the response to write, for as long as it keeps it.
-Frameworks are served through an adapter that turns a `ClientRequest` into the framework's own
-request and response: [Laravel](https://github.com/phasync/swerve-laravel),
-[Symfony](https://github.com/phasync/swerve-symfony), [Yii](https://github.com/phasync/swerve-yii),
-[CakePHP](https://github.com/phasync/swerve-cakephp),
-[Spiral](https://github.com/phasync/swerve-spiral),
-[CodeIgniter](https://github.com/phasync/swerve-codeigniter) and
-[Laminas](https://github.com/phasync/swerve-laminas).
+Swerve runs traditional PHP applications, persistent application workers and highly concurrent
+asynchronous applications in one server. Built on [phasync](https://github.com/phasync/phasync),
+it lets you write conventional, sequential PHP while serving thousands of concurrent HTTP
+requests, WebSocket connections and long-lived coroutines.
 
 > Swerve is at 0.x: options and APIs may still change before 1.0.
 
 **[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
 [Server-Sent Events](examples/sse-chat).
 
+## Three modes
+
+- **Classic**: each request starts with a fresh PHP execution context, as under PHP-FPM. Existing
+  applications such as WordPress run unmodified.
+- **Persistent**: the application boots once and handles one request at a time per worker, as with
+  RoadRunner, Laravel Octane or FrankenPHP's worker mode.
+- **Async**: the application boots once and handles many requests concurrently on coroutines, as
+  in Node.js.
+
+An application picks one as its base mode in `swerve.php`. In Classic or Persistent mode, path
+patterns can still run in Async mode, as async routes: existing applications get WebSockets,
+Server-Sent Events and other long-lived endpoints without changing their execution model.
+
+```php
+return ClassicMode::serve('public');                                              // public/index.php routes
+return PersistentMode::serve('public', require __DIR__ . '/bootstrap/swerve.php'); // boot once
+return AsyncMode::serve('public', $app);                                           // safe for overlapping requests
+```
+
+Without a `swerve.php`, the command line is shorthand for Classic, as with `php -S`: `swerve`
+serves the current directory through its `index.php`, `swerve public` serves `public/`, and
+`swerve public router.php` sends every path that doesn't exist to `router.php`. Swerve serves
+static files itself in every mode, as nginx's `try_files $uri $uri/ /index.php`; dotfiles, PHP
+source and anything outside the public root never.
+
+Whatever the mode, code sees PHP's own request environment: `$_SERVER` as PHP-FPM behind nginx
+fills it, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `php://input`, and with ext-phasync `header()`,
+`echo`, output buffering and sessions per request. Swerve's services work in every mode:
+[publish/subscribe](docs/publish-subscribe.md) between workers, a [shared cache](#shared-cache) and
+[claims](#claims).
+
 ## Why swerve
 
-PHP-FPM builds your application from nothing for every request (autoloader, framework,
-container, database connection), runs one request per process, and throws it all away. swerve
-keeps the application loaded in long-running workers, and each worker serves thousands of
-requests and connections at once on [phasync](https://github.com/phasync/phasync) coroutines.
-
-- **Connections that stay open.** Server-Sent Events and long polling from an ordinary request
-  handler, streaming request and response bodies, raw connections after a `101`, and
+- **Connections that stay open.** WebSockets, Server-Sent Events and long polling from an
+  ordinary handler, also beside a Classic application; streaming request and response bodies;
   [publish/subscribe](docs/publish-subscribe.md) between workers, so live features need no
   separate Node or Go service.
-- **Boot once, serve forever.** The framework, routes and connection pools are built once per
-  worker. A Slim app costs swerve about 10% over a bare handler; Express costs Node half or more.
-- **Waiting is free.** While one request waits for the database or an API, the same worker serves
-  others. Your handler stays ordinary sequential PHP: no promises, no callbacks.
-- **Isolated requests.** Each request runs in a `Scope` of its own, which the coroutines it
-  starts share, so request-scoped state stays separate even with thousands in flight.
+- **Boot once, serve forever** in Persistent and Async mode: the framework, routes and connection
+  pools are built once per worker. A Slim app costs swerve about 10% over a bare handler; Express
+  costs Node half or more.
+- **Waiting is free** in Async mode. While one request waits for the database or an API, the same
+  worker serves others. Handlers stay ordinary sequential PHP: no promises, no callbacks.
+- **Classic at PHP-FPM's cost.** ext-phasync's request server runs every request with PHP's real
+  lifecycle in forked processes sharing one opcache, the model of PHP-FPM.
 - **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
-  workers that grow are recycled, and reloads roll one worker at a time.
-- **Yours to own.** MIT, with no third-party dependencies beyond phasync and the PSR logger and
-  cache interfaces. See [the Ennerd philosophy](PHILOSOPHY.md).
-
-Up to 512 connections per worker swerve runs on PHP's own `stream_select()`; above that
-it needs ext-phasync, which waits with epoll.
-
-
-### Coming from PHP-FPM
-
-1. **Already using phasync under FPM?** That code runs unchanged in swerve: the coroutines you
-   started inside one request now also share the worker with other requests.
-2. **Keep per-request state per request.** A worker runs many requests at once, so static
-   properties and globals are shared between them. There are no `$_GET`, `$_SERVER` or
-   `$_SESSION`: read request data from the `ClientRequest` (a framework's adapter does), and keep
-   request-scoped state in a `WeakMap` keyed by `Scope::getCurrent()`: each request is a `Scope`
-   of its own. See
-   [How swerve runs your application](docs/how-it-runs.md).
-3. **Return a `Swerve\RequestHandler`** from `swerve.php`. A framework gets an adapter that turns
-   the `ClientRequest` into its own request and response.
-4. **Load ext-phasync** in production (it ships inside phasync: start swerve with `--ext`, or `pie install phasync/ext-phasync`). Blocking calls in
-   libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
-   coroutine instead of stalling the worker, and a worker can hold far more than 1,024
-   connections.
+  workers that grow are recycled.
+- **Yours to own.** MIT, with no third-party dependencies beyond phasync and the PSR interfaces.
+  See [the Ennerd philosophy](PHILOSOPHY.md).
 
 ## Getting started
 
 Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions.
 
-1. Install swerve:
+```bash
+composer require phasync/swerve
+vendor/bin/swerve public                 # an existing application: public/index.php routes
+vendor/bin/swerve --watch                # with a swerve.php: reload when a PHP file changes
+```
 
-   ```bash
-   composer require phasync/swerve
-   ```
+```
+> vendor/bin/swerve public
+2026-10-22 10:18:22.42 0 Classic (the extension's request server, up to 32 processes)
+2026-10-22 10:18:22.61   swerve 0.2.0 serving /srv/app/public through /srv/app/public/index.php on http://127.0.0.1:8080 with 8 workers
+2026-10-22 10:18:22.71 3 GET / 200 3.0ms
+```
 
-2. Create `swerve.php` in your project root, returning a `Swerve\RequestHandler` that wraps a
-   closure (the file is also your [bootstrap](docs/bootstrap.md): each worker runs it once at
-   start). The closure runs once for each HTTP exchange, and the exchange lasts as long as the
-   closure does:
-
-   ```php
-   <?php // swerve.php
-
-   return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-       $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-       $request->write("Hello, World\n");
-   });
-   ```
-
-   Keeping the request open makes a stream. This one pushes a number every second as
-   Server-Sent Events, until the client leaves:
-
-   ```php
-   <?php // swerve.php
-
-   use phasync;
-   use phasync\IOException;
-
-   return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-       $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream', 'cache-control' => 'no-cache']);
-       $request->flush(); // the head goes out now, not with the first event
-       try {
-           for ($n = 1; ; ++$n) {
-               $request->write("data: $n\n\n");
-               phasync::sleep(1);
-           }
-       } catch (IOException) {
-           // the client left
-       }
-   });
-   ```
-
-3. Run it:
-
-   ```
-   > vendor/bin/swerve
-   2026-09-26 17:00:30.12    swerve 0.1.0 serving ./swerve.php on http://127.0.0.1:8080 with 8 workers
-   2026-09-26 17:00:31.25 3 GET / 200 1.2ms
-   2026-09-26 17:00:31.31 6 GET /missing 404 0.4ms
-   ```
-
-   Each line has the time, the worker (its slot number, 0 to 7 here; blank for the master
-   process), and the message: a request with its status and how long the application took,
-   or anything else worth knowing, such as a worker that crashed and was restarted. Ctrl+C
-   stops swerve: requests in flight get a `503`, or are cut.
-
-   ```bash
-   vendor/bin/swerve --watch              # during development: reload when a PHP file changes
-   vendor/bin/swerve --public=public      # also serve the files in public/ (CSS, JavaScript, images)
-   vendor/bin/swerve app.php --http :80   # app.php on port 80 of every interface
-   ```
+Each line has the time, the worker (its slot number; blank for the master process), and the
+message. Ctrl+C stops swerve: requests in flight get a `503`, or are cut. Load ext-phasync in
+production: it ships inside phasync (start swerve with `--ext`, or `pie install
+phasync/ext-phasync`). [Getting started](docs/getting-started.md) goes on from here.
 
 ## Usage
 
 ```
 > vendor/bin/swerve --help
-Usage: swerve [options] [file]
+Usage: swerve [options] [dir|router.php] [router.php]
 
-Application:
-  [file]                           With the swerve adapter: swerve.php, a PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest (default: ./swerve.php). With another adapter: given to it (a router script, say, as for php -S)
-  -t, --docroot=<dir>              The document root, given to the adapter (one serving plain PHP files, say, as php -S does); not for the swerve adapter, see --public
-  --adapter=<name>                 The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application's composer.json, the only installed adapter, else swerve
+Application (without a swerve.php, as php -S: Classic mode):
+  [dir|router.php]                 A directory: the public root (default: the current directory); a PHP file: the router, run for every path that does not exist (default: index.php in the public root)
+  [router.php]                     After a public root: the router
+  -t, --docroot=<dir>              The public root, as for php -S
 
 Serving:
   --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
-  --public=<dir>                   HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
   --trusted-proxy=<ip|range|unix>  HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
+  --max-processes=<n>              Classic: the most PHP processes running scripts at once, shared by the workers; auto is 4 per CPU core (default: auto)
 
 Extension:
   --ext                            Load ext-phasync (bundled with phasync); swerve stops if it cannot
@@ -183,10 +144,9 @@ Information:
   --version                        The versions of swerve, PHP, phasync and ext-phasync
 ```
 
-Options and the application file may come in any order; an option's value is attached
-(`--workers=4`, `-w4`) or the next word (`--workers 4`, `-w 4`). A usage error exits with
-code 2, and so does an application (a `swerve.php` or an adapter's entry) that returns anything but a
-`Swerve\RequestHandler`.
+Options and arguments may come in any order; an option's value is attached (`--workers=4`, `-w4`)
+or the next word (`--workers 4`, `-w 4`). A usage error exits with code 2, and so does a
+`swerve.php` that throws while loading or returns anything but a mode.
 
 swerve runs in the foreground, as systemd, Docker and supervisord expect, and logs to
 standard output, which they collect; there is no daemon mode. Elsewhere,
@@ -198,60 +158,51 @@ connections over the workers. A proxy in front (nginx, HAProxy, Caddy) speaks HT
 The line per request costs about 5% of the throughput of a hello-world application, and
 less of a real one; `--no-access-log` turns it off.
 
-## Adapters
+## Handlers and adapters
+
+`PersistentMode::serve()`, `AsyncMode::serve()` and `withAsync()` take a handler, and an adapter
+runs it. Swerve runs four kinds itself:
+
+| Handler | Runs as |
+|---|---|
+| `function (ClientRequest $request): void` | Swerve's native handler: reads the body and writes the response on the request |
+| `function (ServerRequestInterface $request): ResponseInterface` | PSR-7; also `$psr15->handle(...)` |
+| a PSR-15 `RequestHandlerInterface` | PSR-15 |
+| `function (): void` | a classic script: superglobals, `php://input`, `echo`, `header()`; the output and headers become the response (needs ext-phasync) |
+
+Framework packages add their own, such as a Symfony kernel:
+[Laravel](https://github.com/phasync/swerve-laravel),
+[Symfony](https://github.com/phasync/swerve-symfony), [Yii](https://github.com/phasync/swerve-yii),
+[CakePHP](https://github.com/phasync/swerve-cakephp),
+[Spiral](https://github.com/phasync/swerve-spiral),
+[CodeIgniter](https://github.com/phasync/swerve-codeigniter) and
+[Laminas](https://github.com/phasync/swerve-laminas). An adapter implements `Swerve\Adapter` and
+registers itself from its Composer autoload `files`:
+
+```php
+interface Adapter
+{
+    /** Called once at startup; throw to refuse a mode you can't run safely. */
+    public function canHandle(object $handler, Mode $mode): bool;
+
+    public function handle(ClientRequest $request, object $handler): void;
+}
+
+Swerve\Handlers::register(new SymfonyAdapter());
+```
+
+At startup every handler is offered to every adapter, and exactly one must take it: none stops
+swerve, naming the package to install for a framework it knows; more than one stops it and
+suggests passing the one method to run as a first-class callable, such as `$kernel->handle(...)`.
 
 swerve is installed into the application's own `vendor/`, so the application and swerve share
 one version of each library. Run as `vendor/bin/swerve`, the worker loads only swerve's own
 dependency closure (swerve, the installed adapters, and what they require), never the
-application's classes or its Composer `files`: an application that includes
-`vendor/autoload.php` itself (a plain PHP application under swerve-sapi) gets them fresh in every
-request, framework bootstraps included, as under php-fpm. swerve accepts every major version of the PSR packages it uses
+application's classes or its Composer `files`: `swerve.php` requires the application's
+`vendor/autoload.php` itself. swerve accepts every major version of the PSR packages it uses
 (`psr/log` 1 to 3, `psr/simple-cache` 1 to 3, `psr/http-message` 1 and 2), and Composer picks
 the one the application needs; `php tests/psr-versions.php` checks that every class loads with
 each.
-
-An adapter is an installed package that provides the entry point in place of `swerve.php`. It
-declares itself in its own `composer.json`:
-
-```json
-{"extra": {"swerve": {"adapter": "psr15", "entry": "Swerve\\Psr15\\init"}}}
-```
-
-`entry` names a function that each worker calls once, after the fork, with the application
-directory; it returns a `Swerve\RequestHandler`, as `swerve.php` does, and anything else stops
-swerve with exit code 2. The entry runs with swerve's dependency closure only (above): the
-adapter, what it requires, swerve and phasync. Whether the application's classes are loaded once
-per worker and shared by its requests, or fresh in each request, is the adapter's choice. One that
-shares them (a framework adapter) requires the application's autoloader in its entry, from the
-vendor directory swerve runs from:
-
-```php
-require_once $GLOBALS['_composer_autoload_path'] ?? "$appDir/vendor/autoload.php";
-``` The master only reads
-`vendor/composer/installed.json` to find adapters, and doesn't call their entry.
-
-The adapter is the first of: `--adapter=<name>`; `"extra": {"swerve": {"adapter": "<name>"}}` in the
-application's own `composer.json`; the only installed adapter; `swerve`, the built-in one, which
-loads `swerve.php` (always available as `--adapter=swerve`). Several installed adapters and no
-choice, or a name that is not installed, stops swerve at start. Adapters are looked up in the
-vendor directory swerve itself was loaded from (`vendor/`, or wherever the application keeps it,
-such as Joomla's `libraries/vendor`), and in the root package's `composer.json`, which may declare
-an adapter with its `entry` itself (an adapter package run from its own checkout). With an adapter other
-than `swerve`, a `swerve.php` in the application directory is ignored (logged once). The
-application directory is the current one, or for the `swerve` adapter the directory of the
-`swerve.php` given.
-
-An adapter's entry may take two more arguments, which swerve passes by name, as absolute paths,
-only when given on the command line: `$docroot` (`-t <dir>`) and `$file` (the file argument). What
-they mean is the adapter's: one serving plain PHP files can take the shape of PHP's built-in
-server, so that `swerve -t public router.php` serves like `php -S 127.0.0.1:8080 -t public
-router.php`. An entry without such a parameter stops swerve with exit code 2 when it is
-given; `-t` with the `swerve` adapter is a usage error (`--public` serves files in front of a
-`swerve.php`).
-
-```php
-function entry(string $appDir, ?string $docroot = null, ?string $file = null): Swerve\RequestHandler
-```
 
 ### Integrating a package with swerve
 
@@ -300,18 +251,14 @@ A hook runs in the event loop and must not wait, and an exception from one stops
 
 ## Static files
 
-`--public=<dir>` serves the files in a directory, and passes every other request to the
-application: `/css/site.css` is `public/css/site.css`, `/` is `public/index.html`. Files are
-streamed, with their Content-Type, Content-Length, Last-Modified and ETag; a browser's
-revalidation gets `304 Not Modified`, and a `Range` request (video, resumed downloads) `206
-Partial Content`. Other methods than GET and HEAD, names starting with a dot (`.env`, `.git/`;
-`.well-known/` is served), PHP files (`.php`, `.phtml`, `.phar`, `.inc`: a source is never sent),
-and paths leading out of the directory (`..`, a symlink pointing outside) go to the application;
-directories are never listed. This is deliberately small: for a lot of static content, or
-anything beyond this, let nginx or a CDN serve it in front of swerve.
-
-The same is available to your own handler: `(new Swerve\StaticFiles($dir))->wrap($handler)` returns
-a handler that answers file requests and calls `$handler` for the rest.
+Every mode serves the files under its public root before the application sees a request:
+`/css/site.css` is `public/css/site.css`, `/docs/` is `public/docs/index.html` (`/docs` is a `301`
+to it). Files are streamed, with their Content-Type, Content-Length, Last-Modified and ETag; a
+browser's revalidation gets `304 Not Modified`, and a `Range` request (video, resumed downloads)
+`206 Partial Content`. Names starting with a dot (`.env`, `.git/`; `.well-known/` is served), PHP
+source (`.php`, `.phtml`, `.phar`, `.inc`) and paths leading out of the directory (`..`, a symlink
+pointing outside) go to the application; directories are never listed. For a lot of static
+content, or anything beyond this, let nginx or a CDN serve it in front of swerve.
 
 ## Logging from the application
 
