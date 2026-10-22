@@ -52,7 +52,7 @@ return AsyncMode::serve('public', $app);
   alternation, as FastRoute does, without changing the API.
 - `swerve.php` is evaluated in each worker, after the fork, never in the master: the master holds
   no application code or state (clean hard reloads, nothing shared across forks by accident). The
-  master learns what it needs (mode, public root, router, async prefixes) from the first worker.
+  master learns what it needs (mode, public root, router, async patterns) from the first worker.
   In Classic, code in `swerve.php` affects only the async handlers, never the request server's
   processes; in Persistent mode it runs in the worker beside the booted application.
 - Async handlers run in Swerve's workers. In a Classic application they can't see the
