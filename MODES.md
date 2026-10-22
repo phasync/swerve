@@ -43,13 +43,15 @@ return AsyncMode::serve('public', $app);
   a project root is rarely safe to publish (`composer.json`, `vendor/`, `storage/`). Adapters
   pass their framework's directory.
 - `withAsync(string $pattern, object $handler)` returns a new instance (immutable, as PSR-7's
-  `with*`). The pattern is a regular expression body matched against the path, anchored at its
-  start: Swerve compiles it as `"\x01^" . $pattern . "\x01Du"` (a raw `\x01` byte in a pattern
-  throws). `D`: `$` is the end of the path; `u`: patterns and paths are UTF-8, and an invalid
+  `with*`). The pattern is a regular expression body matched against the path. One that starts
+  with `/` is anchored at the start of the path (Swerve prepends `^`), so `'/ws/'` is a prefix;
+  any other pattern matches anywhere, as nginx's `location ~`: `'\.scss$'`. Write `^` to anchor a
+  pattern that starts otherwise, e.g. `'^(?i)/admin/'`, and escape `.` in plain prefixes. Swerve
+  compiles it with the delimiter `\x01` and the modifiers `Du` (a raw `\x01` byte in a pattern
+  throws): `D`, `$` is the end of the path; `u`, patterns and paths are UTF-8, and an invalid
   pattern throws at startup. Other options are written inline (`(?i)`, `(?x)`). Patterns match
-  the decoded, normalised path without the query string, as nginx's `location`; paths with
-  control characters or invalid UTF-8 are rejected with 400 before any routing. So `'/ws/'` is a prefix, and `'.*\.scss$'` or
-  `'/assets/.*\.css$'` are patterns (escape `.` in plain prefixes). The first match in declaration
+  the decoded, normalised path without the query string; paths with control characters or
+  invalid UTF-8 are rejected with 400 before any routing. The first match in declaration
   order wins; adding the same pattern twice throws. Async routes come before static files, so a
   pattern can take over existing files (compile `.scss` on request) or paths that don't exist
   (build `style.css` from `style.scss`). With many patterns, Swerve can combine them into one
