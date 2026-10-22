@@ -94,17 +94,15 @@ The same order in every mode, nginx's `try_files $uri $uri/ /index.php`:
 
 1. the first matching async pattern: its handler;
 2. an existing file under the public root that isn't `.php`: served by Swerve;
-3. Classic: an existing `.php` file runs as itself;
+3. Classic: an existing `.php` file runs as itself; followed by `/`, it runs with the rest of the
+   path as `PATH_INFO` (`/index.php/2024/hello`, and `/test.php/` with `PATH_INFO=/`), as
+   `php -S`, Apache and the usual WordPress nginx setup do;
 4. a directory requested with a trailing slash runs its `index.php` (Classic) or serves its
    `index.html`; requested without one, it is a 301 to the path with the slash (query string kept)
    when it has such an index file;
 5. everything else: Classic's router, or the Persistent or Async handler. That includes a
    directory without an index file (never a listing), `/test` when only `test.php` exists (no
-   extensionless mapping) and a file requested with a trailing slash.
-
-Open: `/index.php/2024/hello` (an existing `.php` file followed by `/`) running `index.php` with
-`PATH_INFO=/2024/hello`, as `php -S`, Apache and the usual WordPress nginx setup do. Proposed:
-yes.
+   extensionless mapping) and a static file followed by `/`.
 
 Swerve's workers serve static files themselves: Content-Type, ETag/Last-Modified, `HEAD`, Range;
 with the extension, file reads go to its thread pool. Never served in any mode: dotfiles, `.php`
