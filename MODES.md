@@ -1,55 +1,143 @@
 # Swerve's three modes (design, Swerve 0.2)
 
 Every application Swerve serves runs in exactly one mode. The mode is stated in `swerve.php`
-(or implied, for Classic without a `swerve.php`), named in the startup log, and documented by
-every adapter. Nothing about it is hidden.
+(or implied by the command line, for Classic without a `swerve.php`), named in the startup log,
+and documented by every adapter. Nothing about it is hidden.
 
 | Mode | What happens per request | State between requests | Requests per process | For |
 |---|---|---|---|---|
 | **Classic** | the script runs from scratch with PHP's own request lifecycle, as under PHP-FPM | fresh every request | one, blocking | any PHP application, unmodified: WordPress, legacy code |
-| **Serialized** | the application booted once; its handler runs per request | kept (statics, services) | one at a time per worker | frameworks that keep request state in services or statics: Laravel Octane-style, Yii, CakePHP, CodeIgniter, Laminas MVC, Spiral |
-| **Concurrent** | the application booted once; requests are coroutines that overlap while they wait | kept, so request state must be scope-safe | many | scope-safe applications: PSR-15 stacks (Slim, Mezzio), Laravel and Symfony with their pools, real-time handlers. Node.js-like power and responsibility |
+| **Persistent** | the application booted once; its handler runs per request | kept (statics, services) | one at a time per worker | frameworks that keep request state in services or statics: Laravel Octane-style, Yii, CakePHP, CodeIgniter, Laminas MVC, Spiral |
+| **Async** | the application booted once; requests are coroutines that overlap while they wait | kept, so request state must be scope-safe | many | scope-safe applications: PSR-15 stacks (Slim, Mezzio), Laravel and Symfony with their pools, real-time handlers. Node.js-like power and responsibility |
 
-Classic and Serialized applications can declare **concurrent routes**: path prefixes that always
-run in Swerve's workers in Concurrent mode. That is where WebSockets, server-sent events and other
+Classic and Persistent applications can declare **async routes**: path prefixes that always run
+in Swerve's workers in Async mode. That is where WebSockets, server-sent events and other
 long-lived or I/O-heavy endpoints live; their code must be written for cooperative concurrency.
 
-## Configuration: `swerve.php` states the mode
-
-`swerve.php` is the only entry point. It returns one of three values:
+## Configuration: `swerve.php` returns the mode
 
 ```php
-// Classic. Without a swerve.php, `swerve <dir>` in a directory with index.php starts Classic
-// (like `php -S`). With one, for options and concurrent routes:
-return Swerve::classic(
-    root: __DIR__ . '/public',
-    router: 'index.php',
-    concurrent: ['/ws/' => __DIR__ . '/realtime.php'],
-);
+use Swerve\{ClassicMode, PersistentMode, AsyncMode};
 
-// Serialized: boot once (the value is the booted application's handler), one request at a time.
-return Swerve::serialized(
-    require __DIR__ . '/bootstrap/swerve.php',
-    concurrent: ['/events/' => __DIR__ . '/realtime.php'],
-);
+// Classic: static files from public/, everything else that doesn't exist goes to public/index.php.
+return ClassicMode::serve('public');
+return ClassicMode::serve('public', 'app/front.php')          // a router outside the web root
+    ->withAsync('/ws/', function (ClientRequest $request): void { /* ... */ });
 
-// Concurrent: any request handler that is scope-safe.
-return Swerve::concurrent($app);   // a Swerve RequestHandler, a PSR-15 handler, or a closure
+// Persistent: boot once, one request at a time per worker.
+return PersistentMode::serve('public', require __DIR__ . '/bootstrap/swerve.php')
+    ->withAsync('/events/', fn (ServerRequestInterface $r): ResponseInterface => /* ... */);
+
+// Async: any handler that is safe for overlapping requests.
+return AsyncMode::serve('public', $app);
 ```
 
-- A concurrent route maps a path prefix to a file that returns a concurrent handler. That file is
-  loaded in the worker separately from the classic or serialized application, so the boundary
-  between the two kinds of code is a file, not a convention.
-- Adapters become plain functions that return one of these: `return Swerve\Laravel\serialized(__DIR__);`,
-  `return Swerve\Symfony\concurrent(__DIR__);` and so on, each documenting its mode. Composer's
-  `extra.swerve` adapter discovery and `--adapter` go away.
+- `ClassicMode::serve(string $publicRoot = '', ?string $router = null)`;
+  `PersistentMode::serve(?string $publicRoot, object $handler)`;
+  `AsyncMode::serve(?string $publicRoot, object $handler)`. On PHP 8.4+ `new ClassicMode(...)`
+  takes the same arguments.
+- Every path is relative to `swerve.php`'s directory (absolute paths are accepted). `$router`
+  defaults to `{$publicRoot}/index.php`. Startup fails if the public root or the router doesn't
+  exist.
+- `$publicRoot = null` (Persistent and Async only) serves no static files. There is no default:
+  a project root is rarely safe to publish (`composer.json`, `vendor/`, `storage/`). Adapters
+  pass their framework's directory.
+- `withAsync(string $prefix, object $handler)` returns a new instance (immutable, as PSR-7's
+  `with*`). The longest matching prefix wins; adding the same prefix twice throws.
+- `swerve.php` is evaluated in each worker, after the fork, never in the master: the master holds
+  no application code or state (clean hard reloads, nothing shared across forks by accident). The
+  master learns what it needs (mode, public root, router, async prefixes) from the first worker.
+  In Classic, code in `swerve.php` affects only the async handlers, never the request server's
+  processes; in Persistent mode it runs in the worker beside the booted application.
+- Async handlers run in Swerve's workers. In a Classic application they can't see the
+  application's globals or functions, even though they are written in the same file.
 - The startup log line names the mode and how it runs, e.g. `Classic (extension request server, up
-  to 32 processes)`, `Classic (php -S pool)`, `Serialized, 4 workers`, `Concurrent, 4 workers`.
+  to 32 processes)`, `Classic (php -S pool)`, `Persistent, 4 workers`, `Async, 4 workers`.
+- Composer's `extra.swerve` adapter discovery and `--adapter` go away.
+
+### The command line is shorthand for `ClassicMode`
+
+Paths on the command line are relative to the current directory, as with `php -S`.
+
+| Command | Public root | Router |
+|---|---|---|
+| `swerve` | `.` | `./index.php` |
+| `swerve public` or `swerve -t public` | `public/` | `public/index.php` |
+| `swerve router.php` | `.` | `./router.php` |
+| `swerve public router.php` | `public/` | `./router.php` |
+
+- A positional argument that is a directory is the public root; a file is the router; anything
+  else is an error.
+- With a `./swerve.php`, plain `swerve` uses it; positional arguments beside it are an error
+  ("swerve.php exists; configure there").
+- `swerve` never looks in parent directories. When the current directory has neither
+  `swerve.php` nor `index.php`, the error names the nearest `swerve.php` above it, if any.
+  `composer exec swerve` runs as `swerve` in the directory of the nearest `composer.json`.
+- Unlike `php -S`, the router runs only for paths that don't exist. `php -S` routers that
+  `return false` for existing files keep working: Swerve has already served those.
+
+## Request routing and static files
+
+The same order in every mode, nginx's `try_files $uri $uri/ /index.php`:
+
+1. a matching async prefix: its handler;
+2. an existing file under the public root that isn't `.php`: served by Swerve;
+3. Classic: an existing `.php` file runs as itself; a directory runs its `index.php` or serves its
+   `index.html`;
+4. everything else: Classic's router, or the Persistent or Async handler.
+
+Swerve's workers serve static files themselves: Content-Type, ETag/Last-Modified, `HEAD`, Range;
+with the extension, file reads go to its thread pool. Never served in any mode: dotfiles, `.php`
+source, anything resolving outside the public root (symlinks included). For a router outside the
+public root, `SCRIPT_FILENAME` is its real path and `SCRIPT_NAME` is `/` plus its file name, as
+nginx sets them.
+
+## Handlers and adapters
+
+`PersistentMode::serve()`, `AsyncMode::serve()` and `withAsync()` take any object, and an adapter
+runs it:
+
+```php
+interface Adapter
+{
+    /** Called once at startup; throw to refuse a mode you can't run safely. */
+    public function canHandle(object $handler, Mode $mode): bool;
+
+    public function handle(ClientRequest $request, object $handler): void;
+}
+
+Swerve\Handlers::register(new SymfonyAdapter());   // from the adapter's autoload "files"
+```
+
+- At startup Swerve asks every registered adapter. Exactly one must answer yes. None: startup
+  fails, naming the package for known types ("install phasync/swerve-symfony"). More than one:
+  startup fails and suggests choosing with a first-class callable, e.g. `$kernel->handle(...)`.
+- Per request, Swerve calls the chosen adapter's `handle()` directly. One-time work belongs in the
+  adapter's constructor or its first `handle()`.
+- The mode is the user's choice; an adapter may refuse a combination it knows is unsafe (a stock
+  Symfony kernel in `AsyncMode`) at startup, with the reason.
+- Several adapters coexist: `swerve-symfony` handles `HttpKernelInterface` and `Request` closures,
+  `swerve-laravel` its kernel, and so on.
+
+Core ships four adapters:
+
+| Handler | Runs as |
+|---|---|
+| `function (ClientRequest $request): void` | Swerve's native handler: reads the body and writes the response on the request |
+| `function (ServerRequestInterface $request): ResponseInterface` | PSR-7; also `$psr15->handle(...)` |
+| a PSR-15 `RequestHandlerInterface` | PSR-15 |
+| `function (): void` | a classic script: superglobals, `php://input`, `echo`, `header()`; the output and headers become the response |
+
+Swerve supports two interfaces and favours no framework: PHP's own SAPI interface, on which every
+framework already runs under PHP-FPM (a Symfony handler can be
+`fn () => $kernel->handle(Request::createFromGlobals())->send()`), and PSR-7/PSR-15, the one typed
+standard, which phasync implements. `ClientRequest` is the native shape, and the raw stream for
+protocols that aren't request/response.
 
 ## How Classic runs
 
-Swerve's workers accept HTTP (and TLS), serve static files themselves, run concurrent routes, and
-forward every other request to a **request runner**:
+Swerve's workers accept HTTP (and TLS), serve static files and run async routes, and forward every
+other request to a **request runner**:
 
 1. **ext-phasync's request server** when the extension is loaded (`phasync.serve`): a master that
    listens on a private Unix socket and forks one child per connection from Swerve; each child
@@ -82,8 +170,8 @@ business on the client side); response output is batched in 64 KiB frames, sent 
 Measured on WordPress (Ryzen 9950X3D, 2 server cores, c=32, JIT 1054 everywhere): the request
 server runs at PHP-FPM's cost with ext-phasync loaded (16.5 ms CPU per request; FPM alone 16.2,
 FPM with the extension 16.5). End to end, Swerve in front of it serves ~118 req/s against nginx +
-FPM's ~123. Known follow-ups: serve mode skips the extension's coroutine hooks (≈1.5%), Swerve's
-front batches its client writes (≈1.5%).
+FPM's ~123. Known follow-ups: serve mode skips the extension's coroutine hooks (≈1.5%, done, not
+yet re-measured end to end), Swerve's front batches its client writes (≈1.5%).
 
 ## The same environment in all three modes
 
@@ -91,25 +179,19 @@ Code sees the same PHP environment whatever mode it runs in: `$_SERVER` with the
 values (as PHP-FPM behind nginx sets them), `$_GET`/`$_POST`/`$_COOKIE`/`$_FILES`/`$_REQUEST`,
 `php://input`, `header()`/`setcookie()`/`http_response_code()`, output buffering and `ob_*`,
 sessions, the default time zone and locale, per request. Classic gets this from PHP's own request
-lifecycle (the request server and `php -S` are SAPIs). Serialized and Concurrent requests, and the
-concurrent routes of Classic and Serialized apps, get it from `sapi()`, around every request,
-always (measured: ~1.8 µs per request on PHP 8.5 with the JIT).
+lifecycle (the request server and `php -S` are SAPIs), and its whole process is one request, so
+`\Scope` there is that request's root scope. Every request in a worker (Persistent, Async, and the
+async routes of Classic and Persistent applications) runs inside ext-phasync's `sapi()`, always
+(measured: ~1.8 µs per request on PHP 8.5 with the JIT), and `Scope` keeps its superglobals, time
+zone and locale. Without the extension, application code is loaded through the plug
+(phasync-babel translation to phasync-hooked replacements), which provides the same, slightly
+inferior (database drivers in C stay blocking; preemption needs the extension).
 
-## Serialized and Concurrent: every request inside `sapi()`
-
-Each request in a worker runs inside ext-phasync's `sapi()`, unconditionally, so every request has its own output
-buffers and `ob_*`, `header()`/`setcookie()`/`http_response_code()`, `php://input`, uploads and
-session; and, through `Scope`, its own request superglobals, default time zone and locale. Without
-the extension, application code is loaded through the plug (phasync-babel translation to
-phasync-hooked replacements), which provides the same, slightly inferior (database drivers in C
-stay blocking; preemption needs the extension).
-
-A handler may produce its response either way:
-- **returned**: a Swerve response, a PSR-7 response; anything echoed beside it is an error, as today;
-- **echoed**: the handler returns nothing, and what it echoed, with the headers and status it set,
-  is the response, exactly as a classic script.
-
-So classic-style code moves into Serialized mode without being rewritten into PSR-7.
+Swerve's services (`Swerve::cache()`, `publish()`, `subscribe()`, `publishRaw()`,
+`subscribeRaw()`, `claim()`) are available in all three modes. In Classic they travel as frames
+on the request server connection, executed by the forwarding worker; `subscribe()` there holds its
+process for as long as it waits. A Classic application doesn't load Swerve's Composer autoloader,
+so the request server makes Swerve's client classes available itself.
 
 ## WebSockets and server-sent events per mode
 
@@ -120,17 +202,17 @@ So classic-style code moves into Serialized mode without being rewritten into PS
   request behaves as if the client had disconnected: `connection_aborted()` is true, output is
   discarded, PHP's own abort rules apply (including `ignore_user_abort()`). `setup()` must come
   before any output.
-- **Serialized and Concurrent**: return `new WebSocketResponse(function (WebSocket $ws) { ... })`
+- **Persistent and Async**: return `new WebSocketResponse(function (WebSocket $ws) { ... })`
   (and the SSE equivalent). The function runs as a coroutine in the same process and outlives the
-  request. In Serialized mode it keeps running while the worker takes the next requests (after the
+  request. In Persistent mode it keeps running while the worker takes the next requests (after the
   framework's cleanup), so it must not touch the framework's global state (facades, the container,
   the request's database connection): only its captured values and Swerve's and phasync's APIs.
-- Classic and Serialized code reaches Swerve's other APIs (`Swerve::cache()`, `publish()`,
-  `subscribe()`, `claim()`): in Classic through frames on the request server connection, executed
-  by the forwarding worker; `subscribe()` there holds its process for as long as it waits.
 
 ## Not decided yet
 
+- Swerve's services from Classic on the `php -S` pool: it has no channel back to Swerve (a
+  loopback connection, or a documented limitation without the extension).
 - Hibernating Classic requests (an idea only: a parked request would free its process).
-- How `Swerve::cache()`/`publish()` frames are numbered in the protocol (after the first Classic release).
+- How the services' frames are numbered in the protocol (after the first Classic release).
+- Retiring a worker on request (`Swerve::retire()`): not now.
 - Windows/macOS for the request server (Linux first).
