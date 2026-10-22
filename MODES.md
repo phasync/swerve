@@ -167,6 +167,28 @@ other request to a **request runner**:
 2. **A pool of `php -S` processes** when the extension isn't available: the same growth and idle
    rules, HTTP on loopback, about 15% more CPU per request than PHP-FPM on WordPress.
 
+### Who starts what
+
+- **The extension's request server: one, started by Swerve's master, shared by all workers.** It
+  takes control at PHP startup, so it is a fresh `php` process (`proc_open`), with its own ini
+  (opcache size, `memory_limit`), never a fork of Swerve's master; one server means one opcache
+  for every child. Order: the master forks the first worker, which evaluates `swerve.php` and
+  reports the `ClassicMode` description; the master starts the server, waits until its socket
+  listens, then lets the workers accept traffic. On a hard reload the master starts a new server,
+  new connections go to it, and the old one drains and exits; on shutdown the master stops it.
+- **The server's first process only accepts, forks and reaps.** It never runs PHP code, so it
+  practically never dies; Swerve's master supervises only it (restarts it if it does, loudly).
+- **A child that dies** (segfault, OOM killer; a fatal PHP error is not that, it ends in a 500 and
+  the child serves on) is reaped by the first process, nothing more: its connection is gone with
+  it. The Swerve worker sees the connection close: 502 if no response had started, otherwise the
+  client connection closes. The pool drops that connection; the next request that finds every
+  connection busy opens a new one, which forks a new child.
+- **Each Swerve worker owns its connections:** it opens one when all of its own are busy, up to the
+  global cap divided by the number of workers, and closes those idle for 10 s. The server's
+  `serve_max_children` is the global cap; connections beyond it wait in its listen backlog.
+- **The `php -S` fallback is per worker:** each `php -S` has its own opcache anyway, so each worker
+  grows its own pool.
+
 ### Protocol between Swerve and the request server
 
 Frames: `[type: 1 byte][length: 4 bytes, big-endian][payload]`.
