@@ -38,7 +38,7 @@ and the lifecycles (through their connections), never forks a worker itself.
 | 'R' ready / 'Q' first request | same; 'R' = first accept() waiting (or the script running, for non-HTTP) |
 | recycle (memory, max requests) | lifecycle ends: accept() returns null → reset (ext) / exit (no ext) |
 | linger + replacement overlap | `worker_detach()` (new, ext + PHP parent): the parent forks a replacement for the index at once; the detached process finishes its upgraded connections and exits. Up to MAX_LINGERING per index |
-| rolling reload (SO_REUSEPORT new listener) | per lifecycle: detach (replacement starts on new code) then drain; one at a time; no new listener, the lot keeps accepting |
+| rolling reload (SO_REUSEPORT new listener) | a second worker-parent, of the next generation, on the current code (fresh opcache compile): inherits the same listener and inbox fds, so the lot keeps accepting; once every slot of it is ready, every lifecycle of the old generation drains ('T') together. `worker_detach()` alone can't do this: the worker-parent's own opcache is shared and never revalidates (`validate_timestamps=0`), so detaching a lifecycle within the same long-lived worker-parent would keep serving the old code. A new generation's worker-parent that dies before it is ready leaves the old one serving, and is retried with backoff |
 | failed-start backoff, crash loop, exit code | master answers hello with a delay; "no lifecycle ever ready, all failing" → stop with the exit code |
 | inboxes made before fork | made by the master before proc_open, all inherited; master assigns one per lifecycle at hello; 4N as today |
 | cache / subscriptions over the pipe | same frames over the lifecycle's connection |
