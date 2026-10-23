@@ -301,10 +301,19 @@ final class HttpClientRequest implements ClientRequest
         }
         try {
             if ($this->continue) {
-                // Not once the head went out, or when the client sent its body without waiting
+                // Not once the head went out, or when the client sent its body without waiting.
+                // A handler that streams its response starts its body producer (a coroutine of
+                // its own) before returning that response, and that coroutine may reach this same
+                // read before the handler's return has had a chance to send anything: one
+                // scheduling tick gives it that chance, so a head (and any body already waiting)
+                // sent meanwhile makes this 100 Continue moot, instead of racing ahead of it on
+                // the wire.
                 $this->continue = false;
                 if (!$this->wire && $this->connection->bufferEmpty()) {
-                    $this->put("HTTP/1.1 100 Continue\r\n\r\n");
+                    phasync::sleep();
+                    if (!$this->wire) {
+                        $this->put("HTTP/1.1 100 Continue\r\n\r\n");
+                    }
                 }
             }
             if (null === $this->bodyLength && 0 === $this->remaining) {
@@ -387,6 +396,7 @@ final class HttpClientRequest implements ClientRequest
         $start     = \hrtime(true);
         $keepAlive = false;
         $status    = 500;
+        $caught    = false; // a catch below ran and already dealt with the response its own way
         try {
             ($c->handler)($this);
             if (null !== $this->error) {
@@ -398,17 +408,20 @@ final class HttpClientRequest implements ClientRequest
             $status    = $this->status;
             $keepAlive = $this->conclude();
         } catch (HttpError $e) {
+            $caught = true;
             $status = $e->getCode();
             if (!$this->wire && null === $this->gone) {
                 $c->refuse($status, $e->getMessage());
             }
         } catch (ShutdownException) {
             // The worker stops: not a failure. A response not begun is answered 503, in full
+            $caught = true;
             if (!$this->wire && null === $this->gone) {
                 phasync::shielded(fn () => $c->refuse(503, 'Service Unavailable', linger: false));
             }
             $status = $this->wire ? $this->status : 503;
         } catch (\Throwable $e) {
+            $caught = true;
             if (null === $this->gone) {
                 $c->logger->error('{request} failed: {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);
                 if (!$this->wire) {
@@ -417,6 +430,26 @@ final class HttpClientRequest implements ClientRequest
             }
             $status = $this->wire ? $this->status : 500;
         } finally {
+            // exit()/die() in the handler (a script's wp_redirect()+exit, for one) bails out of
+            // everything above -- every catch included, same as any other finally -- with the
+            // head possibly already committed (sendResponseHeaders() ran, directly or through
+            // the ext's own "headers are sent if nothing sent them" on the way out) but never
+            // sent: deliver it, same as a handler that simply returned without writing a body.
+            // Not when a catch above ran: it already dealt with the response its own way (most
+            // of them leave $this->ended false on purpose, for this same finally to still mark
+            // the bookkeeping -- not to redo anything).
+            if (!$caught && !$this->ended) {
+                try {
+                    $this->end();
+                    $status    = $this->status;
+                    $keepAlive = $this->conclude();
+                } catch (\Throwable $e) {
+                    if (null === $this->gone) {
+                        $c->logger->error('{request} failed after exit(): {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);
+                    }
+                    $status = $this->wire ? $this->status : 500;
+                }
+            }
             $this->finished = $this->ended = true;
             $c->access?->request($this->method, $this->target, $status, (\hrtime(true) - $start) / 1e9);
         }
