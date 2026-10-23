@@ -512,14 +512,14 @@ final class Worker
 
             return;
         }
-        $written = @\fwrite($this->pipe, $bytes);
+        $written = @\fwrite($this->master, $bytes);
         if (false === $written || \strlen($bytes) === $written) {
-            return; // false: the master is gone, and tick() acts on that
+            return; // false: the master is gone, and awaitMaster()'s EOF acts on that
         }
         $this->out = \substr($bytes, $written);
         phasync::go(function () {
             while ('' !== $this->out) {
-                $written = @\fwrite(phasync::writable($this->pipe, \PHP_FLOAT_MAX), $this->out);
+                $written = @\fwrite(phasync::writable($this->master, \PHP_FLOAT_MAX), $this->out);
                 if (false === $written) {
                     $this->out = '';
 
