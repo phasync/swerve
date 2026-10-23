@@ -52,6 +52,21 @@ it('keeps two overlapping requests\' output buffers and headers apart', function
     }
 });
 
+it('gives a classic script handler a session of its own, kept over its cookie', function () {
+    [, $addr] = swerve_start(workers: 1, fixture: 'plug-script.php', php: ['-d', 'session.save_path=' . temp_path(true)]);
+    $get = static function (string $cookie) use ($addr): string {
+        $conn = stream_socket_client("tcp://$addr");
+        fwrite($conn, "GET /visits HTTP/1.1\r\nHost: t\r\nConnection: close\r\n$cookie\r\n");
+
+        return (string) stream_get_contents($conn);
+    };
+    $first = $get('');
+    expect(preg_match('/^set-cookie: (PHPSESSID=[^;]+)/mi', $first, $m))->toBe(1)
+        ->and(plug_dechunk($first))->toBe('visits=1')
+        ->and(plug_dechunk($get("Cookie: {$m[1]}\r\n")))->toBe('visits=2')
+        ->and(plug_dechunk($get('')))->toBe('visits=1');
+});
+
 /** The body of a chunked response. */
 function plug_dechunk(string $response): string
 {

@@ -3,6 +3,13 @@
 // Without ext-phasync: a classic script handler on phasync/hooked's sapi(), see PlugTest
 
 return Swerve\AsyncMode::serve(null, static function (): void {
+    if ('/visits' === $_SERVER['REQUEST_URI']) {
+        session_start();
+        $_SESSION['n'] = ($_SESSION['n'] ?? 0) + 1;
+        echo 'visits=', $_SESSION['n'];
+
+        return;
+    }
     if ('/sleep' === parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)) {
         ob_start();
         echo 'before ';

@@ -144,7 +144,7 @@ it, `$_GET`, `$_COOKIE`, and for a `function (): void` handler also `php://input
 `$_FILES`. In Classic mode the PHP process is the request, so everything is as under PHP-FPM. In a
 worker, every request runs inside `sapi()`, ext-phasync's or, without the extension, phasync/hooked's
 equivalent: `echo`, `header()`, `setcookie()`, `http_response_code()`, output buffering and
-`php://input` are the request's own (sessions too with the extension), and `$_GET`, `$_POST`,
+`php://input` and the session are the request's own, and `$_GET`, `$_POST`,
 `$_COOKIE` and `$_FILES`, the default time zone and the locale follow the request's `Scope`.
 `$_SERVER` and `$_REQUEST` are filled at the start of each request but shared by the requests of a
 worker: in Async mode read them before the request first waits. `$_SERVER` starts from what the
