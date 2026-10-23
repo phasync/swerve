@@ -2,10 +2,22 @@
 
 namespace Swerve;
 
+use phasync;
+use phasync\Psr\ServerRequest;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Swerve\Http\HttpConnection;
+use Swerve\Http\TrustedProxies;
+use Swerve\Psr\Bridge;
+use Swerve\Util\Logger;
+use Swerve\Util\Router;
+use Swerve\Util\Sapi;
 use Swerve\Util\Shutdown;
+use Swerve\Util\StaticFile;
 use Swerve\Util\Topics;
+use Swerve\Util\Worker;
+use Swerve\Util\WorkerDuplex;
 
 /**
  * What swerve gives the application: its log, the cache and the messages shared by every worker, and the state of the worker.
@@ -46,6 +58,30 @@ final class Swerve
 
     /** Startup is over: later registrations change nothing */
     private static bool $started = false;
+
+    /** Requests already parsed (pipelined, or from a connection accept() kept itself), see accept(). */
+    private static array $queue = [];
+    /** Raised when accept() pushes to $queue. */
+    private static ?\stdClass $queueFlag = null;
+    /** Calls to accept() currently blocked with nothing to do: a worker with spare capacity, see onIdle(). */
+    private static int $idle = 0;
+    /** The fiber running each request's handler, so a nested accept() from inside it can be refused. */
+    private static ?\WeakMap $requestFibers = null;
+    /** 'R' sent once, at the first accept(). */
+    private static bool $readySent = false;
+    /** A closure's handler form, cached: see resolveHandler(). */
+    private static ?\WeakMap $handlerKinds = null;
+    /** $_SERVER as the application left it after booting (its own values, not the command line's), see bootServer(). */
+    private static ?array $bootServer = null;
+    private static int $maxBody = HttpConnection::MAX_BODY;
+    private static ?TrustedProxies $trustedProxies = null;
+    private static ?Logger $accessLog = null;
+
+    /** $_SERVER entries of the worker's command line, which no request has. */
+    private const COMMAND_LINE = [
+        'argv' => 0, 'argc' => 0, 'PHP_SELF' => 0, 'SCRIPT_NAME' => 0, 'SCRIPT_FILENAME' => 0,
+        'PATH_TRANSLATED' => 0, 'DOCUMENT_ROOT' => 0, 'REQUEST_TIME' => 0, 'REQUEST_TIME_FLOAT' => 0,
+    ];
 
     /**
      * The log of this process: swerve's own PSR-3 logger, in its format (the time, this worker's slot).
@@ -412,6 +448,266 @@ final class Swerve
         foreach (self::$workerStart as $callback) {
             $callback();
         }
+    }
+
+    /**
+     * @internal the HTTP limits and the access log, set once by `inc/lifecycle.php` from the
+     *           command line, before the application runs
+     */
+    public static function configureHttp(int $maxBody, ?TrustedProxies $proxies, LoggerInterface $logger): void
+    {
+        self::$maxBody        = $maxBody;
+        self::$trustedProxies = $proxies;
+        self::$accessLog      = $logger instanceof Logger && $logger->access ? $logger : null;
+    }
+
+    /**
+     * The next HTTP request this worker should serve: a connection `phasync\ext\worker_next()`
+     * (or, without the extension, phasync/hooked's replacement) hands this lifecycle, parsed,
+     * with its handler already running as a fiber inside `sapi()`. Call it in a loop; it never
+     * returns null for an HTTP worker, only throws.
+     *
+     * `$handler` is one of three forms: a script's path (`require`d per request, reading
+     * `php://input` and the superglobals, as PHP-FPM would); a closure with no required
+     * parameters (the same, inline); or `function (ServerRequestInterface $request):
+     * ResponseInterface` (PSR-7). `$_SERVER` for the request starts from what the application
+     * left there while booting (its `.env` values, a framework's flags; never the command
+     * line's own entries), plus this request's own (`REQUEST_METHOD`, `HTTP_*`, ...); it throws
+     * once, the first time, if that boot `$_SERVER` holds an object (sharing it across every
+     * request would be a bug the application should see at once).
+     *
+     * A static file under `$webRoot`, or a redirect to add a directory's trailing slash, never
+     * reaches `$handler`: see {@see Router}. `$webRoot` null serves no static files; everything
+     * goes to `$handler`.
+     *
+     * A kept-alive connection either stays here directly for its next request (when this
+     * worker has nothing better to do: another call to accept() is already waiting) or is
+     * handed back to the lot (`WorkerDuplex::park()`) for whichever worker is idle when its
+     * next request arrives; an app-set `Connection: close` always ends it. A connection with
+     * bytes already read but not yet parsed (pipelined requests) is never parked: it keeps
+     * being read here until its buffer is empty.
+     *
+     * @param string|\Closure(ServerRequestInterface): \Psr\Http\Message\ResponseInterface $handler
+     *
+     * @throws \LogicException called from inside the request it is already serving (it is the
+     *                          worker script's own loop, not something a request's handler calls),
+     *                          or with `--no-http` (no listener to ask for a connection)
+     * @throws \Throwable      whatever the ext (or phasync/hooked without it) throws when this
+     *                         process is not a worker, or already has an outstanding call
+     *
+     * @topic request-handlers
+     */
+    public static function accept(?string $webRoot, string|\Closure $handler): \Fiber
+    {
+        $fiber = \Fiber::getCurrent();
+        if (null !== $fiber && isset((self::$requestFibers ??= new \WeakMap())[$fiber])) {
+            throw new \LogicException('Swerve::accept() cannot be called from inside the request it is serving: call it only from the worker script\'s own loop');
+        }
+        if (self::$queue) {
+            return \array_shift(self::$queue);
+        }
+        if (!self::$readySent) {
+            self::$readySent = true;
+            Worker::current()->ready();
+        }
+        ++self::$idle;
+        try {
+            self::serveConnection(\phasync\ext\worker_next(), $webRoot, $handler);
+            while (!self::$queue) {
+                phasync::awaitFlag(self::$queueFlag ??= new \stdClass());
+            }
+        } finally {
+            --self::$idle;
+        }
+
+        return \array_shift(self::$queue);
+    }
+
+    /**
+     * Wraps a connection worker_next() handed out in an {@see \Swerve\Http\HttpConnection}: every
+     * request it parses becomes a fiber pushed to the queue accept() reads, which this
+     * connection's own coroutine waits for before looking at the next request (keep-alive) or
+     * ending (see onIdle, in accept()'s docblock, for what happens between requests).
+     *
+     * @param resource $conn
+     */
+    private static function serveConnection($conn, ?string $webRoot, string|\Closure $handler): void
+    {
+        $io = new WorkerDuplex($conn);
+        $onIdle = static function (HttpConnection $connection) use ($io): bool {
+            if (self::$idle > 0 || !$connection->bufferEmpty()) {
+                return false; // this worker is idle anyway, or parking would lose buffered bytes
+            }
+            $io->park();
+
+            return true;
+        };
+        $worker     = Worker::current();
+        $dispatch   = static function (ClientRequest $request) use ($webRoot, $handler, $worker): void {
+            [$kind, $resolved] = self::resolveHandler($handler);
+            $requestFiber       = phasync::go(static function () use ($request, $webRoot, $kind, $resolved, $worker): void {
+                self::$requestFibers[\Fiber::getCurrent()] = true;
+                $id = $worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getTarget());
+                try {
+                    self::dispatch($request, $webRoot, $kind, $resolved);
+                } finally {
+                    $worker->requestDone($id);
+                }
+            });
+            self::$queue[] = $requestFiber;
+            phasync::raiseFlag(self::$queueFlag ??= new \stdClass());
+            phasync::await($requestFiber);
+        };
+        $connection = new HttpConnection($io, $dispatch, self::log(), self::$accessLog, self::$maxBody, self::$trustedProxies, $onIdle);
+        phasync::go($connection->serve(...));
+    }
+
+    /** Where the route for $request's target leads: a static file, a redirect, or $kind/$resolved (see accept()). */
+    private static function dispatch(ClientRequest $request, ?string $webRoot, string $kind, string|\Closure $resolved): void
+    {
+        $route = (new Router($webRoot))->route($request->getTarget());
+        switch ($route[0]) {
+            case Router::STATIC:
+                StaticFile::send($request, $route[1]);
+
+                return;
+            case Router::REDIRECT:
+                $request->sendResponseHeaders(301, ['Location' => $route[1], 'Content-Length' => '0']);
+                $request->end();
+
+                return;
+            case Router::BAD:
+                $request->sendResponseHeaders(400, ['Content-Type' => 'text/plain', 'Content-Length' => '12']);
+                $request->write("Bad Request\n");
+                $request->end();
+
+                return;
+            default: // Router::APP
+                self::run($request, $kind, $resolved);
+        }
+    }
+
+    /** Builds the request's $_SERVER (and $_GET, $_COOKIE, ...), then runs $resolved inside sapi(). */
+    private static function run(ClientRequest $request, string $kind, string|\Closure $resolved): void
+    {
+        $target  = $request->getTarget();
+        $q       = \strpos($target, '?');
+        $query   = false === $q ? '' : \substr($target, $q + 1);
+        $headers = $request->getRequestHeaders();
+        $now     = \microtime(true);
+        $server  = self::bootServer();
+        foreach ($headers as $name => $values) {
+            $server['HTTP_' . \strtoupper(\strtr($name, '-', '_'))] = \implode('cookie' === $name ? '; ' : ', ', $values);
+        }
+        if (isset($headers['content-type'])) {
+            $server['CONTENT_TYPE'] = $headers['content-type'][0];
+        }
+        if (isset($headers['content-length'])) {
+            $server['CONTENT_LENGTH'] = $headers['content-length'][0];
+        }
+        [$remoteAddr, $remotePort] = self::address($request->peer());
+        [$localAddr, $localPort]   = self::address($request->local());
+        $server = \array_replace($server, [
+            'SERVER_SOFTWARE'    => 'Swerve',
+            'GATEWAY_INTERFACE'  => 'CGI/1.1',
+            'SERVER_PROTOCOL'    => 'HTTP/' . $request->getProtocolVersion(),
+            'SERVER_NAME'        => \preg_replace('/:\d+$/', '', $headers['host'][0] ?? $localAddr),
+            'SERVER_ADDR'        => $localAddr,
+            'SERVER_PORT'        => $localPort,
+            'REMOTE_ADDR'        => $remoteAddr,
+            'REMOTE_PORT'        => $remotePort,
+            'REQUEST_SCHEME'     => $request->getScheme(),
+            'REQUEST_METHOD'     => $request->getMethod(),
+            'REQUEST_URI'        => $target,
+            'DOCUMENT_URI'       => false === $q ? $target : \substr($target, 0, $q),
+            'QUERY_STRING'       => $query,
+            'REQUEST_TIME_FLOAT' => $now,
+            'REQUEST_TIME'       => (int) $now,
+        ]);
+        if ('https' === $server['REQUEST_SCHEME']) {
+            $server['HTTPS'] = 'on';
+        } else {
+            unset($server['HTTPS']);
+        }
+        $_SERVER  = $server;
+        \parse_str($query, $_GET);
+        $_COOKIE  = isset($headers['cookie']) ? ServerRequest::cookies(\implode('; ', $headers['cookie'])) : [];
+        $_POST    = [];
+        $_FILES   = [];
+        $_REQUEST = $_GET;
+        if ('psr7' === $kind) {
+            (new Sapi($request, false))->run(static fn () => Bridge::serve($request, $resolved));
+
+            return;
+        }
+        $ext = \function_exists('phasync\ext\sapi');
+        (new Sapi($request, true))->run(static function () use ($kind, $resolved, $headers, $ext): void {
+            if (\preg_match('#^(?:application/x-www-form-urlencoded|multipart/form-data)\b#i', $headers['content-type'][0] ?? '')) {
+                [$_POST, $_FILES] = $ext ? \request_parse_body() : \phasync\hooked\request_parse_body();
+                $_REQUEST         = \array_merge($_GET, $_POST);
+            }
+            'path' === $kind ? require $resolved : $resolved();
+        });
+    }
+
+    /** @return array{string, string} an address "host:port" or "[v6]:port" as its host and port */
+    private static function address(string $address): array
+    {
+        return \preg_match('/^\[?(.+?)\]?:(\d+)$/', $address, $m) ? [$m[1], $m[2]] : [$address, ''];
+    }
+
+    /** $_SERVER as the application left it after booting, once: see configureHttp(). */
+    private static function bootServer(): array
+    {
+        if (null === self::$bootServer) {
+            $server = \array_diff_key($_SERVER, self::COMMAND_LINE);
+            foreach ($server as $key => $value) {
+                if (\is_object($value)) {
+                    throw new \LogicException("\$_SERVER['$key'] holds an object; accept() refuses to carry it into every request's \$_SERVER");
+                }
+            }
+            self::$bootServer = $server;
+        }
+
+        return self::$bootServer;
+    }
+
+    /**
+     * `'path'` for a script (its path, $resolved unchanged), `'script'` for a `function (): void`
+     * closure, `'psr7'` for `function (ServerRequestInterface $request): ResponseInterface`.
+     *
+     * @return array{string, string|\Closure}
+     */
+    private static function resolveHandler(string|\Closure $handler): array
+    {
+        if (\is_string($handler)) {
+            return ['path', $handler];
+        }
+        self::$handlerKinds ??= new \WeakMap();
+        if (isset(self::$handlerKinds[$handler])) {
+            return [self::$handlerKinds[$handler], $handler];
+        }
+        $f      = new \ReflectionFunction($handler);
+        $params = $f->getParameters();
+        if (0 === $f->getNumberOfRequiredParameters()) {
+            $kind = 'script';
+        } else {
+            $type = 1 === \count($params) ? $params[0]->getType() : null;
+            if (!$type instanceof \ReflectionNamedType || $type->isBuiltin() || !\is_a($type->getName(), ServerRequestInterface::class, true)) {
+                throw new \LogicException('Swerve::accept() runs a script path, function (): void, or function (ServerRequestInterface $request): ResponseInterface, not ' . self::describeClosure($f));
+            }
+            $kind = 'psr7';
+        }
+        self::$handlerKinds[$handler] = $kind;
+
+        return [$kind, $handler];
+    }
+
+    private static function describeClosure(\ReflectionFunction $f): string
+    {
+        return 'the closure function (' . \implode(', ', \array_map(static fn (\ReflectionParameter $p) => \trim(($p->getType() ?? '') . ' $' . $p->getName()), $f->getParameters())) . ')'
+            . ($f->hasReturnType() ? ': ' . $f->getReturnType() : '')
+            . ' (' . $f->getFileName() . ':' . $f->getStartLine() . ')';
     }
 
     /**

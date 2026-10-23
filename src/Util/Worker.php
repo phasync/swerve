@@ -33,6 +33,9 @@ use Swerve\WorkerStoppingException;
  */
 final class Worker
 {
+    /** This lifecycle's worker, for Swerve::accept(); set once, by the constructor. */
+    private static self $current;
+
     /**
      * How soon the master's death is acted on, and how often the heartbeat goes out: often
      * enough that a busy worker is never late by a whole watchdog timeout.
@@ -168,6 +171,13 @@ final class Worker
         \stream_set_blocking($master, false);
         Topics::$toMaster = fn (string $topic, string $message, bool $json = false) => $this->send(Topics::frame($topic, $message, $json));
         Topics::connect($inboxId, $peers, $logger);
+        self::$current = $this;
+    }
+
+    /** This lifecycle's worker, for Swerve::accept(). */
+    public static function current(): self
+    {
+        return self::$current;
     }
 
     /**
