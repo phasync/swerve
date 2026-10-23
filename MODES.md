@@ -233,20 +233,41 @@ zone and locale. Without the extension, application code is loaded through the p
 inferior (database drivers in C stay blocking; preemption needs the extension).
 
 Swerve's services (`Swerve::cache()`, `publish()`, `subscribe()`, `publishRaw()`,
-`subscribeRaw()`, `claim()`) are available in all three modes. In Classic they travel as frames
-on the request server connection, executed by the forwarding worker; `subscribe()` there holds its
-process for as long as it waits. A Classic application doesn't load Swerve's Composer autoloader,
-so the request server makes Swerve's client classes available itself.
+`subscribeRaw()`) are available in all three modes. `Swerve::claim()` is gone in 0.2: `flock()` does
+the same, better (the kernel releases a lock when its process dies, wakes the next waiter at once, and
+works in every mode, cooperatively with the extension or the plug); each holder opens its own handle,
+as locks belong to an open file.
+
+### Services from Classic
+
+- **One service socket per Swerve worker**, private: a Unix socket in the master's private directory
+  (0700); on Windows, where PHP has no Unix sockets, TCP on 127.0.0.1 with a random token per worker.
+  Cache and pub/sub are cluster-wide, so whichever worker answers is the same.
+- **Every forwarded request names the service address** (and the token) of the worker that forwarded
+  it: a HEAD field for the request server, a private header for `php -S` (as the client's identity
+  travels today). The process connects on its first call and keeps the connection for its life.
+- **The protocol** is the frame format of the request server (`[type][length][payload]`), with
+  serialize()d calls and answers; the same client serves both runners, with no service code in C.
+- **The client classes**: Swerve prepends a small client file (`auto_prepend_file`, both runners'
+  ini are Swerve's) that defines `Swerve\Swerve` as a client of the service socket, then includes the
+  application's own `auto_prepend_file`. The real class can't run in a Classic process (it has no
+  channel to the master), so the client takes the name, also when the application installs
+  phasync/swerve with Composer.
+- `subscribe()` in a Classic script holds its process while it waits, as blocking does there.
+- On `php -S` (development, Windows) the services may be slow: correctness, not speed.
 
 ## WebSockets and server-sent events per mode
 
 - **Classic**: `WebSocket::setup(static function (WebSocket $ws) use (...) { ... })` (and
   `EventStream::setup()` for SSE). The function must be static (no `$this`); it is serialized with
   Serializor and runs in a Swerve worker, which keeps the connection; only its `use` values travel,
-  as copies, and values that can't travel (PDO, resources) throw at `setup()`. Afterwards the
-  request behaves as if the client had disconnected: `connection_aborted()` is true, output is
-  discarded, PHP's own abort rules apply (including `ignore_user_abort()`). `setup()` must come
-  before any output.
+  as copies, and values that can't travel (PDO, resources) throw at `setup()`. The closure goes to the
+  service socket under a one-time id, and the script answers with a private response header naming
+  it; the forwarding worker sees the header in the response head, completes the handshake and runs
+  the closure as a coroutine. Afterwards the request behaves as if the client had disconnected:
+  the worker discards its output and tells it so (the request server's ABORT frame; for `php -S`, its
+  connection closes), so `connection_aborted()` is true and PHP's own abort rules apply (including
+  `ignore_user_abort()`). `setup()` must come before any output.
 - **Persistent and Async**: return `new WebSocketResponse(function (WebSocket $ws) { ... })`
   (and the SSE equivalent). The function runs as a coroutine in the same process and outlives the
   request. In Persistent mode it keeps running while the worker takes the next requests (after the
@@ -255,9 +276,6 @@ so the request server makes Swerve's client classes available itself.
 
 ## Not decided yet
 
-- Swerve's services from Classic on the `php -S` pool: it has no channel back to Swerve (a
-  loopback connection, or a documented limitation without the extension).
 - Hibernating Classic requests (an idea only: a parked request would free its process).
-- How the services' frames are numbered in the protocol (after the first Classic release).
 - Retiring a worker on request (`Swerve::retire()`): not now.
 - Windows/macOS for the request server (Linux first).
