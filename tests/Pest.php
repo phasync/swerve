@@ -58,10 +58,19 @@ function http_get(string $addr, string $path): ?string
 
 /*
  * Every swerve started by a test runs in its own process group (setsid), which is SIGKILLed
- * after the test: that reaches replacement workers and orphans too, and can't hang.
+ * after the test: that reaches replacement workers and orphans too, and can't hang. A test that
+ * never reached its own native_stop() (an assertion, or the "did not start serving" timeout,
+ * threw first) still leaks the worker-parent otherwise: see native_stop()'s own comment.
  */
 uses()->afterEach(function () {
     foreach ($GLOBALS['swerve_groups'] ?? [] as $pgid) {
+        $childPath = "/proc/$pgid/task/$pgid/children";
+        // Already gone (native_stop reached it first, normally) is the same as "no children"
+        // -- not read at all, not an @-suppressed warning PHPUnit would still flag as risky.
+        $children = \is_readable($childPath) ? preg_split('/\s+/', trim((string) @file_get_contents($childPath)), -1, PREG_SPLIT_NO_EMPTY) : [];
+        foreach ($children as $child) {
+            @posix_kill(-(int) $child, SIGKILL);
+        }
         @posix_kill(-$pgid, SIGKILL);
     }
     foreach ($GLOBALS['swerve_temp'] ?? [] as $path) {
@@ -179,11 +188,23 @@ function native_start(string $fixture = 'app.php', array $args = [], int $worker
 /**
  * Stop swerve with SIGINT, as Ctrl+C does, and wait for it; past the timeout, kill its whole
  * process group. Returns the seconds it took.
+ *
+ * The worker-parent (Cluster.php's proc_open, the ext's `phasync.workers`) is the master's own
+ * child, setsid'd into a process group of its own precisely so the master can signal it without
+ * signalling itself -- which also means the master's own process group (above) never reaches
+ * it. A graceful stop is meant to take it down too, but a master that dies before that (its own
+ * bug, or this test killing it by the timeout below) leaves it and every lifecycle it forked
+ * running: snapshot its children before stopping, and sweep them after, belt and suspenders.
  */
 function native_stop($process, float $timeout = 10): float
 {
-    $start = microtime(true);
-    $pid   = proc_get_status($process)['pid'];
+    $start    = microtime(true);
+    $pid      = proc_get_status($process)['pid'];
+    $childPath = "/proc/$pid/task/$pid/children";
+    // A process this short-lived can already be gone (PHPUnit turns even an @-suppressed
+    // warning from a vanished /proc entry into a risky-test warning, so check first, not just
+    // suppress): no children to sweep is the same as "couldn't read them".
+    $children = \is_readable($childPath) ? preg_split('/\s+/', trim((string) @file_get_contents($childPath)), -1, PREG_SPLIT_NO_EMPTY) : [];
     posix_kill($pid, SIGINT);
     while (proc_get_status($process)['running']) {
         if (microtime(true) - $start > $timeout) {
@@ -193,6 +214,9 @@ function native_stop($process, float $timeout = 10): float
         usleep(20000);
     }
     proc_close($process);
+    foreach ($children as $child) {
+        @posix_kill(-(int) $child, SIGKILL);
+    }
 
     return microtime(true) - $start;
 }
