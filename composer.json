@@ -16,7 +16,7 @@
         "phasync/plug": "@dev",
         "phasync/babel": "@dev",
         "phasync/hooked": "@dev",
-        "frodeborli/serializor": "dev-master as 2.1.99"
+        "phasync/serializor": "dev-master as 2.1.99"
     },
     "bin": [
         "bin/swerve"

@@ -22,7 +22,7 @@ final class ClientPrepend
         }
         \putenv("SWERVE_APP_PREPEND=$prepend");
         // Serializor, for WebSocket::setup(): the client loads it from Swerve's own installation
-        \putenv('SWERVE_SERIALIZOR=' . \realpath(\Composer\InstalledVersions::getInstallPath('frodeborli/serializor')) . '/src');
+        \putenv('SWERVE_SERIALIZOR=' . \realpath(\Composer\InstalledVersions::getInstallPath('phasync/serializor')) . '/src');
 
         return ['-d', 'auto_prepend_file=' . __DIR__ . '/classic-client.php'];
     }
