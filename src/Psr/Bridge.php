@@ -4,6 +4,7 @@ namespace Swerve\Psr;
 
 use phasync\IOException;
 use phasync\Psr\ServerRequest;
+use phasync\Psr\Uri;
 use phasync\ShutdownException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -77,7 +78,7 @@ final class Bridge
         $form    = isset($headers['content-type']) ? FormBody::for($method, $headers['content-type'][0], $body) : null;
         $cookies = isset($headers['cookie']) ? ServerRequest::cookies(\implode('; ', $headers['cookie'])) : [];
 
-        return new ServerRequest(
+        $request = new ServerRequest(
             $method,
             $target,
             $form ? $form->input(...) : $body,
@@ -90,6 +91,19 @@ final class Bridge
             [],
             $client->getProtocolVersion(),
         );
+        // Request::getUri() derives the URI from the request target plus the Host header, which
+        // is wrong for the absolute form (a proxy request, RFC 9112 3.2.2): $target is already
+        // the whole URI there, not a path to append one to. HttpConnection already made the Host
+        // header this request's authority (see its own absolute-form handling); withUri() here
+        // only fixes getUri() to match, not getRequestTarget() (origin-form once a URI is
+        // attached, same as any other withUri() call). The target's own scheme is what the client
+        // asked the origin to be reached by, not what this connection actually is; a plain
+        // connection reports its own scheme regardless, same as any other request's URI.
+        if ('/' !== ($target[0] ?? '') && '*' !== $target) {
+            $request = $request->withUri((new Uri($target))->withScheme($client->getScheme()));
+        }
+
+        return $request;
     }
 
     /**

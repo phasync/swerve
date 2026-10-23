@@ -13,6 +13,7 @@ use phasync\Psr\UnbufferedStream;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\EventStreamResponse;
+use Swerve\Psr\FallibleStream;
 use Swerve\ServerSentEvents;
 use Swerve\StopReason;
 use Swerve\Swerve;
@@ -59,33 +60,38 @@ function fx_json(mixed $value): ResponseInterface
 
 /**
  * A response whose body is written progressively, from a coroutine of its own ($write gets an
- * UnbufferedStream to append() to, then end()): for the routes that used to write straight to
- * the ClientRequest, sleeping between pieces.
+ * UnbufferedStream to append() to): for the routes that used to write straight to the
+ * ClientRequest, sleeping between pieces. A $write that throws fails the stream (see
+ * FallibleStream) instead of ending it successfully, so the exception reaches the reader (and
+ * through it, the same "abort after the head is sent" handling a direct write() throwing would
+ * get) rather than vanishing.
  *
  * @param \Closure(UnbufferedStream): void $write
  */
 function fx_stream(int $status, array $headers, \Closure $write): ResponseInterface
 {
-    $stream = new UnbufferedStream();
+    $stream = new FallibleStream();
     \phasync::go(static function () use ($stream, $write) {
         try {
             $write($stream);
-        } finally {
             $stream->end();
+        } catch (\Throwable $e) {
+            $stream->fail($e);
         }
     });
 
     return new Response($status, $headers, $stream);
 }
 
-/** The request URI: the scheme and Host, and the target's path and query. */
+/**
+ * The request URI, as a string: Uri::getPath() alone collapses a leading "//" to look less like
+ * an authority, which only matters without one; __toString() is the raw, already-normalised URI
+ * (scheme/host lowercased, unsafe characters encoded, at construction), so it keeps a path's
+ * leading "//" intact when there is a host to disambiguate it.
+ */
 function fx_uri(ServerRequestInterface $r): string
 {
-    $uri  = $r->getUri();
-    $path = $uri->getPath() . ('' === $uri->getQuery() ? '' : '?' . $uri->getQuery());
-    $host = $r->getHeaderLine('host');
-
-    return '' === $host ? $path : $uri->getScheme() . '://' . $host . ('' === $path ? '/' : $path);
+    return (string) $r->getUri();
 }
 
 /** A static property, as frameworks keep request state in them: for /swap. */
@@ -342,11 +348,14 @@ return (function () use ($version) {
                         $stream->append(\sprintf("piece %03d\n", $i));
                     }
                 });
-            // Declares ?cl= bytes, and sends ?actual= pieces of 10
+            // Declares ?cl= bytes, and sends ?actual= pieces of 10, one write() each (yielding
+            // between them, so the reader sees each piece on its own: a content-length overflow
+            // rejects the one piece that doesn't fit, not a chunk coalescing several)
             case '/applength':
                 return fx_stream(200, ['Content-Length' => $query['cl']], static function (UnbufferedStream $stream) use ($query) {
                     for ($i = 0; $i < (int) $query['actual']; ++$i) {
                         $stream->append(\sprintf("piece %03d\n", $i));
+                        phasync::sleep();
                     }
                 });
             case '/echo-stream':
