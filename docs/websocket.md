@@ -6,6 +6,12 @@ and `Swerve\ServerSentEvents` writes an event stream on one. Both are in swerve 
 `tests/WebSocketTest.php` and `tests/ServerSentEventsTest.php` pin every line of it, over raw sockets, with and
 without ext-phasync, and nothing differs.
 
+This is the Async-mode entry point, `WebSocket::from()` and `new ServerSentEvents($request)`, on a
+`ClientRequest`. A Classic script reaches the same connection through `WebSocket::setup()` and
+`ServerSentEvents::setup()`, and a Persistent or Async handler that returns a PSR-7 response
+through `WebSocketResponse::from()` and `EventStreamResponse::stream()`: see
+[the modes](modes.md#websockets-and-server-sent-events-per-mode).
+
 ## WebSocket
 
 ```php

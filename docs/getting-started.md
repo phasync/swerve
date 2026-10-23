@@ -84,7 +84,9 @@ start background coroutines and servers of your own, see [swerve.php as bootstra
 In Classic mode it runs only in swerve's workers, for the async routes: the application's scripts
 run in processes of their own.
 
-[Requests and responses](requests-and-responses.md) is the reference for the `ClientRequest`.
+[Swerve's three modes](modes.md) is the reference for `ClassicMode`, `PersistentMode`, `AsyncMode`
+and `withAsync()`; [Requests and responses](requests-and-responses.md) is the reference for the
+`ClientRequest`.
 
 ## During development
 

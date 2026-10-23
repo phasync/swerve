@@ -21,7 +21,7 @@ requests go to different workers. Keep shared state in a database or Redis, and 
 
 **`sendResponseHeaders(101)` throws.** A 101 answers an HTTP/1.1 request with `Connection: upgrade`
 and an `Upgrade` header, whose body you have read to its end. See
-[Raw connections](realtime.md#raw-connections-and-websockets).
+[Raw connections](realtime.md#raw-connections).
 
 **`Swerve\HeadersSentException`.** The final head was committed already: by an earlier
 `sendResponseHeaders()`, or by a `write()`, `flush()`, `end()` or `sendFile()` that sent the implicit

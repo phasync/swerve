@@ -17,9 +17,17 @@ Breaking: `swerve.php` returns a mode instead of a `Swerve\RequestHandler`.
   `Swerve\Handlers::register()`. The PSR bridge, `WebSocketResponse` and `EventStreamResponse` are
   in core.
 - Requests in a worker see `$_SERVER`, `$_GET`, `$_COOKIE` (and, for scripts, `$_POST`, `$_FILES`,
-  `php://input`) as under PHP-FPM, and run inside ext-phasync's `sapi()`.
+  `php://input`) as under PHP-FPM, and run inside `sapi()` (ext-phasync's, or phasync/hooked's
+  through the plug without it, always, not only with the extension): `echo`, `header()` and the
+  session are the request's own in every mode.
 - Without a `swerve.php`, `swerve [dir] [router.php]` and `-t` serve a Classic application, as
-  `php -S`. `--classic-workers` bounds Classic's processes, which run as PHP-FPM's `pm = ondemand`.
+  `php -S`. `--classic-workers` bounds Classic's processes, which run as PHP-FPM's `pm = ondemand`;
+  with the extension, `connection_aborted()` in a Classic script works as under FPM.
+- `Swerve::cache()`, `publish()`, `publishRaw()` and `subscribe()` work in Classic scripts too,
+  through the service socket of the worker that forwarded the request.
+- `WebSocket::setup()` and `ServerSentEvents::setup()` hand a Classic script's client over to a
+  WebSocket or an event stream run by the worker; `WebSocketResponse::from()` and
+  `EventStreamResponse::stream()` do the same for a Persistent or Async handler's PSR-7 response.
 - Removed: `Swerve\RequestHandler`, `Swerve\StaticFiles`, `--public`, `--adapter`, the file
   argument, adapter discovery through Composer's `extra.swerve`, and `Swerve::claim()`; use
   `flock()`.

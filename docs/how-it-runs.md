@@ -22,6 +22,9 @@ worker until it closes.
 | **Persistent** | the application, booted once per worker, runs its handler | kept | one per worker |
 | **Async** | the same, as coroutines that overlap while they wait | kept and shared | many per worker |
 
+[The modes](modes.md) is the full reference: `swerve.php`, `withAsync()`, handlers and adapters,
+Classic's services, and WebSockets and Server-Sent Events per mode.
+
 Every mode routes requests the same way, as nginx's `try_files $uri $uri/ /index.php`: an async
 route first, then a file under the public root (served by the worker itself: Content-Type,
 ETag/Last-Modified, `HEAD`, ranges), then the application. Dotfiles, PHP source and anything
@@ -143,15 +146,20 @@ In every mode a request sees PHP's own request environment: `$_SERVER` as PHP-FP
 it, `$_GET`, `$_COOKIE`, and for a `function (): void` handler also `php://input`, `$_POST` and
 `$_FILES`. In Classic mode the PHP process is the request, so everything is as under PHP-FPM. In a
 worker, every request runs inside `sapi()`, ext-phasync's or, without the extension, phasync/hooked's
-equivalent: `echo`, `header()`, `setcookie()`, `http_response_code()`, output buffering and
-`php://input` and the session are the request's own, and `$_GET`, `$_POST`,
-`$_COOKIE` and `$_FILES`, the default time zone and the locale follow the request's `Scope`.
-`$_SERVER` and `$_REQUEST` are filled at the start of each request but shared by the requests of a
-worker: in Async mode read them before the request first waits. `$_SERVER` starts from what the
-application put there while booting (its `.env` values), with the request's own values over it.
-Without the extension, application code is translated by phasync/babel to call phasync/hooked's
-replacements (the plug): blocking functions wait as coroutines, except database drivers written in C,
-and nothing is preempted.
+equivalent, always: `echo`, `header()`, `setcookie()`, `http_response_code()`, output buffering and
+`php://input` and the session are the request's own, and `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`
+and `$_REQUEST` follow the request's `Scope`, so overlapping requests in Async mode never see each
+other's. `$_SERVER` is different: it is a plain global, filled at the start of each request but
+shared by every request of the worker, so in Async mode read it before the request first waits.
+`$_SERVER` starts from what the application put there while booting (its `.env` values), with the
+request's own values over it. The default time zone and the locale are process state too, not
+`Scope` state: see [per-request process state](../README.md#per-request-process-state-for-framework-authors)
+for keeping them per request. Without the extension, application code is translated by phasync/babel
+to call phasync/hooked's replacements (the plug): blocking functions wait as coroutines, except
+database drivers written in C, and nothing is preempted.
+
+[The modes](modes.md) covers Classic, Persistent and Async in full, including Classic scripts'
+access to `Swerve::cache()` and publish/subscribe, and WebSockets and Server-Sent Events per mode.
 
 What still differs from PHP-FPM in Persistent and Async mode:
 

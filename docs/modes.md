@@ -1,4 +1,4 @@
-# Swerve's three modes (design, Swerve 0.2)
+# Swerve's three modes
 
 Every application Swerve serves runs in exactly one mode. The mode is stated in `swerve.php`
 (or implied by the command line, for Classic without a `swerve.php`), named in the startup log,
@@ -144,7 +144,7 @@ Core ships four adapters:
 | `function (ClientRequest $request): void` | Swerve's native handler: reads the body and writes the response on the request |
 | `function (ServerRequestInterface $request): ResponseInterface` | PSR-7; also `$psr15->handle(...)` |
 | a PSR-15 `RequestHandlerInterface` | PSR-15 |
-| `function (): void` | a classic script: superglobals, `php://input`, `echo`, `header()`; the output and headers become the response |
+| `function (): void` | a classic script: superglobals, `php://input`, `echo`, `header()`; the output and headers become the response (PHP 8.4+ with the extension, any supported version without it) |
 
 Swerve supports two interfaces and favours no framework: PHP's own SAPI interface, on which every
 framework already runs under PHP-FPM (a Symfony handler can be
@@ -167,8 +167,7 @@ other request to a **request runner**:
    worker and no child is tied to a worker. The children are forked from a master that never runs a
    request, so they share its opcache.
 2. **A pool of `php -S` processes** when the extension isn't available: per worker (each its share
-   of `--classic-workers`), HTTP on loopback, about 15% more CPU per request than PHP-FPM on
-   WordPress.
+   of `--classic-workers`), HTTP on loopback.
 
 ### Who starts what
 
@@ -185,97 +184,92 @@ other request to a **request runner**:
   the child serves on) is reaped by the first process, nothing more: its connection is gone with
   it. The Swerve worker sees the connection close: 502 if no response had started, otherwise the
   client connection closes. The next request is taken by another child, forked if none is free.
-- **One queue for all workers:** an earlier design gave each worker a fixed share of persistent
-  connections (the cap divided by the workers); measured on WordPress it queued requests in a busy
-  worker while another's processes idled (p50 352 ms against 260 with one worker). Connections per
-  request through one accept queue have no such split.
+- **One queue for all workers:** every worker forwards to the same request server over the same
+  socket, so requests from a busy worker don't wait behind it while another worker's children sit
+  idle.
 - **The `php -S` fallback is per worker:** each `php -S` has its own opcache anyway, so each worker
   grows its own pool, its share of `--classic-workers`, idle processes stopped after 30 seconds;
   the split between workers remains there.
 
 ### Protocol between Swerve and the request server
 
-Frames: `[type: 1 byte][length: 4 bytes, big-endian][payload]`.
+Internal: frames `[type: 1 byte][length: 4 bytes, big-endian][payload]` over a Unix socket per
+request, one request per connection.
 
 | Type | Direction | Payload |
 |---|---|---|
-| `HEAD` | Swerve → server | `serialize()` of `method`, `target`, `protocol`, `headers` (list of `[name, value]` pairs in order, duplicates kept), `remote` `[addr, port]`, `local` `[addr, port]`, `https`, `server_name`, `body` (bool) |
-| `HEAD` | server → Swerve | `serialize()` of `status` and `headers` (list of `[name, value]`) |
-| `BODY` | both | body bytes; length 0 ends the body. A request with `'body' => false` sends no BODY frames at all |
-| `STOP` | server → Swerve | send no more request body (the script ended without reading it); Swerve sends the end-of-body frame at once, the server discards frames in flight until it |
-| `ABORT` | Swerve → server | the client is gone (later: `connection_aborted()` as under FPM) |
+| `HEAD` | Swerve → server | `serialize()` of the request: method, target, protocol, headers, addresses, `https`, `server_name`, whether it has a body |
+| `HEAD` | server → Swerve | `serialize()` of the response: status and headers |
+| `BODY` | both | body bytes; length 0 ends the body |
+| `STOP` | server → Swerve | the script ended without reading the rest of the request body |
 
-Rules: one request per connection (the server also serves several in a row on one connection);
-the server reads up to the request's end-of-body frame before the next request; a fatal
-error still ends with a response `HEAD` (500 if nothing was sent) and the end frame; the response
-never closes the connection (a `Connection: close` from the script or the client is Swerve's
-business on the client side); response output is batched in 64 KiB frames, sent when full, on
-`flush()` and at the end of the request.
-
-Measured on WordPress (Ryzen 9950X3D, 2 server cores, c=32, JIT 1054 everywhere): the request
-server runs at PHP-FPM's cost with ext-phasync loaded (16.5 ms CPU per request; FPM alone 16.2,
-FPM with the extension 16.5). End to end, Swerve in front of it serves ~118 req/s against nginx +
-FPM's ~123. Known follow-ups: serve mode skips the extension's coroutine hooks (≈1.5%, done, not
-yet re-measured end to end), Swerve's front batches its client writes (≈1.5%).
+A fatal error still ends with a response `HEAD` (500 if nothing was sent) and the end frame; the
+response never closes the connection.
 
 ## The same environment in all three modes
 
-Code sees the same PHP environment whatever mode it runs in: `$_SERVER` with the same keys and
-values (as PHP-FPM behind nginx sets them), `$_GET`/`$_POST`/`$_COOKIE`/`$_FILES`/`$_REQUEST`,
-`php://input`, `header()`/`setcookie()`/`http_response_code()`, output buffering and `ob_*`,
-sessions, the default time zone and locale, per request. Classic gets this from PHP's own request
-lifecycle (the request server and `php -S` are SAPIs), and its whole process is one request, so
-`\Scope` there is that request's root scope. Every request in a worker (Persistent, Async, and the
-async routes of Classic and Persistent applications) runs inside ext-phasync's `sapi()`, always
-(measured: ~1.8 µs per request on PHP 8.5 with the JIT), and `Scope` keeps its superglobals, time
-zone and locale. Without the extension, application code is loaded through the plug
-(phasync-babel translation to phasync-hooked replacements), which provides the same, slightly
-inferior (database drivers in C stay blocking; preemption needs the extension).
+Code sees the same PHP environment whatever mode it runs in: `$_SERVER` (as PHP-FPM behind nginx
+sets it), `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `$_REQUEST`, `php://input`,
+`header()`/`setcookie()`/`http_response_code()`, output buffering and `ob_*`, and sessions, per
+request. Classic gets this from PHP's own request lifecycle (the request server and `php -S` are
+SAPIs), and its whole process is one request, so `\Scope` there is that request's root scope.
+Every request in a worker (Persistent, Async, and the async routes of Classic and Persistent
+applications) runs inside `sapi()` — ext-phasync's, or, without the extension, phasync/hooked's
+through the plug, always — so `echo`, `header()`, `php://input` and the session are the request's
+own there too. `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES` and `$_REQUEST` are kept by the request's
+`Scope`, so overlapping requests in Async mode never see each other's; `$_SERVER` is a plain
+global, filled fresh before the handler runs, so a handler that overlaps with others (Async mode)
+reads it before its first wait. Process-wide state such as `setlocale()` or
+`date_default_timezone_set()` is not swapped automatically: a `phasync::onScopeChange()` hook keeps
+it per request, see [per-request process state](../README.md#per-request-process-state-for-framework-authors).
+Without the extension, application code runs through the plug (phasync/babel translation to
+phasync/hooked's replacements), which provides the same, slightly inferior (database drivers in C
+stay blocking; preemption needs the extension).
 
-Swerve's services (`Swerve::cache()`, `publish()`, `subscribe()`, `publishRaw()`,
-`subscribeRaw()`) are available in all three modes. `Swerve::claim()` is gone in 0.2: `flock()` does
-the same, better (the kernel releases a lock when its process dies, wakes the next waiter at once, and
-works in every mode, cooperatively with the extension or the plug); each holder opens its own handle,
-as locks belong to an open file.
+Swerve's services (`Swerve::cache()`, `publish()`, `subscribe()`, `publishRaw()`) are available in
+all three modes, and in Classic scripts (below). One worker at a time is `flock()`'s job, in every
+mode: the kernel releases a lock when its holder's process dies and wakes the next waiter at once;
+each holder opens its own handle, as a lock belongs to an open file, not a name.
 
 ### Services from Classic
 
-- **One service socket per Swerve worker**, private: a Unix socket in the master's private directory
-  (0700); on Windows, where PHP has no Unix sockets, TCP on 127.0.0.1 with a random token per worker.
-  Cache and pub/sub are cluster-wide, so whichever worker answers is the same.
-- **Every forwarded request names the service address** (and the token) of the worker that forwarded
-  it: a HEAD field for the request server, a private header for `php -S` (as the client's identity
-  travels today). The process connects on its first call and keeps the connection for its life.
-- **The protocol** is the frame format of the request server (`[type][length][payload]`), with
-  serialize()d calls and answers; the same client serves both runners, with no service code in C.
+A Classic script runs in a process of its own, with no channel to the master, so
+`Swerve\Swerve::cache()`, `publish()`, `publishRaw()` and `subscribe()` reach it through the
+worker that forwarded the request:
+
+- **One service socket per Swerve worker**, private: a Unix socket in the master's private
+  directory (0700). Cache and pub/sub are cluster-wide, so whichever worker answers is the same.
+- **Every forwarded request names the service socket** of the worker that forwarded it (a HEAD
+  field for the request server, a private header for `php -S`, hidden from the application). The
+  process connects on its first call and keeps the connection for its life.
 - **The client classes**: Swerve prepends a small client file (`auto_prepend_file`, both runners'
-  ini are Swerve's) that defines `Swerve\Swerve` as a client of the service socket, then includes the
-  application's own `auto_prepend_file`. The real class can't run in a Classic process (it has no
-  channel to the master), so the client takes the name, also when the application installs
-  phasync/swerve with Composer.
-- `subscribe()` in a Classic script holds its process while it waits, as blocking does there.
-- On `php -S` (development, Windows) the services may be slow: correctness, not speed.
+  ini are Swerve's) that defines `Swerve\Swerve` as a client of the service socket, then includes
+  the application's own `auto_prepend_file`. The real class can't run in a Classic process, so the
+  client takes its name, also when the application installs phasync/swerve with Composer. Cache
+  values are serialized by the script, which never loads the application's classes on the worker's
+  side.
+- Calls block, as everything does in a Classic script: `subscribe()` holds the process while it
+  waits.
+- On `php -S` (development) the services may be slow: correctness, not speed.
 
 ## WebSockets and server-sent events per mode
 
-- **Classic**: `WebSocket::setup(static function (WebSocket $ws) use (...) { ... })` (and
-  `EventStream::setup()` for SSE). The function must be static (no `$this`); it is serialized with
-  Serializor and runs in a Swerve worker, which keeps the connection; only its `use` values travel,
-  as copies, and values that can't travel (PDO, resources) throw at `setup()`. The closure goes to the
-  service socket under a one-time id, and the script answers with a private response header naming
-  it; the forwarding worker sees the header in the response head, completes the handshake and runs
-  the closure as a coroutine. Afterwards the request behaves as if the client had disconnected:
-  the worker discards its output and tells it so (the request server's ABORT frame; for `php -S`, its
-  connection closes), so `connection_aborted()` is true and PHP's own abort rules apply (including
-  `ignore_user_abort()`). `setup()` must come before any output.
-- **Persistent and Async**: return `new WebSocketResponse(function (WebSocket $ws) { ... })`
-  (and the SSE equivalent). The function runs as a coroutine in the same process and outlives the
-  request. In Persistent mode it keeps running while the worker takes the next requests (after the
-  framework's cleanup), so it must not touch the framework's global state (facades, the container,
-  the request's database connection): only its captured values and Swerve's and phasync's APIs.
+- **Classic**: `Swerve\WebSocket::setup(static function (WebSocket $ws) use (...) { ... })`, and
+  `Swerve\ServerSentEvents::setup(static function (ServerSentEvents $sse) use (...) { ... })` for
+  SSE. The function must be static (no `$this`); it is serialized with Serializor and runs in the
+  worker that forwarded the request, which keeps the connection; only its `use` values travel, as
+  copies, and values that can't travel (PDO, resources) throw at `setup()`. The closure goes to the
+  service socket under a one-time id, and the script's response head names it; the forwarding
+  worker sees the header, takes the client over and runs the closure as a coroutine. `setup()` must
+  come before any output. Afterwards the script's connection to Swerve ends, so its output goes
+  nowhere; with the extension, that makes `connection_aborted()` true inside the script, as under
+  FPM, so PHP's own abort rules apply (including `ignore_user_abort()`).
+- **Persistent and Async**: return `Swerve\WebSocketResponse::from($request, function (WebSocket $ws) { ... })`,
+  or `Swerve\EventStreamResponse::stream(function (ServerSentEvents $sse) { ... })` for SSE. The
+  function runs as a coroutine in the same process and outlives the request. In Persistent mode it
+  keeps running while the worker takes the next requests (after the framework's cleanup), so it
+  must not touch the framework's global state (facades, the container, the request's database
+  connection): only its captured values and Swerve's and phasync's APIs.
 
-## Not decided yet
-
-- Hibernating Classic requests (an idea only: a parked request would free its process).
-- Retiring a worker on request (`Swerve::retire()`): not now.
-- Windows/macOS for the request server (Linux first).
+See [WebSockets and Server-Sent Events](websocket.md) for the contract of `WebSocket` and
+`ServerSentEvents` themselves.

@@ -2,7 +2,9 @@
 
 Workers share no memory. `Swerve::publish()` and `Swerve::subscribe()` carry messages between
 them: a message published in any worker reaches the subscribers of its topic in every worker,
-the publishing one included.
+the publishing one included. A Classic script calls the same `Swerve\Swerve::publish()` and
+`subscribe()`, through the worker that forwarded its request; see
+[services from Classic](modes.md#services-from-classic).
 
 ```php
 use Swerve\Swerve;

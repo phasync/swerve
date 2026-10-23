@@ -42,6 +42,7 @@ requests, WebSocket connections and long-lived coroutines.
 An application picks one as its base mode in `swerve.php`. In Classic or Persistent mode, path
 patterns can still run in Async mode, as async routes: existing applications get WebSockets,
 Server-Sent Events and other long-lived endpoints without changing their execution model.
+[The modes](docs/modes.md) is the reference.
 
 ```php
 return ClassicMode::serve('public');                                              // public/index.php routes
@@ -56,10 +57,12 @@ static files itself in every mode, as nginx's `try_files $uri $uri/ /index.php`;
 source and anything outside the public root never.
 
 Whatever the mode, code sees PHP's own request environment: `$_SERVER` as PHP-FPM behind nginx
-fills it, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `php://input`, and with ext-phasync `header()`,
-`echo`, output buffering and sessions per request. Swerve's services work in every mode:
-[publish/subscribe](docs/publish-subscribe.md) between workers and a [shared cache](#shared-cache);
-coordination across workers is `flock()` ([one worker at a time](#one-worker-at-a-time)).
+fills it, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `php://input`, and, inside `sapi()`
+(ext-phasync's, or phasync/hooked's through the plug without it), `header()`, `echo`, output
+buffering and sessions per request. Swerve's services work in every mode, including Classic
+scripts: [publish/subscribe](docs/publish-subscribe.md) between workers and a
+[shared cache](#shared-cache); coordination across workers is `flock()`
+([one worker at a time](#one-worker-at-a-time)).
 
 ## Why swerve
 
@@ -168,7 +171,7 @@ runs it. Swerve runs four kinds itself:
 | `function (ClientRequest $request): void` | Swerve's native handler: reads the body and writes the response on the request |
 | `function (ServerRequestInterface $request): ResponseInterface` | PSR-7; also `$psr15->handle(...)` |
 | a PSR-15 `RequestHandlerInterface` | PSR-15 |
-| `function (): void` | a classic script: superglobals, `php://input`, `echo`, `header()`; the output and headers become the response (needs ext-phasync) |
+| `function (): void` | a classic script: superglobals, `php://input`, `echo`, `header()`; the output and headers become the response (PHP 8.4+ with the extension, any supported version without it) |
 
 Framework packages add their own, such as a Symfony kernel:
 [Laravel](https://github.com/phasync/swerve-laravel),
@@ -322,6 +325,9 @@ body (`''` only at its end) and `write()` sends the response body. The module do
   `ulimit -n` says: add workers or install the extension for many of them.
 - **Server-Sent Events and WebSockets** are in core: `Swerve\ServerSentEvents` and `Swerve\WebSocket`,
   specified in [WebSockets and Server-Sent Events](docs/websocket.md); see also [Realtime](docs/realtime.md).
+  A Classic script gets the same through `WebSocket::setup()` and `ServerSentEvents::setup()`, and
+  Persistent and Async through `WebSocketResponse::from()` and `EventStreamResponse::stream()`; see
+  [the modes](docs/modes.md#websockets-and-server-sent-events-per-mode).
 
 ## Publish and subscribe
 
@@ -390,6 +396,8 @@ $cache->set("user.$id", $user, 60);
 - A coroutine that `swerve.php` starts may use it at once: the call waits until the worker serves. Directly in
   `swerve.php` it throws ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
   embedded in your own process), the cache is the process's own.
+- A Classic script shares the same cache, through the worker that forwarded its request; see
+  [services from Classic](docs/modes.md#services-from-classic).
 
 ### One worker at a time
 

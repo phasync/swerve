@@ -80,7 +80,7 @@ directly.
 
 - A `1xx` is an interim response: sent at once, and may be repeated (`103` Early Hints).
 - `101` is sent at once and switches to the raw connection: see
-  [Realtime](realtime.md#raw-connections-and-websockets).
+  [Realtime](realtime.md#raw-connections).
 - Any other status is the final head. It is held until the first `write()`, `end()`, `flush()` or
   `sendFile()`, and goes out with the first body bytes in one packet. A second call throws
   `Swerve\HeadersSentException`.
