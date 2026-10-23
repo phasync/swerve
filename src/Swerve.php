@@ -65,6 +65,8 @@ final class Swerve
     private static ?\stdClass $queueFlag = null;
     /** Calls to accept() currently blocked with nothing to do: a worker with spare capacity, see onIdle(). */
     private static int $idle = 0;
+    /** The background coroutine pulling connections (see accept()) was started once already. */
+    private static bool $acceptorStarted = false;
     /** The fiber running each request's handler, so a nested accept() from inside it can be refused. */
     private static ?\WeakMap $requestFibers = null;
     /** 'R' sent once, at the first accept(). */
@@ -76,6 +78,29 @@ final class Swerve
     private static int $maxBody = HttpConnection::MAX_BODY;
     private static ?TrustedProxies $trustedProxies = null;
     private static ?Logger $accessLog = null;
+
+    /**
+     * Open HTTP connections, oldest first, keyed by spl_object_id(); see connectionLimit()
+     * and reclaim().
+     *
+     * @var array<int, HttpConnection>
+     */
+    private static array $connections = [];
+    /** The most connections this worker serves at once, see connectionLimit(). */
+    private static int $maxConnections = \PHP_INT_MAX;
+    /** What serves more connections, for the log; see connectionLimit() and reclaim(). */
+    private static string $remedy = 'raise the open-file limit (ulimit -n) or add workers';
+    /** When running short of connections was last logged: once a minute at most. */
+    private static float $shortLogged = -\INF;
+    /** Connections closed to make room since the last log of it, see reclaim(). */
+    private static int $reclaimed = 0;
+
+    /**
+     * File descriptors left for the listener, logs and the application's own files and
+     * connections, below the connection limit. (Without ext-phasync the limit is half of
+     * FD_SETSIZE, which leaves far more.)
+     */
+    private const RESERVED_FDS = 64;
 
     /** $_SERVER entries of the worker's command line, which no request has. */
     private const COMMAND_LINE = [
@@ -459,6 +484,83 @@ final class Swerve
         self::$maxBody        = $maxBody;
         self::$trustedProxies = $proxies;
         self::$accessLog      = $logger instanceof Logger && $logger->access ? $logger : null;
+        self::$maxConnections = self::connectionLimit();
+    }
+
+    /**
+     * A worker serves at most so many connections at once that its file descriptors stay below
+     * the open-file limit; more wait, see reclaim(). Also lowers the limit to FD_SETSIZE
+     * without the extension (see below), and arms $exiting for a clean shutdown.
+     *
+     * Without the phasync extension, the native stream_select() fails for every stream of the
+     * worker at once when one of them has a descriptor number of FD_SETSIZE or more, which
+     * would end the accept loop and every connection. Capping the connections can't prevent
+     * that, since the application's own descriptors (a file being sent, a database connection)
+     * take numbers too. So the worker's open-file limit is lowered to FD_SETSIZE: no descriptor
+     * ever gets such a number, and running out fails only the one accept (retried when
+     * descriptors are free again) or the one application call that opens something.
+     *
+     * The application opens descriptors of its own while serving, about one per client on
+     * average, so without the extension a worker serves at most half of FD_SETSIZE connections,
+     * leaving the other half for those and for the listener, logs and pipes. With the extension
+     * the limit is the open-file limit less RESERVED_FDS.
+     */
+    private static function connectionLimit(): int
+    {
+        \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
+        $rlimit = \posix_getrlimit();
+        $limit  = (int) $rlimit['soft openfiles'];
+        if (!\extension_loaded('phasync') && $limit > \PHP_FD_SETSIZE) {
+            $hard = 'unlimited' === $rlimit['hard openfiles'] ? \POSIX_RLIM_INFINITY : (int) $rlimit['hard openfiles'];
+            if (!\posix_setrlimit(\POSIX_RLIMIT_NOFILE, \PHP_FD_SETSIZE, $hard)) {
+                throw new \RuntimeException('Could not lower the open-file limit to ' . \PHP_FD_SETSIZE);
+            }
+            $limit        = \PHP_FD_SETSIZE;
+            self::$remedy = 'add workers, or install the phasync extension: without it a worker serves no more, whatever the open-file limit';
+        }
+        $max = $limit - self::RESERVED_FDS;
+        if (!\extension_loaded('phasync')) {
+            $max = \min($max, \intdiv(\PHP_FD_SETSIZE, 2));
+        }
+        self::log()->info('A worker serves at most {max} connections at once', ['max' => $max]);
+
+        return $max;
+    }
+
+    /**
+     * Close a connection that waits on its client, as nginx reuses its idle keep-alive
+     * connections when it runs short. Else a client holding the worker's connections, which
+     * costs it almost nothing, would lock everyone else out. The oldest first of: those already
+     * answered (lingering before the close, or skipping an unread body), then those that never
+     * completed a request (a new connection that sent nothing yet, a slow head), then the
+     * kept-alive ones, and last those waiting for more of a request body. A connection running
+     * its handler, or upgraded (101), is never closed to make room: see HttpConnection::$reclaimable.
+     */
+    private static function reclaim(): bool
+    {
+        foreach ([HttpConnection::ANSWERED, HttpConnection::NEW, HttpConnection::KEPT_ALIVE, HttpConnection::BODY] as $state) {
+            foreach (self::$connections as $connection) {
+                if ($connection->reclaim($state)) {
+                    ++self::$reclaimed;
+                    self::logShort();
+
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** A warning that the worker runs short, at most once a minute: under a flood, every accept would log one. */
+    private static function logShort(): void
+    {
+        $now = \microtime(true);
+        if ($now - self::$shortLogged >= 60) {
+            self::$shortLogged = $now;
+            self::log()->warning('At the limit of {max} connections; {n} waiting on their clients closed to make room since the last warning; {remedy}', ['max' => self::$maxConnections, 'n' => self::$reclaimed, 'remedy' => self::$remedy]);
+            self::$reclaimed = 0;
+        }
     }
 
     /**
@@ -487,6 +589,11 @@ final class Swerve
      * bytes already read but not yet parsed (pipelined requests) is never parked: it keeps
      * being read here until its buffer is empty.
      *
+     * The first call starts a background coroutine that keeps pulling connections with
+     * `worker_next()`, independently of any one accept() call: a request from any connection
+     * this worker holds may be the one a given accept() call returns, not necessarily from the
+     * connection it would have pulled itself.
+     *
      * @param string|\Closure(ServerRequestInterface): \Psr\Http\Message\ResponseInterface $handler
      *
      * @throws \LogicException called from inside the request it is already serving (it is the
@@ -510,9 +617,23 @@ final class Swerve
             self::$readySent = true;
             Worker::current()->ready();
         }
+        if (!self::$acceptorStarted) {
+            self::$acceptorStarted = true;
+            // The first worker_next() runs here, in the caller's own fiber, so --no-http (and
+            // anything else the ext throws for a process that cannot accept) reaches it
+            // directly, as documented; every one after is this background coroutine's own,
+            // decoupled from any one accept() call: a connection that fails before its first
+            // request parses (a malformed start, an idle one that times out) never pushes a
+            // fiber, and must not be what an accept() call is left waiting on.
+            self::serveConnection(\phasync\ext\worker_next(), $webRoot, $handler);
+            phasync::go(static function () use ($webRoot, $handler): void {
+                while (true) {
+                    self::serveConnection(\phasync\ext\worker_next(), $webRoot, $handler);
+                }
+            });
+        }
         ++self::$idle;
         try {
-            self::serveConnection(\phasync\ext\worker_next(), $webRoot, $handler);
             while (!self::$queue) {
                 phasync::awaitFlag(self::$queueFlag ??= new \stdClass());
             }
@@ -559,7 +680,22 @@ final class Swerve
             phasync::await($requestFiber);
         };
         $connection = new HttpConnection($io, $dispatch, self::log(), self::$accessLog, self::$maxBody, self::$trustedProxies, $onIdle);
-        phasync::go($connection->serve(...));
+        $id         = \spl_object_id($connection);
+        self::$connections[$id] = $connection;
+        phasync::go(static function () use ($connection, $id): void {
+            try {
+                $connection->serve();
+            } finally {
+                unset(self::$connections[$id]);
+            }
+        });
+        // At the limit, nothing may be reclaimable yet (a connection just accepted, including
+        // this one, has not had a chance to reach a waiting state): yielding, instead of moving
+        // on to accept more, is what lets them get there (this one's own coroutine, started
+        // above, included).
+        while (\count(self::$connections) > self::$maxConnections && !self::reclaim()) {
+            phasync::sleep();
+        }
     }
 
     /** Where the route for $request's target leads: a static file, a redirect, or $kind/$resolved (see accept()). */

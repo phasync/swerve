@@ -304,7 +304,11 @@ foreach ([\STDOUT, \STDERR] as $out) {
             }
             continue;
         }
-        $listener = @\stream_socket_server("tcp://$address", $errno, $errstr, \STREAM_SERVER_BIND | \STREAM_SERVER_LISTEN);
+        // A large backlog, matching System::listen()'s unix socket: the default (SOMAXCONN via
+        // PHP's own fallback, effectively 128) lets a connection flood outrun it, leaving new
+        // connections to wait out a TCP retransmit instead of sitting in the accept queue.
+        $context  = \stream_context_create(['socket' => ['backlog' => 65535]]);
+        $listener = @\stream_socket_server("tcp://$address", $errno, $errstr, \STREAM_SERVER_BIND | \STREAM_SERVER_LISTEN, $context);
         if (false === $listener) {
             $logger->critical('The server failed to start: {address} is already in use ({error})', ['address' => $address, 'error' => $errstr]);
             exit(1);
