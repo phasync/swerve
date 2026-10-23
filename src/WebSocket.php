@@ -14,18 +14,18 @@ use phasync\Util\Event;
  * A WebSocket connection (RFC 6455), server side, on a {@see ClientRequest} or any {@see Duplex}.
  *
  * ```php
- * return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
- *     Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
- *         $ws->onMessage->listen(function (string $data) {      // inbound: events
- *             Swerve::publish('chat', $data);
- *         });
- *         foreach (Swerve::subscribe('chat') as $out) {         // outbound: plain sequential code
- *             if ('end' === $out) {
- *                 return;                                       // returning closes the socket (1000)
- *             }
- *             $ws->send($out);
- *         }
+ * // A PSR-7 handler given to Swerve::accept() returns Swerve\WebSocketResponse::from($request,
+ * // ...) instead, which runs the same callback on the same WebSocket.
+ * Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
+ *     $ws->onMessage->listen(function (string $data) {      // inbound: events
+ *         Swerve::publish('chat', $data);
  *     });
+ *     foreach (Swerve::subscribe('chat') as $out) {         // outbound: plain sequential code
+ *         if ('end' === $out) {
+ *             return;                                       // returning closes the socket (1000)
+ *         }
+ *         $ws->send($out);
+ *     }
  * });
  * ```
  *

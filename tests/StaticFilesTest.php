@@ -1,8 +1,8 @@
 <?php
 
-use Swerve\AsyncMode;
 use Swerve\ClientRequest;
-use Swerve\Util\Dispatcher;
+use Swerve\Util\Router;
+use Swerve\Util\StaticFile;
 
 /**
  * A public directory: index.html, app.js, a 1000-byte data.bin, a sub directory with and
@@ -29,39 +29,57 @@ function static_dir(): string
 }
 
 /**
- * A `swerve.php` beside `$publicDir` (which must be named `public`), serving it with
- * `AsyncMode::serve()`; the application answers 404 "app", changing the working directory both
- * while swerve.php loads and inside every request, to check that the public root (an absolute
- * path once the mode is made) keeps serving correctly anyway.
+ * A `swerve.php` beside `$publicDir` (which must be named `public`): Swerve::accept('public',
+ * ...), the application answering 404 "app", changing the working directory both while
+ * swerve.php loads and inside every request, to check that the public root (an absolute path
+ * once accept() is called) keeps serving correctly anyway.
  *
  * @return string the swerve.php, to start swerve with as its fixture
  */
 function static_app(string $publicDir): string
 {
     $dir = dirname($publicDir);
-    file_put_contents("$dir/swerve.php", "<?php\nuse Swerve\\AsyncMode;\nuse Swerve\\ClientRequest;\n\$mode = AsyncMode::serve('public', static function (ClientRequest \$r) {\n    chdir('/');\n    \$r->sendResponseHeaders(404, ['Content-Length' => '3']);\n    \$r->write('app');\n});\nchdir('/');\nreturn \$mode;\n");
+    file_put_contents("$dir/swerve.php", "<?php\nuse Psr\\Http\\Message\\ResponseInterface;\nuse Psr\\Http\\Message\\ServerRequestInterface;\nchdir('/');\nwhile (true) {\n    Swerve\\Swerve::accept('public', static function (ServerRequestInterface \$r): ResponseInterface {\n        chdir('/');\n\n        return new phasync\\Psr\\Response(404, ['Content-Length' => '3'], new phasync\\Psr\\StringStream('app'));\n    });\n}\n");
 
     return "$dir/swerve.php";
 }
 
 /**
- * One request through a `Dispatcher` serving `$publicRoot` (the application answering 404
- * "app"), over a connection, driven exactly as swerve would drive it.
+ * One request through {@see Router} + {@see StaticFile} serving `$publicRoot` (the application
+ * answering 404 "app"), over a connection, driven exactly as swerve's accept() would drive it --
+ * without a whole swerve process, the way a unit test needs to be fast.
  *
  * @return array{status: int, headers: array<string, string>, body: string}
  */
 function static_get(string $publicRoot, string $target, array $headers = [], string $method = 'GET'): array
 {
-    $mode = AsyncMode::serve($publicRoot, static function (ClientRequest $r) {
-        $r->sendResponseHeaders(404, ['Content-Length' => '3']);
-        $r->write('app');
-    });
-    $dispatcher          = new Dispatcher($mode, "$publicRoot/swerve.php", null);
+    $handler = static function (ClientRequest $r) use ($publicRoot) {
+        $route = (new Router($publicRoot))->route($r->getTarget());
+        switch ($route[0]) {
+            case Router::STATIC:
+                StaticFile::send($r, $route[1]);
+
+                return;
+            case Router::REDIRECT:
+                $r->sendResponseHeaders(301, ['Location' => $route[1], 'Content-Length' => '0']);
+                $r->end();
+
+                return;
+            case Router::BAD:
+                $r->sendResponseHeaders(400, ['Content-Length' => '0']);
+                $r->end();
+
+                return;
+            default: // Router::APP
+                $r->sendResponseHeaders(404, ['Content-Length' => '3']);
+                $r->write('app');
+        }
+    };
     $request             = "$method $target HTTP/1.1\r\nHost: t\r\nConnection: close\r\n";
     foreach ($headers as $name => $value) {
         $request .= "$name: $value\r\n";
     }
-    $raw           = implode('', native_serve_packets($dispatcher(...), "$request\r\n"));
+    $raw           = implode('', native_serve_packets($handler, "$request\r\n"));
     [$head, $body] = explode("\r\n\r\n", $raw, 2);
     $lines         = explode("\r\n", $head);
     $status        = (int) substr(array_shift($lines), 9, 3);
@@ -140,11 +158,10 @@ test('a byte range is served as 206, past the end as 416; If-Range that does not
 ]);
 
 test("swerve.php's public root serves the files and the application the rest, HEAD included; a range streams from its start", function () {
-    // The application fixture's own handler (app.php, which answers /hello), wrapped with a
-    // public root, as a project's swerve.php would combine the two
-    $dir    = dirname(static_dir());
-    $appPhp = var_export(__DIR__ . '/Fixtures/app.php', true);
-    file_put_contents("$dir/swerve.php", "<?php\nuse Swerve\\AsyncMode;\n\$app = require $appPhp;\nreturn AsyncMode::serve('public', \$app->handler);\n");
+    // A trivial /hello handler, wrapped with a public root, as a project's swerve.php would
+    // combine the two with Swerve::accept($root, $handler)
+    $dir = dirname(static_dir());
+    file_put_contents("$dir/swerve.php", "<?php\nuse Psr\\Http\\Message\\ResponseInterface;\nuse Psr\\Http\\Message\\ServerRequestInterface;\nwhile (true) {\n    Swerve\\Swerve::accept('public', static function (ServerRequestInterface \$r): ResponseInterface {\n        return new phasync\\Psr\\Response(200, [], new phasync\\Psr\\StringStream('Hello'));\n    });\n}\n");
     [$process, $addr] = swerve_start([], 1, fixture: "$dir/swerve.php");
     try {
         expect(probe($addr, '/app.js'))->toBe('console.log(1)');

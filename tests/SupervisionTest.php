@@ -237,15 +237,6 @@ test('a crash loop backs off exponentially and is logged loudly; a stable worker
     native_stop($process);
 });
 
-test('an application that returns no handler stops the master with exit code 2', function () {
-    [$process, , $log, $pid] = swerve_start(fixture: 'bad.php', wait: false);
-    [$code, $seconds]        = swerve_wait($process, 3);
-
-    expect($code)->toBe(2);
-    expect(file_get_contents($log))->toContain('returned')->toContain('failed to start');
-    expect(group_gone($pid))->toBeTrue();
-});
-
 test('a port taken by another program stops the master with an error', function () {
     $taken   = stream_socket_server('tcp://127.0.0.1:0');
     $addr    = stream_socket_get_name($taken, false);
@@ -1464,61 +1455,49 @@ test('--watchdog below a second is refused', function () {
     expect(implode("\n", $out))->toContain('Seconds: 1 or more, or 0 for off');
 });
 
-test('a swerve.php exists: a positional argument or -t is refused, naming where to configure the public root and router instead', function (array $args) {
+test('a swerve.php exists: -S or a positional path is refused, naming where to configure the application instead', function (array $args, string $message) {
     $dir = temp_path(true);
     mkdir("$dir/public");
-    file_put_contents("$dir/swerve.php", "<?php return Swerve\\AsyncMode::serve(null, static fn () => null);\n");
+    file_put_contents("$dir/swerve.php", "<?php while (true) { Swerve\\Swerve::accept(null, static fn () => null); }\n");
     $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
     $cli    = implode(' ', array_map('escapeshellarg', $args));
     exec('cd ' . escapeshellarg($dir) . " && $swerve $cli 2>&1", $out, $code);
     expect($code)->toBe(2);
-    expect(implode("\n", $out))->toContain("$dir/swerve.php exists; configure the public root and the router there");
+    expect(implode("\n", $out))->toContain(\str_replace('{dir}', $dir, $message));
 })->with([
-    'a directory'  => [['public']],
-    'a file'       => [['router.php']],
-    '-t'           => [['-t', 'public']],
+    '-S'                => [['-S', 'public'], '-S and {dir}/swerve.php: configure the application there'],
+    'a positional path' => [['router.php'], '{dir}/swerve.php exists; configure the application there'],
 ]);
 
-test('a positional argument that is neither a directory nor a file that exists exits 2', function () {
+test('a positional argument that is not a file that exists exits 2', function () {
     $dir    = temp_path(true);
     $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
     exec('cd ' . escapeshellarg($dir) . " && $swerve nope.php 2>&1", $out, $code);
     expect($code)->toBe(2);
-    expect(implode("\n", $out))->toContain('swerve: nope.php is not a directory or a file that exists');
+    expect(implode("\n", $out))->toContain('swerve: nope.php is not a file that exists');
 });
 
-test('no swerve.php and no index.php, with none above either, exits 2 without naming one', function () {
+test('no swerve.php and nothing on the command line exits 2', function () {
     $dir    = temp_path(true);
     $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
     exec('cd ' . escapeshellarg($dir) . " && $swerve 2>&1", $out, $code);
     expect($code)->toBe(2);
-    expect(implode("\n", $out))->toContain('index.php not found')->not->toContain('there is one in');
+    expect(implode("\n", $out))->toContain('no swerve.php here, and nothing on the command line');
 });
 
-test('no swerve.php and no index.php, but a parent directory has one, names it', function () {
+test('-S alone serves the current directory with its index.php as the router', function () {
     $dir = temp_path(true);
-    mkdir("$dir/sub");
-    file_put_contents("$dir/swerve.php", "<?php return Swerve\\AsyncMode::serve(null, static fn () => null);\n");
-    $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
-    exec('cd ' . escapeshellarg("$dir/sub") . " && $swerve 2>&1", $out, $code);
-    expect($code)->toBe(2);
-    expect(implode("\n", $out))->toContain("(there is one in $dir)");
-});
-
-test('swerve with only index.php in the current directory serves it as Classic, no swerve.php needed', function () {
-    $dir = temp_path(true);
-    file_put_contents("$dir/index.php", "<?php echo 'Hello from Classic shorthand';\n");
+    file_put_contents("$dir/index.php", "<?php echo 'Hello from -S shorthand';\n");
     $addr     = free_address();
     $log      = temp_path();
-    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '-vv', '--grace=2'], null, cwd: $dir);
+    $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '-vv', '--grace=2', '-S'], null, cwd: $dir);
     $deadline = microtime(true) + 10;
-    while ('Hello from Classic shorthand' !== probe($addr, '/')) {
+    while ('Hello from -S shorthand' !== probe($addr, '/')) {
         if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
             throw new RuntimeException("swerve did not start serving:\n" . file_get_contents($log));
         }
         usleep(20_000);
     }
-    expect(file_get_contents($log))->toContain('Classic (');
     native_stop($process);
 });
 

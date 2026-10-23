@@ -295,14 +295,3 @@ test('the request is described as it was sent', function () {
 
     expect($seen)->toBe(['POST', '/a%20b?x=1', '1.1', 'http', ['host' => ['t'], 'x-multi' => ['1', '2'], 'content-length' => ['0']]]);
 });
-
-test('an application that does not return a Mode, or a Mode whose handler no adapter runs, stops the master with exit code 2', function (string $fixture, string $message) {
-    [$process, , $log] = swerve_start(fixture: $fixture, wait: false);
-    [$code]            = swerve_wait($process, 3);
-
-    expect($code)->toBe(2);
-    expect(file_get_contents($log))->toContain($message);
-})->with([
-    'a bare closure'             => ['bad-closure.php', 'it must return the mode'],
-    'a handler no adapter runs'  => ['bad-callable.php', 'No adapter runs'],
-]);

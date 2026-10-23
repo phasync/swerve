@@ -21,14 +21,14 @@ use phasync\Net\Duplex;
  * is the same as none; any other value throws.
  *
  * ```php
- * return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
- *     $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream']);
- *     foreach ([1, 2, 3] as $n) {
- *         $request->write("data: $n\n\n");
- *         $request->flush();
- *         phasync::sleep(1);
- *     }
- * });
+ * // Swerve::accept()'s own code reads and writes a ClientRequest this way; most applications
+ * // reach one only through a PSR-7 response such as EventStreamResponse or WebSocketResponse.
+ * $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream']);
+ * foreach ([1, 2, 3] as $n) {
+ *     $request->write("data: $n\n\n");
+ *     $request->flush();
+ *     phasync::sleep(1);
+ * }
  * ```
  *
  * A handler that throws before the head is committed makes a 500 (logged); after, the connection

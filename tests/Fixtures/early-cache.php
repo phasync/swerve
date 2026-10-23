@@ -5,8 +5,10 @@
  * coroutines started here that have not waited yet. /report answers what each of them saw.
  */
 
-use Swerve\AsyncMode;
-use Swerve\ClientRequest;
+use phasync\Psr\Response;
+use phasync\Psr\StringStream;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Swerve\OrderedChannel;
 use Swerve\Swerve;
 
@@ -36,13 +38,14 @@ phasync::service(static function () use ($attempt) {
 });
 $attempt('load', static fn () => Swerve::cache()->get('early'));
 
-return AsyncMode::serve(null, static function (ClientRequest $r) use ($report) {
-    for ($waited = 0; \count($report) < 5 && $waited < 200; ++$waited) {
-        phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
-    }
-    $report = $report->getArrayCopy();
-    \ksort($report);
-    $body = \json_encode($report);
-    $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen($body)]);
-    $r->write($body);
-});
+while (true) {
+    Swerve::accept(null, static function (ServerRequestInterface $r) use ($report): ResponseInterface {
+        for ($waited = 0; \count($report) < 5 && $waited < 200; ++$waited) {
+            phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
+        }
+        $copy = $report->getArrayCopy();
+        \ksort($copy);
+
+        return new Response(200, [], new StringStream(\json_encode($copy)));
+    });
+}

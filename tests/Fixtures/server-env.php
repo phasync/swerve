@@ -2,16 +2,25 @@
 
 // $_SERVER as a request sees it: see ServerEnvTest
 
+use phasync\Psr\Response;
+use phasync\Psr\StringStream;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Swerve\Swerve;
+
 $_SERVER['APP_ENV'] = 'prod'; // as a framework's .env loader does while booting
 
-return Swerve\AsyncMode::serve(null, static function (Swerve\ClientRequest $request): void {
-    $body = json_encode([
-        'APP_ENV'        => $_SERVER['APP_ENV'] ?? null,
-        'REQUEST_METHOD' => $_SERVER['REQUEST_METHOD'],
-        'REQUEST_URI'    => $_SERVER['REQUEST_URI'],
-        'argv'           => array_key_exists('argv', $_SERVER),
-        'HTTPS'          => $_SERVER['HTTPS'] ?? null,
-    ]);
-    $request->sendResponseHeaders(200, ['content-type' => 'application/json', 'content-length' => (string) strlen($body)]);
-    $request->write($body);
-});
+while (true) {
+    Swerve::accept(null, static function (ServerRequestInterface $r): ResponseInterface {
+        $server = $r->getServerParams();
+        $body   = \json_encode([
+            'APP_ENV'        => $server['APP_ENV'] ?? null,
+            'REQUEST_METHOD' => $server['REQUEST_METHOD'],
+            'REQUEST_URI'    => $server['REQUEST_URI'],
+            'argv'           => \array_key_exists('argv', $server),
+            'HTTPS'          => $server['HTTPS'] ?? null,
+        ]);
+
+        return new Response(200, ['content-type' => 'application/json'], new StringStream($body));
+    });
+}

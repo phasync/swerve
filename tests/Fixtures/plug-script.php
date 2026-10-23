@@ -2,7 +2,8 @@
 
 // Without ext-phasync: a classic script handler on phasync/hooked's sapi(), see PlugTest
 
-return Swerve\AsyncMode::serve(null, static function (): void {
+while (true) {
+    Swerve\Swerve::accept(null, static function (): void {
     if ('/visits' === $_SERVER['REQUEST_URI']) {
         session_start();
         $_SESSION['n'] = ($_SESSION['n'] ?? 0) + 1;
@@ -30,3 +31,4 @@ return Swerve\AsyncMode::serve(null, static function (): void {
     echo 'post=', json_encode($_POST), ' input=', file_get_contents('php://input');
     ?> inline<?php
 });
+}

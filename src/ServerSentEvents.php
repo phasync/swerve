@@ -13,12 +13,12 @@ use phasync\IOException;
  * written as one chunk. The stream ends when the handler returns.
  *
  * ```php
- * return Swerve\AsyncMode::serve(null, function (Swerve\ClientRequest $request) {
- *     $sse = new Swerve\ServerSentEvents($request);
- *     foreach (Swerve::subscribe('news', $sse->lastEventId()) as $message) {
- *         $sse->send($message);
- *     }
- * });
+ * // A PSR-7 handler given to Swerve::accept() gets one ready-made through
+ * // Swerve\EventStreamResponse::stream(); this is the raw ClientRequest it wraps.
+ * $sse = new Swerve\ServerSentEvents($request);
+ * foreach (Swerve::subscribe('news', $sse->lastEventId()) as $message) {
+ *     $sse->send($message);
+ * }
  * ```
  *
  * A client that leaves makes the next `send()` or `comment()` throw `phasync\IOException`. Let it

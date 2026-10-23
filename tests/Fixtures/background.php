@@ -4,8 +4,9 @@
  * An application that starts a coroutine as it loads, running for the worker's life.
  */
 
-use Swerve\AsyncMode;
-use Swerve\ClientRequest;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Swerve\Swerve;
 
 $ticks = 0;
 phasync::go(static function () use (&$ticks) {
@@ -15,7 +16,8 @@ phasync::go(static function () use (&$ticks) {
     }
 });
 
-return AsyncMode::serve(null, static function (ClientRequest $r) use (&$ticks) {
-    $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen((string) $ticks)]);
-    $r->write((string) $ticks);
-});
+while (true) {
+    Swerve::accept(null, static function (ServerRequestInterface $r) use (&$ticks): ResponseInterface {
+        return new phasync\Psr\Response(200, ['Content-Length' => (string) \strlen((string) $ticks)], new phasync\Psr\StringStream((string) $ticks));
+    });
+}

@@ -5,17 +5,24 @@
  * through a proxy shows them.
  */
 
-use Swerve\AsyncMode;
-use Swerve\ClientRequest;
+use phasync\Psr\Response;
+use phasync\Psr\StringStream;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Swerve\Swerve;
 
-return AsyncMode::serve(null, static function (ClientRequest $r) {
-    $host = $r->getRequestHeaders()['host'][0];
-    $body = \json_encode([
-        'remote' => \trim(\substr($r->peer(), 0, \strrpos($r->peer(), ':')), '[]'),
-        'https'  => 'https' === $r->getScheme() ? 'on' : null,
-        'uri'    => $r->getScheme() . '://' . $host . $r->getTarget(),
-        'host'   => $host,
-    ]);
-    $r->sendResponseHeaders(200, ['Content-Type' => 'application/json', 'Content-Length' => (string) \strlen($body)]);
-    $r->write($body);
-});
+while (true) {
+    Swerve::accept(null, static function (ServerRequestInterface $r): ResponseInterface {
+        $server = $r->getServerParams();
+        $host   = $r->getHeaderLine('host');
+        $remote = (string) ($server['REMOTE_ADDR'] ?? '');
+        $body   = \json_encode([
+            'remote' => $remote,
+            'https'  => 'on' === ($server['HTTPS'] ?? null) ? 'on' : null,
+            'uri'    => $r->getUri()->getScheme() . '://' . $host . $r->getRequestTarget(),
+            'host'   => $host,
+        ]);
+
+        return new Response(200, ['Content-Type' => 'application/json'], new StringStream($body));
+    });
+}
