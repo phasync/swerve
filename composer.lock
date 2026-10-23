@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9cd8576c768d26a46a35de77d4b2ccdd",
+    "content-hash": "bf7cf362a9bc234bffca40ad9592d9f8",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -66,11 +66,17 @@
         },
         {
             "name": "phasync/babel",
-            "version": "dev-main",
-            "dist": {
-                "type": "path",
-                "url": "/home/frode/dev/phasync-babel",
+            "version": "0.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/phasync/babel.git",
                 "reference": "f37dd6ae75785ff3f694afc6f1049603da7caf3c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/phasync/babel/zipball/f37dd6ae75785ff3f694afc6f1049603da7caf3c",
+                "reference": "f37dd6ae75785ff3f694afc6f1049603da7caf3c",
+                "shasum": ""
             },
             "require": {
                 "php": ">=8.1"
@@ -83,14 +89,15 @@
             ],
             "type": "library",
             "autoload": {
-                "psr-4": {
-                    "phasync\\Babel\\": "src/"
-                },
                 "files": [
                     "src/shims.php",
                     "src/shims-strict.php"
-                ]
+                ],
+                "psr-4": {
+                    "phasync\\Babel\\": "src/"
+                }
             },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -108,18 +115,25 @@
                 "token_get_all",
                 "transpiler"
             ],
-            "transport-options": {
-                "symlink": true,
-                "relative": false
-            }
+            "support": {
+                "issues": "https://github.com/phasync/babel/issues",
+                "source": "https://github.com/phasync/babel/tree/0.2.0"
+            },
+            "time": "2026-10-22T11:30:42+00:00"
         },
         {
             "name": "phasync/hooked",
-            "version": "dev-master",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/phasync/hooked.git",
+                "reference": "4eb7fb97de508934aba7fdc04a3d7806508a1d8c"
+            },
             "dist": {
-                "type": "path",
-                "url": "/home/frode/dev/phasync-hooked",
-                "reference": "a5ab101cabd92957a798050786f4b166831f91fe"
+                "type": "zip",
+                "url": "https://api.github.com/repos/phasync/hooked/zipball/4eb7fb97de508934aba7fdc04a3d7806508a1d8c",
+                "reference": "4eb7fb97de508934aba7fdc04a3d7806508a1d8c",
+                "shasum": ""
             },
             "require": {
                 "phasync/phasync": "^2.0.4",
@@ -134,36 +148,33 @@
                     "src/_functions.php"
                 ]
             },
-            "scripts": {
-                "test": [
-                    "pest"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "proprietary"
+                "MIT"
             ],
             "description": "Cooperative blocking PHP function replacements for phasync",
-            "transport-options": {
-                "symlink": true,
-                "relative": false
-            }
+            "support": {
+                "issues": "https://github.com/phasync/hooked/issues",
+                "source": "https://github.com/phasync/hooked/tree/v0.1.0"
+            },
+            "time": "2026-10-23T07:36:11+00:00"
         },
         {
             "name": "phasync/net",
-            "version": "2.0.0",
+            "version": "2.0.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/net.git",
-                "reference": "c54b4afd19c12c9d98e13e0a1f3d0f68fc87bfa0"
+                "reference": "0d3fd56b666c38df1d5c2e0d8aae869590fd969a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/net/zipball/c54b4afd19c12c9d98e13e0a1f3d0f68fc87bfa0",
-                "reference": "c54b4afd19c12c9d98e13e0a1f3d0f68fc87bfa0",
+                "url": "https://api.github.com/repos/phasync/net/zipball/0d3fd56b666c38df1d5c2e0d8aae869590fd969a",
+                "reference": "0d3fd56b666c38df1d5c2e0d8aae869590fd969a",
                 "shasum": ""
             },
             "require": {
-                "phasync/phasync": "^2.0@alpha",
+                "phasync/phasync": "^2.0",
                 "php": "^8.2"
             },
             "require-dev": {
@@ -192,9 +203,9 @@
             "description": "TCP, UDP and Unix socket networking for PHP using phasync coroutines.",
             "support": {
                 "issues": "https://github.com/phasync/net/issues",
-                "source": "https://github.com/phasync/net/tree/2.0.0"
+                "source": "https://github.com/phasync/net/tree/2.0.1"
             },
-            "time": "2026-10-19T16:28:44+00:00"
+            "time": "2026-10-19T18:12:43+00:00"
         },
         {
             "name": "phasync/phasync",
@@ -269,57 +280,61 @@
         },
         {
             "name": "phasync/plug",
-            "version": "dev-master",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/phasync/plug.git",
+                "reference": "cf5ff5ef06a383d9a6072c134e97d28ada7756a8"
+            },
             "dist": {
-                "type": "path",
-                "url": "/home/frode/dev/phasync-plug",
-                "reference": "38a959284ae251e1d212c86d28973c49704580b8"
+                "type": "zip",
+                "url": "https://api.github.com/repos/phasync/plug/zipball/cf5ff5ef06a383d9a6072c134e97d28ada7756a8",
+                "reference": "cf5ff5ef06a383d9a6072c134e97d28ada7756a8",
+                "shasum": ""
             },
             "require": {
-                "phasync/babel": "*",
-                "phasync/hooked": "*",
+                "phasync/babel": "^0.2",
+                "phasync/hooked": "^0.1",
                 "php": ">=8.2"
             },
             "require-dev": {
                 "pestphp/pest": "^3.0",
                 "phasync/phasync": "^2.0.4",
-                "phasync/serializor": "*"
+                "phasync/serializor": "^2.1"
             },
             "type": "library",
             "autoload": {
-                "psr-4": {
-                    "phasync\\plug\\": "src/"
-                },
                 "files": [
                     "src/path.php"
-                ]
-            },
-            "autoload-dev": {
+                ],
                 "psr-4": {
-                    "phasync\\plug\\Tests\\": "tests/"
+                    "phasync\\plug\\": "src/"
                 }
             },
-            "scripts": {
-                "test": [
-                    "pest"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "proprietary"
+                "MIT"
             ],
-            "description": "End-to-end proof: a file:// stream wrapper that runs phasync-babel translated application code against phasync-hooked, so Swerve without ext-phasync still waits cooperatively",
-            "transport-options": {
-                "symlink": true,
-                "relative": false
-            }
+            "description": "Translate whole PHP applications with phasync/babel so their blocking calls go to phasync/hooked's cooperative replacements: what ext-phasync does (sapi(), non-blocking I/O), done in userspace",
+            "support": {
+                "issues": "https://github.com/phasync/plug/issues",
+                "source": "https://github.com/phasync/plug/tree/v0.1.0"
+            },
+            "time": "2026-10-23T07:39:44+00:00"
         },
         {
             "name": "phasync/serializor",
-            "version": "dev-master",
-            "dist": {
-                "type": "path",
-                "url": "/home/frode/dev/serializor",
+            "version": "v2.1.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/phasync/serializor.git",
                 "reference": "9a2a068747af34fe010123387583187953cef204"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/phasync/serializor/zipball/9a2a068747af34fe010123387583187953cef204",
+                "reference": "9a2a068747af34fe010123387583187953cef204",
+                "shasum": ""
             },
             "require": {
                 "php": "^8.1"
@@ -335,18 +350,14 @@
             },
             "type": "library",
             "autoload": {
-                "psr-4": {
-                    "Serializor\\": "src/"
-                },
                 "files": [
                     "Serializor.php"
-                ]
-            },
-            "autoload-dev": {
+                ],
                 "psr-4": {
-                    "Tests\\": "tests/"
+                    "Serializor\\": "src/"
                 }
             },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
@@ -363,10 +374,11 @@
                 "serialization",
                 "serialize"
             ],
-            "transport-options": {
-                "symlink": true,
-                "relative": false
-            }
+            "support": {
+                "issues": "https://github.com/phasync/serializor/issues",
+                "source": "https://github.com/phasync/serializor/tree/v2.1.1"
+            },
+            "time": "2026-10-23T07:24:15+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -870,16 +882,16 @@
         },
         {
             "name": "composer/semver",
-            "version": "3.5.1",
+            "version": "3.5.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/composer/semver.git",
-                "reference": "528948210cc46f967a4b98e83b19e76f2b504993"
+                "reference": "9dfce66f1e97360ea5e6d3e38ab14277e4cc591e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/composer/semver/zipball/528948210cc46f967a4b98e83b19e76f2b504993",
-                "reference": "528948210cc46f967a4b98e83b19e76f2b504993",
+                "url": "https://api.github.com/repos/composer/semver/zipball/9dfce66f1e97360ea5e6d3e38ab14277e4cc591e",
+                "reference": "9dfce66f1e97360ea5e6d3e38ab14277e4cc591e",
                 "shasum": ""
             },
             "require": {
@@ -931,7 +943,7 @@
             "support": {
                 "irc": "ircs://irc.libera.chat:6697/composer",
                 "issues": "https://github.com/composer/semver/issues",
-                "source": "https://github.com/composer/semver/tree/3.5.1"
+                "source": "https://github.com/composer/semver/tree/3.5.2"
             },
             "funding": [
                 {
@@ -943,7 +955,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-05T13:12:12+00:00"
+            "time": "2026-10-22T15:37:26+00:00"
         },
         {
             "name": "composer/xdebug-handler",
@@ -6158,21 +6170,10 @@
             "time": "2026-10-05T23:14:19+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "phasync/serializor",
-            "version": "9999999-dev",
-            "alias": "2.1.99",
-            "alias_normalized": "2.1.99.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "friendsofphp/php-cs-fixer": 20,
-        "phasync/babel": 20,
-        "phasync/hooked": 20,
-        "phasync/plug": 20,
-        "phasync/serializor": 20
+        "friendsofphp/php-cs-fixer": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,

@@ -13,10 +13,10 @@
         "ext-sockets": "*",
         "phasync/net": "^2.0",
         "psr/http-server-handler": "^1.0",
-        "phasync/plug": "@dev",
-        "phasync/babel": "@dev",
-        "phasync/hooked": "@dev",
-        "phasync/serializor": "dev-master as 2.1.99"
+        "phasync/plug": "^0.1",
+        "phasync/babel": "^0.2",
+        "phasync/hooked": "^0.1",
+        "phasync/serializor": "^2.1.1"
     },
     "bin": [
         "bin/swerve"
@@ -46,35 +46,5 @@
         "platform": {
             "php": "8.2.0"
         }
-    },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "/home/frode/dev/phasync-plug",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "/home/frode/dev/phasync-babel",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "/home/frode/dev/phasync-hooked",
-            "options": {
-                "symlink": true
-            }
-        },
-        {
-            "type": "path",
-            "url": "/home/frode/dev/serializor",
-            "options": {
-                "symlink": true
-            }
-        }
-    ]
+    }
 }
