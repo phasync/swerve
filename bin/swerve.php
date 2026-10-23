@@ -183,8 +183,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
 
     /*
      * What every worker runs (see inc/lifecycle.php): ./swerve.php in the current directory;
-     * `swerve some-app.php`, that single file; `-S [root] [router]`, a generated loop around
-     * Swerve::accept($root, $router), as php -S's; bare, with neither, an error.
+     * `swerve some-app.php`, that single file; `-S [root] [router]`, a generated Classic-shaped
+     * script (one Swerve::accept($root, $router), awaited, then the lifecycle ends -- php -S's
+     * own one-request-per-process shape, same as php-fpm); bare, with neither, an error.
      */
     $cwd        = \getcwd();
     $swerveFile = \is_file("$cwd/swerve.php") ? "$cwd/swerve.php" : null;
@@ -213,10 +214,14 @@ foreach ([\STDOUT, \STDERR] as $out) {
             exit(2);
         }
         // Every worker's inc/lifecycle.php requires this once per lifecycle: generated once here,
-        // removed when the master exits (System::tempDirectory()'s cleanup).
+        // removed when the master exits (System::tempDirectory()'s cleanup). One accept(), its
+        // fiber awaited so the request finishes before this script does, same as -S's own
+        // one-request-per-process shape (php-fpm's too): the lifecycle ends right after, and the
+        // ext resets every process-global (functions, classes, constants, statics) before the
+        // next one -- a script that redeclares a function or exit()s is never a problem here.
         $appDir  = System::tempDirectory('swerve-serve');
         $appFile = "$appDir/app.php";
-        \file_put_contents($appFile, '<?php while (true) { \Swerve\Swerve::accept(' . \var_export($root, true) . ', ' . \var_export($router, true) . "); }\n");
+        \file_put_contents($appFile, '<?php \phasync::await(\Swerve\Swerve::accept(' . \var_export($root, true) . ', ' . \var_export($router, true) . "));\n");
     } elseif (null !== $swerveFile) {
         if ('' !== $args->path) {
             \fwrite(\STDERR, "swerve: $swerveFile exists; configure the application there, or remove it to run {$args->path} instead\n");

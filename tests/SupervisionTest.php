@@ -1498,6 +1498,36 @@ test('-S alone serves the current directory with its index.php as the router', f
     native_stop($process);
 });
 
+/*
+ * -S's generated app.php is one Swerve::accept() call, awaited, then the lifecycle ends -- the
+ * Classic shape (one request per lifecycle, php -S/php-fpm semantics): the ext resets every
+ * process-global (functions, classes, constants, statics) before the next one, so a router that
+ * declares a function at its top level, unguarded, answers every request the same way, never
+ * "Cannot redeclare" -- unlike a looped `while (true) { Swerve::accept(...); }` written by hand
+ * (the Persistent shape), where that would be the script's own bug to avoid.
+ */
+test('-S answers many requests in a row, including one whose router redeclares a function', function () {
+    $dir = temp_path(true);
+    file_put_contents("$dir/index.php", "<?php\nfunction shorthand_redeclare_test() { return 'hi'; }\necho shorthand_redeclare_test();\n");
+    $addr    = free_address();
+    $log     = temp_path();
+    $process = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '-vv', '--grace=2', '-S'], null, cwd: $dir);
+    $deadline = microtime(true) + 10;
+    while ('hi' !== probe($addr, '/')) {
+        if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
+            throw new RuntimeException("swerve did not start serving:\n" . file_get_contents($log));
+        }
+        usleep(20_000);
+    }
+    try {
+        for ($i = 0; $i < 5; ++$i) {
+            expect(probe($addr, '/'))->toBe('hi');
+        }
+    } finally {
+        native_stop($process);
+    }
+});
+
 test('--http takes an IPv6 address', function () {
     $probe = stream_socket_server('tcp://[::1]:0');
     $addr  = stream_socket_get_name($probe, false);
