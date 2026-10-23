@@ -63,9 +63,13 @@ and the lifecycles (through their connections), never forks a worker itself.
 
 ## Order of work (tests first in each)
 
-1. ext: `worker_detach()` in the C parent. 
-2. Master + lifecycle over the new layout, ext path; existing supervision tests ported.
-3. PHP parent + PHP lot (no ext), same tests both ways.
-4. accept(), keep-alive parking, --no-http, CLI; fixes swerve#63's path.
-5. Delete Mode classes, Dispatcher modes, Classic runners, services protocol; docs.
-6. FPM comparison (hello world, WordPress) on black.
+No transitional support for the Mode classes (owner 2026-10-23: they are not part of 0.2):
+the test fixtures (17 files, ~41 Mode calls) move to accept() in the same change as the master.
+
+1. ext: `worker_detach()` in the C parent.
+2. Master + lifecycle on the new layout (ext path) together with accept(), keep-alive parking,
+   --no-http and the CLI forms; Mode classes, Dispatcher modes, Classic runners and the services
+   protocol deleted; fixtures converted. Fixes swerve#63's path.
+3. PHP parent + PHP lot (no ext): the same tests pass both ways.
+4. Docs (README, docs/), memory of the contract.
+5. FPM comparison (hello world, WordPress) on black.
