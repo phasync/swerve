@@ -216,10 +216,8 @@ SAPIs), and its whole process is one request, so `\Scope` there is that request'
 Every request in a worker (Persistent, Async, and the async routes of Classic and Persistent
 applications) runs inside `sapi()` — ext-phasync's, or, without the extension, phasync/hooked's
 through the plug, always — so `echo`, `header()`, `php://input` and the session are the request's
-own there too. `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES` and `$_REQUEST` are kept by the request's
-`Scope`, so overlapping requests in Async mode never see each other's; `$_SERVER` is a plain
-global, filled fresh before the handler runs, so a handler that overlaps with others (Async mode)
-reads it before its first wait. Process-wide state such as `setlocale()` or
+own there too. `$_SERVER`, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES` and `$_REQUEST` are kept by the
+request's `Scope`, so overlapping requests in Async mode never see each other's. Process-wide state such as `setlocale()` or
 `date_default_timezone_set()` is not swapped automatically: a `phasync::onScopeChange()` hook keeps
 it per request, see [per-request process state](../README.md#per-request-process-state-for-framework-authors).
 Without the extension, application code runs through the plug (phasync/babel translation to

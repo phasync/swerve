@@ -147,11 +147,9 @@ it, `$_GET`, `$_COOKIE`, and for a `function (): void` handler also `php://input
 `$_FILES`. In Classic mode the PHP process is the request, so everything is as under PHP-FPM. In a
 worker, every request runs inside `sapi()`, ext-phasync's or, without the extension, phasync/hooked's
 equivalent, always: `echo`, `header()`, `setcookie()`, `http_response_code()`, output buffering and
-`php://input` and the session are the request's own, and `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`
-and `$_REQUEST` follow the request's `Scope`, so overlapping requests in Async mode never see each
-other's. `$_SERVER` is different: it is a plain global, filled at the start of each request but
-shared by every request of the worker, so in Async mode read it before the request first waits.
-`$_SERVER` starts from what the application put there while booting (its `.env` values), with the
+`php://input` and the session are the request's own, and `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`,
+`$_REQUEST` and `$_SERVER` follow the request's `Scope`, so overlapping requests in Async mode never
+see each other's. `$_SERVER` starts from what the application put there while booting (its `.env` values), with the
 request's own values over it. The default time zone and the locale are process state too, not
 `Scope` state: see [per-request process state](../README.md#per-request-process-state-for-framework-authors)
 for keeping them per request. Without the extension, application code is translated by phasync/babel
