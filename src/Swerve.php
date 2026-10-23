@@ -719,12 +719,16 @@ final class Swerve
 
                 return;
             default: // Router::APP
-                self::run($request, $kind, $resolved);
+                // $route[1] (an existing PHP file Router matched) is a path to require, same as
+                // $resolved only when $resolved is one too ('path': -S's router, or a bare
+                // `swerve some-app.php`); a 'script'/'psr7' $resolved is the application's own
+                // closure regardless of what file the target happened to match.
+                self::run($request, $kind, 'path' === $kind && isset($route[1]) ? $route[1] : $resolved, $webRoot);
         }
     }
 
     /** Builds the request's $_SERVER (and $_GET, $_COOKIE, ...), then runs $resolved inside sapi(). */
-    private static function run(ClientRequest $request, string $kind, string|\Closure $resolved): void
+    private static function run(ClientRequest $request, string $kind, string|\Closure $resolved, ?string $webRoot = null): void
     {
         $target  = $request->getTarget();
         $q       = \strpos($target, '?');
@@ -764,6 +768,21 @@ final class Swerve
             $server['HTTPS'] = 'on';
         } else {
             unset($server['HTTPS']);
+        }
+        if ('path' === $kind) {
+            // What mod_php/php-fpm give the script that is about to run: the file under the
+            // public root that matched (Router::APP's own file), or the fallback script when
+            // none did -- either way $resolved, by the time dispatch() calls here. No PATH_INFO
+            // (swerve, like -S, routes by file match, not by a prefix of the path).
+            \assert(\is_string($resolved));
+            $scriptName = null !== $webRoot && \str_starts_with($resolved, "$webRoot/")
+                ? \substr($resolved, \strlen($webRoot))
+                : '/' . \basename($resolved);
+            $server['SCRIPT_FILENAME']  = $resolved;
+            $server['SCRIPT_NAME']      = $scriptName;
+            $server['PHP_SELF']         = $scriptName;
+            $server['PATH_TRANSLATED']  = $resolved;
+            $server['DOCUMENT_ROOT']    = $webRoot ?? \dirname($resolved);
         }
         $_SERVER  = $server;
         \parse_str($query, $_GET);

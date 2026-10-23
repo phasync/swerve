@@ -6,9 +6,12 @@ namespace Swerve\Util;
  * Where a request goes, for {@see \Swerve\Swerve::accept()}: nginx's `try_files $uri $uri/`.
  *
  * 1. an existing file under the public root that isn't PHP source: served;
- * 2. a directory with a trailing slash: its `index.html`; without the slash, a 301 to it when
- *    it has one;
- * 3. everything else: the application (accept()'s handler).
+ * 2. a directory with a trailing slash: its `index.html`, or else its `index.php` (the
+ *    application, that file itself, e.g. `wp-admin/`'s own front controller); without the
+ *    slash, a 301 to it when it has either;
+ * 3. an existing PHP source file: the application, that file itself (its own `SCRIPT_NAME`),
+ *    not the fallback script -- same as nginx's `try_files $uri` before `/index.php`;
+ * 4. everything else: the application, the fallback script given to `-S`/`accept()`.
  *
  * The path is decoded and normalised first (dot segments resolved, repeated slashes merged);
  * control characters, invalid UTF-8 or a `..` above the root are a bad request. Never served:
@@ -34,7 +37,7 @@ final class Router
     /**
      * The route for a request target.
      *
-     * [BAD]; [STATIC, the file]; [REDIRECT, the location]; [APP].
+     * [BAD]; [STATIC, the file]; [REDIRECT, the location]; [APP]; [APP, the PHP file itself].
      *
      * @return array{0: int, 1?: string}
      */
@@ -59,8 +62,11 @@ final class Router
 
         $file = $this->root . $path;
         if (\is_file($file)) {
-            if (!$this->inside($file) || \preg_match(self::SOURCE, $path)) {
+            if (!$this->inside($file)) {
                 return [self::APP];
+            }
+            if (\preg_match(self::SOURCE, $path)) {
+                return [self::APP, \realpath($file)]; // this file itself, not the fallback script
             }
 
             return [self::STATIC, \realpath($file)];
@@ -69,15 +75,18 @@ final class Router
             if (!$this->inside($file)) {
                 return [self::APP];
             }
-            $dir = \rtrim($file, '/');
-            if (!\is_file("$dir/index.html")) {
+            $dir   = \rtrim($file, '/');
+            $index = \is_file("$dir/index.html") ? "$dir/index.html" : (\is_file("$dir/index.php") ? "$dir/index.php" : null);
+            if (null === $index) {
                 return [self::APP];
             }
             if (!\str_ends_with($path, '/')) {
                 return [self::REDIRECT, \implode('/', \array_map(\rawurlencode(...), \explode('/', $path))) . '/' . (false === $q ? '' : \substr($target, $q))];
             }
 
-            return [self::STATIC, \realpath("$dir/index.html")];
+            // index.html is served as a static file; index.php is the application, itself (a
+            // directory's own front controller, e.g. wp-admin/), not the fallback script.
+            return \str_ends_with($index, '.html') ? [self::STATIC, \realpath($index)] : [self::APP, \realpath($index)];
         }
 
         return [self::APP];
