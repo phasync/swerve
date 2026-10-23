@@ -790,6 +790,17 @@ final class Swerve
         $_POST    = [];
         $_FILES   = [];
         $_REQUEST = $_GET;
+        // $_SERVER is a plain global the ext shares across every request (unlike $_GET/$_POST/...,
+        // which are Scope state): on a bailout (a script's wp_redirect()+exit, for one -- any
+        // normal use, not a bug), $_SERVER no longer holds this request's values by the time PHP's
+        // registered shutdown functions run. Registered before the handler gets a chance to
+        // register its own (register_shutdown_function() runs them in registration order), this
+        // restores it first, so whatever a script's own shutdown callback reads (WordPress's
+        // _wp_cron(), hooked to 'shutdown') is still this request's $_SERVER, not whatever it was
+        // reset to.
+        \register_shutdown_function(static function () use ($server): void {
+            $_SERVER = $server;
+        });
         if ('psr7' === $kind) {
             (new Sapi($request, false))->run(static fn () => Bridge::serve($request, $resolved));
 
@@ -801,7 +812,16 @@ final class Swerve
                 [$_POST, $_FILES] = $ext ? \request_parse_body() : \phasync\hooked\request_parse_body();
                 $_REQUEST         = \array_merge($_GET, $_POST);
             }
-            'path' === $kind ? require $resolved : $resolved();
+            if ('path' !== $kind) {
+                $resolved();
+
+                return;
+            }
+            // require would run $resolved as part of *this* closure's own scope: a top-level
+            // variable the script sets becomes local to this call, invisible to a function of its
+            // own that reads it with `global` (WordPress does, repeatedly) -- same as any other
+            // SAPI, the script needs to run as if it were the actual entry point, not an include.
+            $ext ? \phasync\ext\include_global($resolved) : require $resolved;
         });
     }
 
