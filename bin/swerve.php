@@ -20,6 +20,7 @@ use Swerve\Swerve;
 use Swerve\Util\Classic\BuiltinRunner;
 use Swerve\Util\Classic\ServerProcess;
 use Swerve\Util\Classic\ServerRunner;
+use Swerve\Util\Classic\ServiceServer;
 use Swerve\Util\Cluster;
 use Swerve\Util\Dispatcher;
 use Swerve\Util\Logger;
@@ -370,15 +371,19 @@ foreach ([\STDOUT, \STDERR] as $out) {
                 $mode = new ClassicMode($root, $router);
             }
             Cache::$loader = null;
-            $runner = null;
+            $runner   = null;
+            $services = null;
             if ($mode instanceof ClassicMode) {
+                // Swerve's cache and pub/sub for the scripts, which run outside the workers
+                $services = new ServiceServer(\sys_get_temp_dir() . '/swerve-' . \posix_getppid() . '-services-' . \posix_getpid() . '.sock');
+                $services->listen();
                 if (\extension_loaded('phasync')) {
                     (Topics::$toMaster)(ServerProcess::TOPIC, \serialize([$mode->publicRoot, $mode->router]));
-                    $runner = new ServerRunner(ServerProcess::$socket);
+                    $runner = new ServerRunner(ServerProcess::$socket, $services->path);
                     $runner->awaitServer();
                 } else {
                     // php -S: a pool per worker, each its share
-                    $runner = new BuiltinRunner($mode->publicRoot, \max(1, \intdiv($classicWorkers, $workerCount)));
+                    $runner = new BuiltinRunner($mode->publicRoot, \max(1, \intdiv($classicWorkers, $workerCount)), services: $services->path);
                 }
             }
             $dispatcher = new Dispatcher($mode, $swerveFile ?? $mode->router, $runner);
@@ -421,6 +426,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
         }
         foreach ($servers as $server) {
             $worker->serve($server->run(...), $server->drain(...));
+        }
+        if (null !== $services) {
+            $worker->serve($services->run(...), $services->drain(...));
         }
         $worker->ready();
     });

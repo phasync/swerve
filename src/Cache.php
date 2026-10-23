@@ -228,6 +228,47 @@ final class Cache implements CacheInterface
      *
      * @example examples/Cache.delete/1-forget.php Delete one key, or several
      */
+    /**
+     * The entries for $keys as serialize() made them, unserialized by nobody: for a client that
+     * has the classes (a Classic script, through the service socket). null for a missing key.
+     *
+     * @internal
+     *
+     * @param list<string> $keys
+     *
+     * @return array<string, string|null>
+     */
+    public function getSerialized(array $keys): array
+    {
+        $values = [];
+        foreach ($this->fetch(self::keys($keys)) as $key => $entry) {
+            $values[$key] = '' === $entry ? null : \substr($entry, 8);
+        }
+
+        return $values;
+    }
+
+    /**
+     * Store values a client serialized itself, as setMultiple() stores them.
+     *
+     * @internal
+     *
+     * @param array<string, string> $serialized key => serialize()'d value
+     * @param int|null              $ttl        seconds; null: none
+     */
+    public function setSerialized(array $serialized, ?int $ttl): bool
+    {
+        $items = [];
+        foreach ($serialized as $key => $value) {
+            $items[self::keys([(string) $key])[0]] = $value;
+        }
+        if (null !== $ttl && $ttl <= 0) {
+            return $this->deleteMultiple(\array_keys($items));
+        }
+
+        return $this->call(['set', $items, $ttl]);
+    }
+
     public function delete($key): bool
     {
         return $this->deleteMultiple([$key]);

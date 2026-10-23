@@ -144,6 +144,18 @@ final class Topics
     }
 
     /**
+     * Publish a message a client encoded itself, as publish() encodes it (JSON) or as publishRaw()
+     * marks it (a leading "\0"): for a Classic script, through the service socket.
+     *
+     * @internal
+     */
+    public static function publishEncodedBy(string $caller, string $topic, string $message): void
+    {
+        self::checkSizes($topic, "\0" === ($message[0] ?? '') ? \substr($message, 1) : $message);
+        self::publishEncoded($caller, $topic, $message);
+    }
+
+    /**
      * What publish() and publishRaw() both do once $message is encoded: deliver here, or fan it
      * out. Never waits: a topic's bitmap, once known, is used at once; the first publish to a
      * topic (or the first after the master forgets its bitmap, see forget()) queues the message

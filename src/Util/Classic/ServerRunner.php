@@ -22,7 +22,11 @@ final class ServerRunner implements Runner
     /** Seconds a new worker waits for the request server to listen. */
     public const START_TIMEOUT = 10.0;
 
-    public function __construct(private readonly string $socket)
+    /**
+     * @param string      $socket   the request server's
+     * @param string|null $services this worker's service socket, named to every script; null: none
+     */
+    public function __construct(private readonly string $socket, private readonly ?string $services = null)
     {
     }
 
@@ -73,9 +77,15 @@ final class ServerRunner implements Runner
     {
         $headers = [];
         foreach ($request->getRequestHeaders() as $name => $values) {
+            if (ServiceServer::HEADER === $name) {
+                continue; // only Swerve names the service socket
+            }
             foreach ($values as $value) {
                 $headers[] = [$name, $value];
             }
+        }
+        if (null !== $this->services) {
+            $headers[] = [ServiceServer::HEADER, $this->services];
         }
         $hasBody = !$request->eof();
         $head    = [

@@ -83,7 +83,7 @@ final class BuiltinRunner implements Runner
         'connection', 'keep-alive', 'transfer-encoding', 'content-length', 'upgrade',
         'proxy-authenticate', 'proxy-authorization', 'te', 'trailers', 'host',
         'x-swerve-script', 'x-swerve-script-name', 'x-swerve-path-info', 'x-swerve-document-root',
-        'x-swerve-remote-addr', 'x-swerve-https', 'x-swerve-server-port', 'x-swerve-host',
+        'x-swerve-remote-addr', 'x-swerve-https', 'x-swerve-server-port', 'x-swerve-host', ServiceServer::HEADER,
     ];
 
     /** Response headers never relayed as the backend sent them: swerve frames the body itself. */
@@ -112,7 +112,10 @@ final class BuiltinRunner implements Runner
      * @param int   $max         this worker's share of the processes running Classic scripts
      * @param float $idleSeconds seconds a process may sit idle before it is stopped; overridable for tests
      */
-    public function __construct(private readonly string $publicRoot, private readonly int $max, private readonly float $idleSeconds = self::IDLE)
+    /**
+     * @param string|null $services this worker's service socket, named to every script; null: none
+     */
+    public function __construct(private readonly string $publicRoot, private readonly int $max, private readonly float $idleSeconds = self::IDLE, private readonly ?string $services = null)
     {
         $this->frame = \phasync::frame();
         $this->scope = \Scope::getCurrent();
@@ -259,7 +262,7 @@ final class BuiltinRunner implements Runner
     {
         $port    = self::freePort();
         $router  = __DIR__ . '/builtin-router.php';
-        $args    = [...(\extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache']), ...self::INI, '-S', "127.0.0.1:$port", '-t', $this->publicRoot, $router];
+        $args    = [...(\extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache']), ...self::INI, ...ClientPrepend::flags(), '-S', "127.0.0.1:$port", '-t', $this->publicRoot, $router];
         $process = Process::run(\PHP_BINARY, $args, $this->publicRoot);
         $deadline = \microtime(true) + self::START_TIMEOUT;
         while (true) {
@@ -318,6 +321,9 @@ final class BuiltinRunner implements Runner
         }
         $lines[] = "X-Swerve-Server-Port: $port";
         $lines[] = "X-Swerve-Host: $host";
+        if (null !== $this->services) {
+            $lines[] = 'X-Swerve-Services: ' . $this->services;
+        }
         $lines[] = $chunked ? 'Transfer-Encoding: chunked' : ('Content-Length: ' . ($length ?? 0));
         $lines[] = 'Connection: close';
 

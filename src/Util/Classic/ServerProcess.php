@@ -107,7 +107,7 @@ final class ServerProcess
     {
         [$root, $router] = $this->serving;
         @\unlink(self::$socket);
-        $args = [\PHP_BINARY, ...self::inheritedFlags(),
+        $args = [\PHP_BINARY, ...self::inheritedFlags(), ...ClientPrepend::flags(),
             '-d', 'phasync.serve=unix:' . self::$socket,
             '-d', "phasync.serve_root=$root",
             '-d', "phasync.serve_router=$router",
