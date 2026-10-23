@@ -120,7 +120,7 @@ test("a script's own shutdown function still sees this request's \$_SERVER after
  * top-level variable the script sets becomes local to that one call, invisible to a function of
  * its own that reads it with `global` (WordPress does this throughout, e.g. $user_login in
  * wp-login.php). Swerve::run() uses phasync\ext\include_global() instead, which runs the file as
- * the actual entry point, same as require_once'ing the true main script would (swerve#66).
+ * the actual entry point, same as require_once'ing the true main script would.
  */
 test("a script's top-level \$x is visible to a function of its own via global \$x", function () {
     $dir = temp_path(true);
