@@ -59,7 +59,10 @@ and the lifecycles (through their connections), never forks a worker itself.
   PSR-7 closure (first param ServerRequestInterface → ResponseInterface). Request $_SERVER =
   worker $_SERVER at accept() + request vars; throws if it holds an object.
 - `--no-http`: no listener; accept() throws.
-- CLI: `swerve file.php`; `swerve -S root router.php` ≡ accept(root, router); bare `swerve` ≡ `-S ./ index.php`.
+- CLI: bare `swerve` runs ./swerve.php; absent one it fails, suggesting `swerve -S [root] [router.php]`
+  (FPM-style runner; `-S` alone ≡ `-S ./ index.php`) and `swerve some-app.php` (that file in every worker).
+- accept() inside a request (inside sapi()) throws LogicException: it is the worker script's loop.
+- No framework adapters: Laravel (stock Octane), Symfony, PSR-15 get swerve.php recipes in the docs.
 
 ## Order of work (tests first in each)
 
@@ -70,6 +73,7 @@ the test fixtures (17 files, ~41 Mode calls) move to accept() in the same change
 2. Master + lifecycle on the new layout (ext path) together with accept(), keep-alive parking,
    --no-http and the CLI forms; Mode classes, Dispatcher modes, Classic runners and the services
    protocol deleted; fixtures converted. Fixes swerve#63's path.
-3. PHP parent + PHP lot (no ext): the same tests pass both ways.
+3. PHP parent + PHP lot (no ext): deferred (owner 2026-10-23) until the ext path works and the FPM
+   comparison is in; then the same tests pass both ways.
 4. Docs (README, docs/), memory of the contract.
 5. FPM comparison (hello world, WordPress) on black.
