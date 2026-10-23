@@ -54,7 +54,9 @@ $watchdog   = (float) $args->watchdog;
 // master answers with our inbox number and a failed-start backoff delay (see Cluster::readHello()).
 $master = \stream_socket_client('unix://' . \getenv('SWERVE_MASTER'), $errno, $errstr, 10);
 if (false === $master) {
-    \fwrite(\STDERR, "lifecycle: could not connect to the master: $errstr\n");
+    // STDERR isn't necessarily defined yet this early in a fresh lifecycle (the ext resets
+    // userspace between lifecycles, in the same process): never a fatal over a missing constant.
+    \error_log("lifecycle: could not connect to the master: $errstr");
     exit(1);
 }
 \fwrite($master, \pack('NNN', $slot, \getmypid(), $generation));

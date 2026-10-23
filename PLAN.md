@@ -75,5 +75,12 @@ the test fixtures (17 files, ~41 Mode calls) move to accept() in the same change
    protocol deleted; fixtures converted. Fixes swerve#63's path.
 3. PHP parent + PHP lot (no ext): deferred (owner 2026-10-23) until the ext path works and the FPM
    comparison is in; then the same tests pass both ways.
+   - Script handlers keep running inside accept()'s function on both paths. With the ext:
+     include_global(). Without it: phasync/plug (already hooking every include on the no-ext
+     path) rewrites each included file to begin with `global $a, $b, ...;` listing the variables
+     used at that file's top level (not inside function/class bodies; not $this or superglobals),
+     placed after a leading declare/namespace statement and inside each braced namespace block; at
+     real global scope the statement is a no-op. Known gaps: top-level variable variables,
+     extract(), get_defined_vars().
 4. Docs (README, docs/), memory of the contract.
 5. FPM comparison (hello world, WordPress) on black.

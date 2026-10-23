@@ -1781,3 +1781,130 @@ test('a worker\'s accepts leave no error behind for the application\'s shutdown 
     expect(\array_filter($recorded))->toBe([]); // phasync/swerve#2: "stream_socket_accept(): Accept failed"
 });
 
+test('SIGTERM under load: the master drains and exits within grace, no replacement lifecycles start after the stop, and no fatal lines appear (swerve#72)', function () {
+    // -S's Classic shape (one accept() per lifecycle, see bin/swerve.php) is what the issue's
+    // repro used (`swerve -S . index.php --workers=16`): every single request ends its lifecycle,
+    // and the ext resets userspace (including the STDERR constant) in the same process for the
+    // next one -- --max-requests on a Persistent app instead respawns a whole new process per
+    // cycle, which never reproduces the "STDERR undefined" half of this bug.
+    $dir = temp_path(true);
+    \file_put_contents("$dir/index.php", "<?php echo 'hi';\n");
+    $addr    = free_address();
+    $log     = temp_path();
+    $process = swerve_spawn(["--http=$addr", '--workers=16', "--log=$log", '-vv', '--grace=3', '-S'], null, cwd: $dir);
+    $deadline = \microtime(true) + 10;
+    while ('hi' !== probe($addr, '/')) {
+        if (\microtime(true) > $deadline || !\proc_get_status($process)['running']) {
+            throw new RuntimeException("swerve did not start serving:\n" . \file_get_contents($log));
+        }
+        \usleep(20_000);
+    }
+
+    // A tight, keep-alive loop per loader (Classic parks its connection at the lifecycle's end
+    // instead of closing it, per PLAN.md, so one connection serves many lifecycles in a row):
+    // much higher request rate per process than reconnecting every time, needed to reproduce the
+    // issue's wrk-driven churn with a handful of PHP processes instead of an external load tool.
+    $script = temp_path() . '.php';
+    \file_put_contents($script, <<<'PHP'
+        <?php
+        $addr = $argv[1];
+        $conn = null;
+        while (true) {
+            if (null === $conn) {
+                $conn = @\stream_socket_client("tcp://$addr", $errno, $errstr, 1);
+                if (false === $conn) {
+                    $conn = null;
+                    \usleep(2000); // the master socket may be gone already: that's fine, keep trying
+                    continue;
+                }
+                \stream_set_timeout($conn, 1);
+            }
+            if (false === @\fwrite($conn, "GET / HTTP/1.1\r\nHost: test\r\n\r\n")) {
+                @\fclose($conn);
+                $conn = null;
+                continue;
+            }
+            $head = '';
+            while (!\str_contains($head, "\r\n\r\n")) {
+                $line = @\fgets($conn);
+                if (false === $line || '' === $line) {
+                    @\fclose($conn);
+                    $conn = null;
+                    continue 2;
+                }
+                $head .= $line;
+            }
+            \preg_match('/Content-Length: (\d+)/i', $head, $m);
+            $len = (int) ($m[1] ?? 0);
+            while ($len > 0) {
+                $chunk = @\fread($conn, $len);
+                if ('' === $chunk || false === $chunk) {
+                    break;
+                }
+                $len -= \strlen($chunk);
+            }
+        }
+        PHP);
+    $loaders = [];
+    try {
+        for ($i = 0; $i < 16; ++$i) {
+            $loaders[] = \proc_open([\PHP_BINARY, $script, $addr], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
+        }
+        \usleep(500_000); // let the load ramp up before the signal
+        swerve_signal($process, SIGTERM);
+        \usleep(500_000); // keep hammering a little past the signal, same as the repro
+
+        [$code, $took] = swerve_wait($process, 5);
+        expect([$code, $took < 4])->toBe([0, true], \file_get_contents($log));
+    } finally {
+        foreach ($loaders as $loader) {
+            $pid = \proc_get_status($loader)['pid'];
+            if ($pid) {
+                \posix_kill($pid, \SIGKILL);
+            }
+            \proc_close($loader);
+        }
+    }
+
+    $logText = \file_get_contents($log);
+    // Never a fatal: a lifecycle forked a moment before the worker-parent saw its own SIGTERM
+    // (sent first, see drainAll()) can still legitimately finish its hello handshake with the
+    // master and get logged ("Started lifecycle") before killIfFullyDrained() takes the whole
+    // group out -- that's a bounded, harmless race (at most one extra attempt per slot, a
+    // Lifecycle {pid} (slot {slot}) failed to start; retrying warning, never a crash), not the
+    // issue's unbounded crash-loop (hundreds of thousands of fatal lines, CRASH_LOOP warnings,
+    // never backing off).
+    expect($logText)->not->toContain('Undefined constant')->not->toContain('Fatal error')->not->toContain('crash-looping');
+    $shutdownAt = \strpos($logText, 'Shutting down');
+    expect($shutdownAt)->not->toBeFalse($logText);
+    expect(\substr_count(\substr($logText, $shutdownAt), 'Started lifecycle'))->toBeLessThanOrEqual(16);
+});
+
+test('a lifecycle that cannot reach the master exits cleanly with a log line (swerve#72)', function () {
+    // The connect-failure half of the issue, deterministic (no load or timing needed): the
+    // master socket is simply not there, as it would not be once the master has unlinked it, so
+    // stream_socket_client() at inc/lifecycle.php:55 fails every time. This doesn't by itself
+    // reproduce "STDERR undefined" -- that only happens after the ext has reset userspace inside
+    // a reused OS process (see the -S test above, which does exercise that reset, under the ext);
+    // a bare `php inc/lifecycle.php` like this one always has a fresh STDERR. It still pins the
+    // contract this path must hold: log and exit(1), never a fatal, regardless of why the
+    // connect failed.
+    $sock    = '/tmp/swerve-test-missing-' . \bin2hex(\random_bytes(4)) . '.sock';
+    $process = \proc_open(
+        [\PHP_BINARY, __DIR__ . '/../inc/lifecycle.php'],
+        [0 => ['pipe', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        null,
+        ['SWERVE_MASTER' => $sock, 'SWERVE_ARGS' => '[]', 'PHASYNC_WORKER' => '0', 'SWERVE_GENERATION' => '0'] + \getenv()
+    );
+    \fclose($pipes[0]);
+    $stderr = \stream_get_contents($pipes[2]);
+    \fclose($pipes[2]);
+    $code = \proc_close($process);
+
+    expect($code)->toBe(1);
+    expect($stderr)->toContain('lifecycle: could not connect to the master')
+        ->not->toContain('Undefined constant')
+        ->not->toContain('Fatal error');
+});
+

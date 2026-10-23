@@ -759,16 +759,20 @@ final class Cluster
     private function drainAll(string $why): void
     {
         $start = self::now();
+        foreach ($this->workerParents as $generation => $info) {
+            $this->workerParents[$generation]['stopping'] = true;
+            // SIGTERM the worker-parent first, same as completeReload(): it's what stops the ext
+            // from running another lifecycle once the one we're about to drain below finishes.
+            // Draining first (the previous order here) left a window where a lifecycle that had
+            // just drained reconnected and the ext started a fresh one, which then raced the
+            // shutdown -- the worker-parent's replacement process then failed to reach the master
+            // (socket refused mid-teardown) and crash-looped (swerve#72).
+            \posix_kill($info['pid'], \SIGTERM);
+        }
         foreach ($this->connections as $w) {
             if (LifecycleConnection::DRAINING !== $w->state) {
                 $this->drain($w, false, 'shutdown' === $why ? 'X' : 'T');
             }
-        }
-        foreach ($this->workerParents as $generation => $info) {
-            $this->workerParents[$generation]['stopping'] = true;
-            // See completeReload(): SIGTERM here is what stops the ext from running another
-            // lifecycle once the one draining below finishes.
-            \posix_kill($info['pid'], \SIGTERM);
         }
         $deadline = $start + $this->grace;
         $signals  = \min($this->stopSignals, 1);
