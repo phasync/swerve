@@ -31,11 +31,7 @@ it('picks the core adapter by the handler\'s shape', function () {
         ->and(Handlers::resolve(static fn (ServerRequestInterface $r) => null, $this->mode))->toBeInstanceOf(Psr7Adapter::class)
         ->and(Handlers::resolve($psr15->handle(...), $this->mode))->toBeInstanceOf(Psr7Adapter::class)
         ->and(Handlers::resolve($psr15, $this->mode))->toBeInstanceOf(Psr15Adapter::class);
-    if (function_exists('phasync\ext\sapi')) {
-        expect(Handlers::resolve(static function (): void {}, $this->mode))->toBeInstanceOf(ScriptAdapter::class);
-    } else {
-        expect(fn () => Handlers::resolve(static function (): void {}, $this->mode))->toThrow(LogicException::class, 'needs ext-phasync');
-    }
+    expect(Handlers::resolve(static function (): void {}, $this->mode))->toBeInstanceOf(ScriptAdapter::class);
 });
 
 it('names what it can run when nothing takes the handler', function () {

@@ -142,14 +142,16 @@ unless ext-phasync is loaded and the database is MySQL: then they wait as a coro
 In every mode a request sees PHP's own request environment: `$_SERVER` as PHP-FPM behind nginx fills
 it, `$_GET`, `$_COOKIE`, and for a `function (): void` handler also `php://input`, `$_POST` and
 `$_FILES`. In Classic mode the PHP process is the request, so everything is as under PHP-FPM. In a
-worker, every request runs inside ext-phasync's `sapi()`: `echo`, `header()`, `setcookie()`,
-`http_response_code()`, output buffering and sessions are the request's own, and `$_GET`, `$_POST`,
+worker, every request runs inside `sapi()`, ext-phasync's or, without the extension, phasync/hooked's
+equivalent: `echo`, `header()`, `setcookie()`, `http_response_code()`, output buffering and
+`php://input` are the request's own (sessions too with the extension), and `$_GET`, `$_POST`,
 `$_COOKIE` and `$_FILES`, the default time zone and the locale follow the request's `Scope`.
 `$_SERVER` and `$_REQUEST` are filled at the start of each request but shared by the requests of a
-worker: in Async mode read them before the request first waits. Without the extension, a worker
-fills the superglobals, but `echo` and `header()` don't make the response: answer through the
-`ClientRequest`, PSR-7 or a framework adapter, and a `function (): void` handler needs the
-extension.
+worker: in Async mode read them before the request first waits. `$_SERVER` starts from what the
+application put there while booting (its `.env` values), with the request's own values over it.
+Without the extension, application code is translated by phasync/babel to call phasync/hooked's
+replacements (the plug): blocking functions wait as coroutines, except database drivers written in C,
+and nothing is preempted.
 
 What still differs from PHP-FPM in Persistent and Async mode:
 

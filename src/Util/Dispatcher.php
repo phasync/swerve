@@ -20,8 +20,8 @@ use Swerve\Util\Classic\Runner;
  * {@see Adapter}.
  *
  * A handler runs in the request's PHP environment: `$_SERVER`, `$_GET` and `$_COOKIE` as PHP-FPM
- * behind nginx fills them, and with ext-phasync inside `sapi()`, so `echo`, `header()` and the
- * session are the request's own. A `function (): void` handler also gets its body through PHP:
+ * behind nginx fills them, and inside `sapi()` (ext-phasync's, or phasync/hooked's without it),
+ * so `echo`, `header()` and the session are the request's own. A `function (): void` handler also gets its body through PHP:
  * `php://input`, and `$_POST` and `$_FILES` for a form. A Persistent application's handler runs one
  * request at a time per worker; async routes overlap with it and with each other.
  *
@@ -45,10 +45,8 @@ final class Dispatcher
 
     private readonly bool $persistent;
 
-    private readonly bool $sapi;
-
-    /** Without the extension, through the plug: translated code reads PHP_SAPI per request */
-    private readonly bool $plug;
+    /** Whether ext-phasync's sapi() and the native request_parse_body() run requests; else phasync/hooked's */
+    private readonly bool $ext;
 
     /**
      * @var array<string, mixed> what every request's $_SERVER starts from: $_SERVER as the application
@@ -86,8 +84,7 @@ final class Dispatcher
             throw new \LogicException('A Classic application needs a runner for its scripts');
         }
         $this->persistent   = $mode instanceof PersistentMode;
-        $this->sapi         = \function_exists('phasync\ext\sapi');
-        $this->plug         = Plug::isInstalled();
+        $this->ext          = \function_exists('phasync\ext\sapi');
         // Made after swerve.php ran: what the application put in $_SERVER while booting stays
         $this->server       = \array_diff_key($_SERVER, self::COMMAND_LINE);
         $this->documentRoot = $mode->publicRoot ?? \dirname($swerveFile);
@@ -189,21 +186,15 @@ final class Dispatcher
         $_POST    = [];
         $_FILES   = [];
         $_REQUEST = $_GET;
-        $run      = $script ? static function () use ($adapter, $request, $object, $headers): void {
+        $ext      = $this->ext;
+        $run      = $script ? static function () use ($adapter, $request, $object, $headers, $ext): void {
             if (\preg_match('#^(?:application/x-www-form-urlencoded|multipart/form-data)\b#i', $headers['content-type'][0] ?? '')) {
-                [$_POST, $_FILES] = \request_parse_body();
+                [$_POST, $_FILES] = $ext ? \request_parse_body() : \phasync\hooked\request_parse_body();
                 $_REQUEST         = \array_merge($_GET, $_POST);
             }
             $adapter->handle($request, $object);
         } : static fn () => $adapter->handle($request, $object);
-        if ($this->sapi) {
-            (new Sapi($request, $script))->run($run);
-        } else {
-            if ($this->plug) {
-                \phasync\hooked\set_sapi_name(\Scope::getCurrent(), 'swerve');
-            }
-            $run();
-        }
+        (new Sapi($request, $script))->run($run);
     }
 
     /** @return array{string, string} an address "host:port" or "[v6]:port" as its host and port */

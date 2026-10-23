@@ -1,5 +1,12 @@
 <?php
 
+// Without the extension, requests the tests run in this process go through phasync/hooked's sapi(),
+// whose output router stays at the bottom of the output stack for the process's life, as in a
+// worker: install it before the first test, so that no test is seen to leave a buffer open
+if (!extension_loaded('phasync')) {
+    phasync\hooked\ensureOutputRouterInstalled();
+}
+
 /**
  * Exactly $length bytes from $conn, or null when the connection ended before the first byte.
  */

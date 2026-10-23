@@ -7,7 +7,8 @@ use phasync\TimeoutException;
 use Swerve\ClientRequest;
 
 /**
- * The `$sapi` object ext-phasync's `sapi()` calls for one request: wraps Swerve's
+ * The `$sapi` object `sapi()` calls for one request (ext-phasync's, or without it phasync/hooked's,
+ * which takes the same object): wraps Swerve's
  * {@see ClientRequest}, as a SAPI module wraps the real connection. Every request in a worker runs
  * inside it, so `echo`, `header()`, `php://input` and the session are the request's own, whatever
  * its handler.
@@ -96,7 +97,7 @@ final class Sapi
     public function run(\Closure $code): void
     {
         try {
-            \phasync\ext\sapi($code, $this);
+            \function_exists('phasync\ext\sapi') ? \phasync\ext\sapi($code, $this) : \phasync\hooked\sapi($code, $this);
         } finally {
             // Every write of the request is in the pair now: what is left is sent, then the
             // pair goes back for a later request
@@ -191,6 +192,7 @@ final class Sapi
             'content_length' => isset($headers['content-length'][0]) ? (int) $headers['content-length'][0] : null,
             'query_string'   => (string) \parse_url($target, \PHP_URL_QUERY),
             'request_uri'    => $target,
+            'protocol'       => $this->client->getProtocolVersion(),
         ];
     }
 
