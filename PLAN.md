@@ -44,7 +44,7 @@ and the lifecycles (through their connections), never forks a worker itself.
 | cache / subscriptions over the pipe | same frames over the lifecycle's connection |
 | Classic ServerProcess / BuiltinRunner / ServiceServer | deleted |
 | orphan reaping (PID 1) | unchanged (the parent is the master's child) |
-| master re-exec on reload | unchanged |
+| master re-exec on reload | no longer needed for a reload: the master has no application code to refresh, and the new worker-parent generation (row above) is what gets a fresh opcache. The master still re-execs itself once at startup, to apply swerve_ini()'s `-d` flags (SWERVE_INI_REEXEC) |
 
 ## Requests in a lifecycle
 

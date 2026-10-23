@@ -7,27 +7,13 @@
 use phasync\Util\Console;
 use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
-use Swerve\Cache;
 use Swerve\CLI\Address;
 use Swerve\CLI\Args;
-use Swerve\ClientRequest;
-use Swerve\Http\HttpServer;
-use Swerve\Http\TrustedProxies;
-use Swerve\ClassicMode;
-use Swerve\Mode;
-use Swerve\PersistentMode;
 use Swerve\Swerve;
-use Swerve\Util\Classic\BuiltinRunner;
-use Swerve\Util\Classic\ServerProcess;
-use Swerve\Util\Classic\ServerRunner;
-use Swerve\Util\Classic\ServiceServer;
 use Swerve\Util\Cluster;
-use Swerve\Util\Dispatcher;
 use Swerve\Util\Logger;
 use Swerve\Util\Plug;
 use Swerve\Util\System;
-use Swerve\Util\Topics;
-use Swerve\Util\Worker;
 
 // Composer's vendor/bin proxy says where the autoloader is. When swerve is installed in that
 // vendor directory (an application's), the worker loads only swerve's own dependency closure and
@@ -59,16 +45,17 @@ unset($vendorDir, $rootInstallPath);
 
 // swerve is a long-running process, like Node.js: php.ini's limits for shared hosting don't apply,
 // and memory is the container's to bound. These settings override php.ini (which still loads the
-// extensions); most only take effect at startup, so one restart applies them, and the extension's
-// own restart below keeps them. An explicit -d on the command line wins, coming after these. Code
-// changes reach the workers only through a reload (--watch, SIGHUP), which invalidates opcache's
-// scripts, so nothing checks timestamps.
-// The command line as the operator gave it, for a reload to start over from
-if (false === \getenv('SWERVE_ARGS')) {
-    \putenv('SWERVE_ARGS=' . \json_encode(phasync\ext\_original_args()));
-}
-if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
-    $ini = [
+// extensions); most only take effect at startup, so one restart applies them, and the worker-
+// parent's own `php` invocation (built further down, same flags) gets them too. An explicit -d on
+// the command line wins, coming after these. Code changes reach the workers only through a reload
+// (--watch, SIGHUP), which starts a worker-parent of the next generation, a fresh `php` process:
+// opcache.validate_timestamps stays 0, since that fresh compile is what picks up the change.
+/**
+ * @return array<string, string>
+ */
+function swerve_ini(): array
+{
+    return [
         'memory_limit'                         => '-1',
         'max_execution_time'                   => '0',
         'max_input_time'                       => '-1',
@@ -103,12 +90,30 @@ if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
         'opcache.preload'                      => '',
         ...Swerve::registeredIni(), // what installed packages need, see Swerve::ini()
     ];
+}
+
+/**
+ * -d flags for swerve_ini(), plus zend_extension=opcache first when nothing loaded it yet.
+ *
+ * @return list<string>
+ */
+function swerve_ini_flags(): array
+{
     $flags = \extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache'];
-    foreach ($ini as $name => $value) {
+    foreach (swerve_ini() as $name => $value) {
         \array_push($flags, '-d', "$name=$value");
     }
+
+    return $flags;
+}
+
+// The command line as the operator gave it, for a reload to start over from
+if (false === \getenv('SWERVE_ARGS')) {
+    \putenv('SWERVE_ARGS=' . \json_encode(phasync\ext\_original_args()));
+}
+if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
     \putenv('SWERVE_INI_REEXEC=1');
-    \pcntl_exec(\PHP_BINARY, [...$flags, ...phasync\ext\_original_args()]);
+    \pcntl_exec(\PHP_BINARY, [...swerve_ini_flags(), ...phasync\ext\_original_args()]);
 }
 
 // Load ext-phasync (it ships inside phasync) with --ext: swerve stops if it cannot. May restart this process once.
@@ -119,6 +124,12 @@ if (\in_array('--ext', $argv, true)) {
         \fwrite(\STDERR, 'swerve: --ext: '.$e->getMessage()."\n");
         exit(1);
     }
+}
+// phasync.workers (the worker-parent model, see Cluster) needs the extension; the no-ext path
+// (the plug alone, running every worker as this one process) isn't built yet.
+if (!\extension_loaded('phasync')) {
+    \fwrite(\STDERR, "swerve: ext-phasync is required for now: run with --ext (see `swerve --help`)\n");
+    exit(1);
 }
 
 pcntl_async_signals(true);
@@ -171,25 +182,20 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     /*
-     * What to serve: ./swerve.php, which returns the mode, evaluated in each worker after the fork
-     * (the master loads no application code); else the command line, as php -S's, for Classic.
+     * What every worker runs (see inc/lifecycle.php): ./swerve.php in the current directory;
+     * `swerve some-app.php`, that single file; `-S [root] [router]`, a generated loop around
+     * Swerve::accept($root, $router), as php -S's; bare, with neither, an error.
      */
     $cwd        = \getcwd();
     $swerveFile = \is_file("$cwd/swerve.php") ? "$cwd/swerve.php" : null;
-    $root       = null;
-    $router     = null;
-    if (null !== $swerveFile) {
-        if ('' !== $args->path || '' !== $args->docroot) {
-            \fwrite(\STDERR, "swerve: $swerveFile exists; configure the public root and the router there\n");
+    if ($args->serve) {
+        if (null !== $swerveFile) {
+            \fwrite(\STDERR, "swerve: -S and $swerveFile: configure the application there\n");
             exit(2);
         }
-        $appDir = $cwd;
-    } else {
-        // A directory is the public root, a file the router: `swerve`, `swerve public`, `swerve router.php`, `swerve public router.php`
         $positional = \array_values(\array_filter([$args->path, $args->router], static fn ($a) => '' !== $a));
-        if ('' !== $args->docroot) {
-            $root = $args->docroot;
-        }
+        $root       = null;
+        $router     = null;
         foreach ($positional as $i => $arg) {
             if (\is_dir($arg) && 0 === $i && null === $root) {
                 $root = $arg;
@@ -202,21 +208,35 @@ foreach ([\STDOUT, \STDERR] as $out) {
         }
         $root   = \realpath($root ?? '.');
         $router = null === $router ? "$root/index.php" : \realpath($router);
-        if (!\is_file($router)) {
-            // Nothing to serve here: perhaps the application is configured further up
-            for ($dir = \dirname($cwd); !\is_file("$dir/swerve.php") && \dirname($dir) !== $dir; $dir = \dirname($dir)) {
-            }
-            \fwrite(\STDERR, "swerve: $router not found: give the public root and the router (swerve [dir] [router.php]), or write a swerve.php"
-                . (\is_file("$dir/swerve.php") ? " (there is one in $dir)" : '') . "\n");
+        if (false === $root || !\is_file($router)) {
+            \fwrite(\STDERR, "swerve: $router not found: give the public root and the router (swerve -S [dir] [router.php])\n");
             exit(2);
         }
-        $appDir = $root;
+        // Every worker's inc/lifecycle.php requires this once per lifecycle: generated once here,
+        // removed when the master exits (System::tempDirectory()'s cleanup).
+        $appDir  = System::tempDirectory('swerve-serve');
+        $appFile = "$appDir/app.php";
+        \file_put_contents($appFile, '<?php while (true) { \Swerve\Swerve::accept(' . \var_export($root, true) . ', ' . \var_export($router, true) . "); }\n");
+    } elseif (null !== $swerveFile) {
+        if ('' !== $args->path) {
+            \fwrite(\STDERR, "swerve: $swerveFile exists; configure the application there, or remove it to run {$args->path} instead\n");
+            exit(2);
+        }
+        $appFile = $swerveFile;
+    } elseif ('' !== $args->path) {
+        if (!\is_file($args->path)) {
+            \fwrite(\STDERR, "swerve: {$args->path} is not a file that exists (swerve some-app.php, swerve -S [dir] [router.php], or write a swerve.php)\n");
+            exit(2);
+        }
+        $appFile = \realpath($args->path);
+    } else {
+        \fwrite(\STDERR, "swerve: no swerve.php here, and nothing on the command line: swerve some-app.php, or swerve -S [dir] [router.php]\n");
+        exit(2);
     }
 
-    $http      = \array_map(Address::normalize(...), $args->http);
-    $addresses = $http;
-    if (\count(\array_unique($addresses)) < \count($addresses)) {
-        $twice = \implode(' ', \array_unique(\array_diff_assoc($addresses, \array_unique($addresses))));
+    $http = $args->noHttp ? [] : \array_map(Address::normalize(...), $args->http);
+    if (\count(\array_unique($http)) < \count($http)) {
+        $twice = \implode(' ', \array_unique(\array_diff_assoc($http, \array_unique($http))));
         \fwrite(\STDERR, "swerve: $twice more than once\n");
         exit(2);
     }
@@ -266,40 +286,63 @@ foreach ([\STDOUT, \STDERR] as $out) {
     }
 
     /*
-     * Every worker listens with SO_REUSEPORT, which would let a second swerve on the address
-     * (a forgotten one, or one started by hand next to systemd's) silently take a share of the
-     * connections. Bound once without it, before any worker listens, the address is refused
-     * when anything listens there.
+     * The HTTP listener(s), opened once here and inherited by every worker-parent generation
+     * (see Cluster): one bound, listening socket per --http address, at descriptors
+     * Cluster::LISTENER_FD, +1, ... in this same order; the ext forks the lifecycles onto it
+     * (phasync.workers_listener), and the kernel spreads accept() across however many there
+     * are (a classic pre-fork server) — no SO_REUSEPORT needed. --no-http: no listeners, and
+     * Swerve::accept() throws in every lifecycle.
      */
-    foreach ($addresses as $address) {
+    $listeners = [];
+    foreach ($http as $address) {
         if (\str_starts_with($address, 'unix:')) {
-            // One listener for every worker, made here and inherited: see System::listen()
             try {
-                System::listen($address);
+                $listeners[] = System::listen($address);
             } catch (\RuntimeException $e) {
                 $logger->critical('The server failed to start: {error}', ['error' => $e->getMessage()]);
                 exit(1);
             }
             continue;
         }
-        $probe = @\stream_socket_server("tcp://$address", $errno, $errstr, \STREAM_SERVER_BIND);
-        if (false === $probe) {
+        $listener = @\stream_socket_server("tcp://$address", $errno, $errstr, \STREAM_SERVER_BIND | \STREAM_SERVER_LISTEN);
+        if (false === $listener) {
             $logger->critical('The server failed to start: {address} is already in use ({error})', ['address' => $address, 'error' => $errstr]);
             exit(1);
         }
-        \fclose($probe);
+        \stream_set_blocking($listener, false);
+        $listeners[] = $listener;
     }
+    $listenerIni = [] === $listeners
+        ? '-1'
+        : \implode(',', \range(Cluster::LISTENER_FD, Cluster::LISTENER_FD + \count($listeners) - 1));
 
     /*
-     * Classic: the processes running scripts, shared by the workers. With the extension, its
-     * request server, which the master starts once the first worker reports a Classic
-     * application; without, a php -S pool per worker.
+     * The worker-parent: a `php -d phasync.workers=N ... inc/lifecycle.php` process (the ext's C
+     * parent), re-started fresh (a new generation) for a reload; same ini flags as this process
+     * applied to itself above, so the lifecycles get the same memory_limit, opcache settings etc.
+     * php.ini (shared by every `php` invocation here) already loads the extension when it is
+     * registered there; only when THIS process got it by re-executing itself (--ext, above, which
+     * leaves PHASYNC_EXT_REEXEC=1 behind) does the worker-parent need the same `-d extension=`,
+     * since that flag lives only in the re-exec'd argv, not in php.ini.
      */
-    $classicWorkers = 'auto' === $args->classicWorkers ? $workerCount : (int) $args->classicWorkers;
-    $classic        = \extension_loaded('phasync') ? new ServerProcess($logger, $classicWorkers) : null;
+    $extFlags = '1' === \getenv('PHASYNC_EXT_REEXEC') && \is_string($so = \phasync\ext\_resolve_so())
+        ? ['-d', "extension=$so"]
+        : [];
+    $workerParentArgv = [
+        \PHP_BINARY,
+        ...$extFlags,
+        ...swerve_ini_flags(),
+        '-d', "phasync.workers=$workerCount",
+        '-d', "phasync.workers_listener=$listenerIni",
+        __DIR__ . '/../inc/lifecycle.php',
+    ];
+    $workerParentEnv = \getenv() + [
+        'SWERVE_ARGS'     => (string) \getenv('SWERVE_ARGS'),
+        'SWERVE_APP_FILE' => $appFile,
+    ];
 
     /*
-     * The master process forks the workers, and supervises them until stopped.
+     * The master process starts the worker-parent, and supervises it (and reloads) until stopped.
      */
     $cluster = new Cluster(
         $workerCount,
@@ -307,130 +350,22 @@ foreach ([\STDOUT, \STDERR] as $out) {
         (float) $args->grace,
         (float) $args->linger,
         (float) $args->watchdog,
-        $args->watch ? $appDir : null,
-        \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(), $swerveFile ?? "$root through $router",
-            \implode(', ', \array_map(static fn ($a) => 'http' . (\str_starts_with($a, 'unix:') ? '+unix://' . \substr($a, 5) : "://$a"), $addresses)),
+        $args->watch ? \dirname($appFile) : null,
+        \sprintf('swerve %s serving %s on %s with %d worker%s%s', Swerve::getVersion(),
+            $swerveFile ?? ($args->serve ? "$root through $router" : $appFile),
+            [] === $http ? 'no HTTP listener' : \implode(', ', \array_map(static fn ($a) => \str_starts_with($a, 'unix:') ? 'http+unix://' . \substr($a, 5) : "http://$a", $http)),
             $workerCount, 1 === $workerCount ? '' : 's', $args->watch ? ', reloading when PHP files change' : ''),
+        $workerParentArgv,
+        $workerParentEnv,
+        $listeners,
         (int) \ini_parse_quantity($args->cacheSize),
-        static function () use ($logger): void {
-            // A reload: start over as a fresh process, from the operator's command line
-            System::closeListeners();
-            System::cleanup();
-            \putenv('SWERVE_INI_REEXEC');
-            \putenv('PHASYNC_EXT_REEXEC');
-            \pcntl_exec(\PHP_BINARY, \json_decode((string) \getenv('SWERVE_ARGS'), true));
-            $logger->critical('Reload failed: swerve could not restart itself ({error})', ['error' => \pcntl_strerror(\pcntl_get_last_error())]);
-            exit(1);
-        },
-        $classic,
     );
-    $worker = $cluster->run();
-    if (\is_int($worker)) {
-        foreach ($addresses as $address) {
-            if (\str_starts_with($address, 'unix:')) {
-                System::unlinkSocket($address);
-            }
+
+    $exitCode = $cluster->run();
+    foreach ($http as $address) {
+        if (\str_starts_with($address, 'unix:')) {
+            System::unlinkSocket($address);
         }
-        exit($worker);
     }
-
-    /*
-     * From here on: a worker process. Load the application.
-     */
-    $logger = $worker->logger;
-    Swerve::setLog($logger);
-    if (Plug::isInstalled()) {
-        $logger->info('ext-phasync is not loaded: application code runs through the plug (phasync/babel and phasync/hooked), cache in {dir}', ['dir' => Plug::cacheDir()]);
-    }
-    Worker::refreshAutoloader();
-    $proxies = $args->trustedProxy ? new TrustedProxies($args->trustedProxy) : null;
-    // Loaded in the worker's event loop: the application may start coroutines as it loads,
-    // such as a subscriber that runs for the worker's whole life
-    phasync::run(static function () use ($swerveFile, $root, $router, $args, $logger, $worker, $http, $proxies, $workerCount, $classicWorkers) {
-        // A coroutine of the worker or a service (each request's frame has its own handler, see
-        // HttpConnection) that fails with nobody awaiting it is logged, and the worker serves on:
-        // without a handler the failure would end this run() once every other coroutine had
-        phasync::frame()->setExceptionHandler(static fn (\Throwable $e) => $logger->error('Unhandled exception in a coroutine: {exception}', ['exception' => $e]));
-        try {
-            Swerve::startWorker();
-        } catch (\Throwable $e) {
-            $logger->critical('A Swerve::onWorkerStart() callback failed: {exception}', ['exception' => $e]);
-            exit(Worker::EXIT_BAD_APP);
-        }
-        try {
-            Cache::$loader = phasync::getFiber();
-            if (null !== $swerveFile) {
-                // Its paths are relative to its own directory
-                \chdir(\dirname($swerveFile));
-                $mode = require Plug::path($swerveFile, \dirname($swerveFile));
-                if (!$mode instanceof Mode) {
-                    $logger->critical('{file} returned {value}; it must return the mode: ClassicMode::serve(), PersistentMode::serve() or AsyncMode::serve()', ['file' => $swerveFile, 'value' => \get_debug_type($mode)]);
-                    exit(Worker::EXIT_BAD_APP);
-                }
-            } else {
-                $mode = new ClassicMode($root, $router);
-            }
-            Cache::$loader = null;
-            $runner   = null;
-            $services = null;
-            if ($mode instanceof ClassicMode) {
-                // Swerve's cache and pub/sub for the scripts, which run outside the workers
-                $services = new ServiceServer(\sys_get_temp_dir() . '/swerve-' . \posix_getppid() . '-services-' . \posix_getpid() . '.sock');
-                $services->listen();
-                if (\extension_loaded('phasync')) {
-                    (Topics::$toMaster)(ServerProcess::TOPIC, \serialize([$mode->publicRoot, $mode->router]));
-                    $runner = new ServerRunner(ServerProcess::$socket, $services->path);
-                    $runner->awaitServer();
-                } else {
-                    // php -S: a pool per worker, each its share
-                    $runner = new BuiltinRunner($mode->publicRoot, \max(1, \intdiv($classicWorkers, $workerCount)), services: $services->path);
-                }
-            }
-            $dispatcher = new Dispatcher($mode, $swerveFile ?? $mode->router, $runner);
-        } catch (\Throwable $e) {
-            $logger->critical('Loading {what} failed: {exception}', ['what' => $swerveFile ?? 'the application', 'exception' => $e]);
-            exit(Worker::EXIT_BAD_APP);
-        }
-        if (0 === $worker->slot) {
-            $logger->notice('{mode}', ['mode' => match (true) {
-                $mode instanceof ClassicMode => 'Classic (' . (null !== $runner && $runner instanceof ServerRunner ? 'the extension\'s request server' : 'php -S') . ", up to $classicWorkers processes)",
-                $mode instanceof PersistentMode => "Persistent, $workerCount worker" . (1 === $workerCount ? "" : "s"),
-                default => "Async, $workerCount worker" . (1 === $workerCount ? "" : "s"),
-            } . ([] === $mode->asyncRoutes() ? '' : ', async routes ' . \implode(' ', \array_map(static fn ($r) => $r[0], $mode->asyncRoutes())))]);
-        }
-        $worker->setLimits($args->maxMemory, (int) $args->maxRequests);
-
-        $handler = static function (ClientRequest $request) use ($dispatcher, $worker) {
-            $id = $worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getTarget());
-            try {
-                $dispatcher($request);
-            } finally {
-                $worker->requestDone($id);
-            }
-        };
-
-        // Every worker serves HTTP/1.1 itself on the same address (SO_REUSEPORT), and the
-        // kernel spreads new connections over them
-        $maxBody = (int) $args->maxBody ?: \PHP_INT_MAX;
-        $servers = [];
-        foreach ($http as $address) {
-            $server = new HttpServer($address, $handler, $logger, $maxBody, $proxies);
-            try {
-                $server->listen();
-            } catch (\Throwable $e) {
-                // Before 'R': the master counts it as a failed start
-                $logger->critical('{exception}', ['exception' => $e]);
-                exit(1);
-            }
-            $servers[] = $server;
-        }
-        foreach ($servers as $server) {
-            $worker->serve($server->run(...), $server->drain(...));
-        }
-        if (null !== $services) {
-            $worker->serve($services->run(...), $services->drain(...));
-        }
-        $worker->ready();
-    });
-    exit(0);
+    exit($exitCode);
 })();

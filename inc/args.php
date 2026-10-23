@@ -20,14 +20,12 @@ return (function () {
     $args    = new Args();
     $seconds = fn ($value) => \is_numeric($value) && $value >= 0 ? null : 'A number of seconds (0 or more) required';
 
-    $args->section('Application (without a swerve.php, as php -S: Classic mode)');
-    $args->add('path', new Argument('dir|router.php', 'A directory: the public root (default: the current directory); a PHP file: the router, run for every path that does not exist (default: index.php in the public root)', ''));
-    $args->add('router', new Argument('router.php', 'After a public root: the router', ''));
-    $args->add('docroot', new Option(
-        't', 'docroot', 'The public root, as for php -S',
-        placeholder: 'dir',
-        validator: fn ($value) => \is_dir($value) ? null : "$value is not a directory",
+    $args->section('Application (without a swerve.php)');
+    $args->add('serve', new Flag(
+        'S', 'serve', 'php -S style: serve the public root\'s static files, and run the router for everything else'
     ));
+    $args->add('path', new Argument('app.php|dir', 'A single file: run in every worker (swerve.php, see below, if it exists here); with -S, the public root (default: the current directory)', ''));
+    $args->add('router', new Argument('router.php', 'With -S, after a public root: the router (default: index.php in it)', ''));
     $args->section('Serving');
     $args->add('http', new Option(
         '', 'http', 'Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several',
@@ -66,16 +64,12 @@ return (function () {
         placeholder: 'n'
     ));
 
-    $args->add('classicWorkers', new Option(
-        '', 'classic-workers', 'Classic: the most PHP processes running scripts at once, as PHP-FPM\'s pm.max_children with pm = ondemand; auto is the number of workers',
-        default: 'auto',
-        placeholder: 'n',
-        validator: fn ($value) => 'auto' === $value || false !== \filter_var($value, \FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ? null : 'auto, or 1 or more, required',
-    ));
-
     $args->section('Extension');
     $args->add('ext', new Flag(
         '', 'ext', 'Load ext-phasync (bundled with phasync); swerve stops if it cannot'
+    ));
+    $args->add('noHttp', new Flag(
+        '', 'no-http', 'No HTTP listener: the application is a background script, not a server; Swerve::accept() throws'
     ));
 
     $args->section('Development');
