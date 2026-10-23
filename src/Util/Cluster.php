@@ -37,9 +37,13 @@ use Swerve\Cache;
  * long-lived worker-parent, with `opcache.validate_timestamps=0`, would otherwise go on serving a
  * changed file's old bytecode forever), inheriting the same listener and inbox descriptors, so
  * both can accept() meanwhile ("the lot keeps accepting"). Once every slot of the new generation
- * is ready, every lifecycle of the old generation is told to drain ('T') together; the old
- * worker-parent is reaped once they are gone, or SIGKILLed (by process group: it runs under
- * `setsid`) after the grace period. A new generation's worker-parent that dies before any of its
+ * is ready, every lifecycle of the old generation is told to drain ('T') together, and the old
+ * worker-parent itself gets SIGTERM: on the byte protocol its lifecycles unwind and exit
+ * promptly, and the SIGTERM is what stops the ext from running another one in a slot that just
+ * did (see tests/worker_sigterm_graceful.phpt) — without it a drained lifecycle would simply
+ * reconnect and start over. The old worker-parent is reaped once every slot is gone that way, or
+ * SIGKILLed (by process group: it runs under `setsid`) after the grace period. A new generation's
+ * worker-parent that dies before any of its
  * slots is ready leaves the old one serving untouched, and is retried with backoff (the same
  * policy as a failed lifecycle start). Signals: SIGTERM, SIGINT or SIGQUIT drain every lifecycle
  * within the grace period, SIGKILL what remains, and stop the worker-parent the same way. SIGUSR1
@@ -116,6 +120,16 @@ final class Cluster
     private int $workerParentFailures = 0;
     /** When to retry starting the current generation's worker-parent after such a failure; 0 = no retry pending. */
     private float $workerParentRetryAt = 0;
+    /**
+     * Slots of a stopping generation that drained at least once; @var array<int, array<int, true>> by generation.
+     * A phasync::run() lifecycle defeats the ext's own "do not replace this slot" bookkeeping for
+     * a worker-parent that got SIGTERM directly (reproduced, not yet understood; filed upstream):
+     * it keeps re-running the slot instead of letting the process exit. So instead of waiting for
+     * that process to exit on its own, its process group is SIGKILLed outright once every one of
+     * its slots is known to have drained once — no in-flight request is lost (a drained slot has
+     * none), and whatever the ext reran in it afterwards never held a real connection for long.
+     */
+    private array $drainedOnce = [];
 
     /** @var resource the master's own unix socket, non-blocking */
     private $masterListener;
@@ -463,6 +477,12 @@ final class Cluster
                 continue;
             }
             $this->workerParents[$generation]['stopping'] = true;
+            // SIGTERM to the worker-parent itself (not SIGKILL: its lifecycles still get to drain
+            // on the byte protocol below) is what makes the ext stop re-running a slot once its
+            // current lifecycle ends (see tests/worker_sigterm_graceful.phpt): without it, a
+            // drained lifecycle would just reconnect and start another one, and the old
+            // generation would never finish.
+            \posix_kill($info['pid'], \SIGTERM);
             $drained = 0;
             foreach ($this->connections as $w) {
                 if ($w->generation === $generation && LifecycleConnection::DRAINING !== $w->state) {
@@ -491,6 +511,7 @@ final class Cluster
     /** The worker-parent of $generation ended: every lifecycle of that generation is gone too. */
     private function workerParentExited(int $generation, int $status): void
     {
+        unset($this->drainedOnce[$generation]);
         $expected = $this->stopSignals > 0 || (isset($this->workerParents[$generation]) && $this->workerParents[$generation]['stopping']);
         foreach ($this->connections as $id => $w) {
             if ($w->generation === $generation) {
@@ -550,6 +571,8 @@ final class Cluster
         $ctx    = ['pid' => $w->pid, 'slot' => $w->slot, 'up' => self::duration($now - $w->started)];
         if (LifecycleConnection::DRAINING === $w->state) {
             $this->logger->info('Lifecycle {pid} (slot {slot}) ended after draining (up {up})', $ctx);
+            $this->drainedOnce[$w->generation][$w->slot] = true;
+            $this->killIfFullyDrained($w->generation);
 
             return;
         }
@@ -576,6 +599,24 @@ final class Cluster
         } else {
             $this->logger->warning('Lifecycle {pid} (slot {slot}) failed to start; retrying in {delay} s', $ctx);
         }
+    }
+
+    /**
+     * Once every slot of a stopping generation has drained at least once, kill its worker-parent's
+     * process group outright, rather than waiting for the process to exit on its own: see
+     * $drainedOnce.
+     */
+    private function killIfFullyDrained(int $generation): void
+    {
+        $info = $this->workerParents[$generation] ?? null;
+        if (null === $info || !$info['stopping']) {
+            return;
+        }
+        if (\count($this->drainedOnce[$generation] ?? []) < $this->numWorkers) {
+            return;
+        }
+        unset($this->drainedOnce[$generation]);
+        \posix_kill(-$info['pid'], \SIGKILL); // process group: setsid makes its pgid its own pid
     }
 
     /**
@@ -725,6 +766,9 @@ final class Cluster
         }
         foreach ($this->workerParents as $generation => $info) {
             $this->workerParents[$generation]['stopping'] = true;
+            // See completeReload(): SIGTERM here is what stops the ext from running another
+            // lifecycle once the one draining below finishes.
+            \posix_kill($info['pid'], \SIGTERM);
         }
         $deadline = $start + $this->grace;
         $signals  = \min($this->stopSignals, 1);
