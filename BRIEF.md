@@ -86,7 +86,7 @@ Swerve's integrated services:
 
 - `Swerve::cache()` — a shared PSR-16 cache.
 - `Swerve::publish()` and `Swerve::subscribe()` — interprocess publish/subscribe messaging.
-- `Swerve::claim()` — coordination through locking.
+- `flock()` — coordination across workers through locking; no service of Swerve's own.
 - WebSockets and server-sent events — persistent connections from any mode (below).
 
 ## One PHP environment in every mode
@@ -121,9 +121,9 @@ had disconnected and finishes normally, while the WebSocket stays open. Other Wo
 publish messages through `Swerve::publish()`.
 
 The closure runs in the front worker, not in the WordPress request: WordPress is not loaded
-there. It can use plain PHP, the values it captured (which must be serializable) and Swerve's
-services (`publish()`, `subscribe()`, `cache()`, `claim()`); work that needs WordPress belongs in
-the request before `setup()`, or in requests that publish to the socket's channel.
+there. It can use plain PHP, the values it captured (which must be serializable), Swerve's
+services (`publish()`, `subscribe()`, `cache()`) and `flock()`; work that needs WordPress belongs
+in the request before `setup()`, or in requests that publish to the socket's channel.
 
 In Persistent and Async mode the handler instead returns
 `new WebSocketResponse(function (WebSocket $ws) { ... })`; the function runs as a coroutine in

@@ -58,8 +58,8 @@ source and anything outside the public root never.
 Whatever the mode, code sees PHP's own request environment: `$_SERVER` as PHP-FPM behind nginx
 fills it, `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `php://input`, and with ext-phasync `header()`,
 `echo`, output buffering and sessions per request. Swerve's services work in every mode:
-[publish/subscribe](docs/publish-subscribe.md) between workers, a [shared cache](#shared-cache) and
-[claims](#claims).
+[publish/subscribe](docs/publish-subscribe.md) between workers and a [shared cache](#shared-cache);
+coordination across workers is `flock()` ([one worker at a time](#one-worker-at-a-time)).
 
 ## Why swerve
 
@@ -307,7 +307,7 @@ body (`''` only at its end) and `write()` sends the response body. The module do
 - **Recycle: lingering.** A worker replaced by a recycle (`--max-memory`, `--max-requests`)
   keeps its upgraded connections instead of draining them: it stops accepting, finishes its
   plain requests and stays until the last client has left, or `--linger` seconds (1800) have
-  passed, which then ends it like a shutdown. Subscriptions, the cache and claims keep working
+  passed, which then ends it like a shutdown. Subscriptions and the cache keep working
   meanwhile. A slot has at most three lingering workers; a recycle that would make a fourth waits
   until one exits. A reload or shutdown ends the lingering with `--grace`. `--linger=0` drains a
   recycled worker at once.
@@ -391,30 +391,26 @@ $cache->set("user.$id", $user, 60);
   `swerve.php` it throws ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
   embedded in your own process), the cache is the process's own.
 
-### Claims
+### One worker at a time
 
-`Swerve::claim($name)` gives a handle on a name that one worker at a time can hold: a job that
-must not run twice, a leader. The handle claims nothing yet.
+`flock()` gives one worker at a time a job: a nightly report, a leader.
 
 ```php
 function nightlyReport(): void
 {
-    if ($claim = Swerve::claim('nightly-report')->acquire()) {
+    $fp = fopen(sys_get_temp_dir() . '/nightly-report.lock', 'c');
+    if (flock($fp, LOCK_EX | LOCK_NB)) {    // this worker runs it
         work();
+        flock($fp, LOCK_UN);
     }
-}   // $claim goes out of scope: released
+    fclose($fp);
+}
 ```
 
-- `available()` tells whether nobody holds the name, claiming nothing. `acquire($timeout)` takes
-  it and returns the handle, or `null`; with a `$timeout` it tries again every 20 ms until the
-  name is free (no queue: the first to try when it frees wins). On a handle that holds the name
-  already, it returns the handle. `held()` tells whether this handle holds it. `release()` gives
-  it up.
-- A claim has no TTL: it is held until released, destroyed, or its worker exits or dies (the
-  master clears a dead worker's claims). Names are apart from the cache's keys.
-- A claim is a file in a temporary directory (under `$SWERVE_TMPDIR`) that the master creates and removes: a hard link
-  to a file with its holder's pid in it. Linking is atomic, and fails while the name is held.
-  Without the master it works the same, in a directory of the process that dies with it.
+Each holder opens its own handle: a lock belongs to an open file, not a name. `LOCK_EX | LOCK_NB`
+tries once; `LOCK_EX` alone waits, as a coroutine with ext-phasync or phasync/hooked's plug, for
+however long another holds it, woken at once when the kernel frees it (the holder's process
+died, or it called `flock($fp, LOCK_UN)`). No master, timeout or polling is involved.
 
 ## Supervision
 

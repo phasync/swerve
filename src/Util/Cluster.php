@@ -5,7 +5,6 @@ namespace Swerve\Util;
 use phasync\Util\LruCache;
 use Psr\Log\LoggerInterface;
 use Swerve\Cache;
-use Swerve\Claim;
 use Swerve\Util\Classic\ServerProcess;
 
 /**
@@ -171,7 +170,6 @@ final class Cluster
         // A serving worker, its replacement starting, and up to MAX_LINGERING lingering ones per slot
         $this->inboxes = new Inboxes((1 + self::MAX_LINGERING) * $numWorkers);
         $this->masterPid = \posix_getpid();
-        Claim::directory(); // before the first fork: the workers inherit it, see Claim
         OrderedLog::directory();
         $this->logger->info('Master process {pid}, {n} workers', ['pid' => $this->masterPid, 'n' => $numWorkers]);
         if (!\extension_loaded('phasync')) {
@@ -482,7 +480,6 @@ final class Cluster
         }
         $this->leaveInbox($w);
         $this->inboxes->release($w->inbox);
-        Claim::clear($pid);
         $now    = self::now();
         $killed = null !== $w->killReason ? ", killed: {$w->killReason}" : '';
         $ctx    = ['pid' => $pid, 'slot' => $w->slot, 'how' => $this->describe($status, $w->fatal), 'up' => self::duration($now - $w->started)];

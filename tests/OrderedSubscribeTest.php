@@ -347,15 +347,13 @@ test('a reader that was away longer than the retention has lost messages: its su
     }
 });
 
-test('SWERVE_TMPDIR is the base of the claims directory and the ordered logs, which the master removes at its exit', function () {
+test('SWERVE_TMPDIR is the base of the ordered logs, which the master removes at its exit', function () {
     $tmp                    = temp_path(true);
     [$process, $addr, $log] = swerve_start([], 2, env: ['SWERVE_TMPDIR' => $tmp]);
     try {
-        foreach (['swerve-claims-*', 'swerve-ordered-*'] as $pattern) {
-            $dirs = glob("$tmp/$pattern");
-            expect($dirs)->toHaveCount(1);
-            expect(fileperms($dirs[0]) & 0777)->toBe(0700);
-        }
+        $dirs = glob("$tmp/swerve-ordered-*");
+        expect($dirs)->toHaveCount(1);
+        expect(fileperms($dirs[0]) & 0777)->toBe(0700);
         [$conn] = ord_subscribe($addr, 'tmp', 1);
         expect(probe($addr, '/publish-ordered?topic=tmp&m=x'))->toBe('published');
         expect(ord_events($conn, 1))->toBe(['x']);

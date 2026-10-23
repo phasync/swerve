@@ -11,7 +11,7 @@ use Swerve\Swerve;
  *
  * Each worker runs one of these and listens on the same port with SO_REUSEPORT: the kernel
  * gives every new connection to one of them, and a connection stays with its worker. Reads go
- * straight to the cache. Every write takes a `Swerve::claim()` on its key, which is what makes
+ * straight to the cache. Every write holds a lock with `flock()` on its key, which is what makes
  * cas, incr, decr, append and prepend atomic across the workers.
  *
  * ```php
@@ -33,10 +33,16 @@ final class MemcachedServer
     private int $connections = 0;
     private array $counters  = ['total_connections' => 0, 'cmd_get' => 0, 'cmd_set' => 0, 'cmd_touch' => 0, 'get_hits' => 0, 'get_misses' => 0];
     private readonly int $startedAt;
+    /** The directory of the per-key lock files, one per port: every worker of this server agrees on it. */
+    private readonly string $lockDir;
 
     public function __construct(private readonly int $port)
     {
         $this->startedAt = \time();
+        $this->lockDir   = \sys_get_temp_dir() . "/swerve-memcached-$port";
+        if (!\is_dir($this->lockDir) && !@\mkdir($this->lockDir, 0700) && !\is_dir($this->lockDir)) {
+            throw new \RuntimeException("Could not create lock directory {$this->lockDir}");
+        }
     }
 
     /**
@@ -368,19 +374,19 @@ final class MemcachedServer
     }
 
     /**
-     * Run `$fn` while holding the claim on `$key`, so that no other worker changes that key meanwhile.
+     * Run `$fn` while holding a lock with `flock()` on `$key`, so that no other worker changes that key meanwhile.
      *
      * @param \Closure(): string $fn
      */
     private function locked(string $key, \Closure $fn): string
     {
-        if (null === ($claim = Swerve::claim("mc:$key")->acquire(5.0))) {
-            return "SERVER_ERROR key is busy\r\n";
-        }
+        $fp = \fopen($this->lockDir . '/' . \hash('sha256', $key), 'c');
         try {
+            \flock($fp, \LOCK_EX);   // waits as a coroutine, with the extension or the plug
             return $fn();
         } finally {
-            $claim->release();
+            \flock($fp, \LOCK_UN);
+            \fclose($fp);
         }
     }
 

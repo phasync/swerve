@@ -103,7 +103,7 @@ memory, say) ends the worker and every request in it, not only the request that 
 
 A recycled worker lingers: it keeps its upgraded connections and long responses fed by subscriptions (SSE) instead of
 dropping them, until the last client has left or `--linger` seconds (1800) have passed, then
-closes what is left and exits. Its subscriptions, cache and claims go on
+closes what is left and exits. Its subscriptions and cache go on
 working meanwhile. Budget for them: a slot may have up to three lingering workers besides its
 serving one, each with its memory (a recycle that would be the fourth waits until one exits, and
 is logged once). `--linger=0` drops the connections of a recycled worker at once, as a reload

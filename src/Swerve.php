@@ -23,7 +23,6 @@ use Swerve\Util\Topics;
  * ```
  *
  * @see Swerve\Cache
- * @see Swerve\Claim
  * @see Swerve\Subscription
  *
  * @topic request-handlers
@@ -242,34 +241,6 @@ final class Swerve
     public static function cache(): \Psr\SimpleCache\CacheInterface
     {
         return Cache::instance();
-    }
-
-    /**
-     * A handle on the name `$name`, which one holder at a time can hold across the workers.
-     *
-     * Nothing is claimed until `acquire()` is called: `Swerve::claim('name')->acquire()` is null,
-     * or the held handle. It is held until released, destroyed, or its worker exits or dies.
-     *
-     * ```php
-     * if ($claim = Swerve::claim('nightly-report')->acquire()) {
-     *     run_report();
-     * }                                     // released when $claim goes out of scope
-     * ```
-     *
-     * @param string $name any non-empty string; a namespace of its own, apart from the cache's keys
-     *
-     * @throws \InvalidArgumentException for an empty name
-     *
-     * @see Swerve\Claim
-     * @see Swerve::cache
-     *
-     * @topic coordination-across-workers
-     *
-     * @example examples/Swerve.claim/1-one-at-a-time.php Only one runs the report
-     */
-    public static function claim(string $name): Claim
-    {
-        return new Claim($name);
     }
 
     /**

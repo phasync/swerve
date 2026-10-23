@@ -21,7 +21,8 @@ Breaking: `swerve.php` returns a mode instead of a `Swerve\RequestHandler`.
 - Without a `swerve.php`, `swerve [dir] [router.php]` and `-t` serve a Classic application, as
   `php -S`. `--classic-workers` bounds Classic's processes, which run as PHP-FPM's `pm = ondemand`.
 - Removed: `Swerve\RequestHandler`, `Swerve\StaticFiles`, `--public`, `--adapter`, the file
-  argument, and adapter discovery through Composer's `extra.swerve`.
+  argument, adapter discovery through Composer's `extra.swerve`, and `Swerve::claim()`; use
+  `flock()`.
 
 ## 0.1.0 (2026-10-19)
 
