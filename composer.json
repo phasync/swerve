@@ -15,7 +15,8 @@
         "psr/http-server-handler": "^1.0",
         "phasync/plug": "@dev",
         "phasync/babel": "@dev",
-        "phasync/hooked": "@dev"
+        "phasync/hooked": "@dev",
+        "frodeborli/serializor": "dev-master as 2.1.99"
     },
     "bin": [
         "bin/swerve"
@@ -64,6 +65,13 @@
         {
             "type": "path",
             "url": "/home/frode/dev/phasync-hooked",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "type": "path",
+            "url": "/home/frode/dev/serializor",
             "options": {
                 "symlink": true
             }

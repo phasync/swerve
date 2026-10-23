@@ -54,10 +54,11 @@ final class ServerRunner implements Runner
 
     public function forward(ClientRequest $request, string $script, string $scriptName, ?string $pathInfo): void
     {
-        $backend = null;
+        $backend  = null;
+        $handover = null;
         try {
-            $backend = Backend::connect($this->socket);
-            $this->exchange($backend, $request, $script, $scriptName, $pathInfo);
+            $backend  = Backend::connect($this->socket);
+            $handover = $this->exchange($backend, $request, $script, $scriptName, $pathInfo);
         } catch (IOException $e) {
             // The server's end failed: the process is gone. The client's own failures are IOExceptions
             // too, and end its exchange the same way.
@@ -71,9 +72,13 @@ final class ServerRunner implements Runner
         } finally {
             $backend?->close();
         }
+        if (null !== $handover) {
+            Handover::run($request, $handover);
+        }
     }
 
-    private function exchange(Backend $backend, ClientRequest $request, string $script, string $scriptName, ?string $pathInfo): void
+    /** @return string|null the handover the script named in its response head (WebSocket::setup()) */
+    private function exchange(Backend $backend, ClientRequest $request, string $script, string $scriptName, ?string $pathInfo): ?string
     {
         $headers = [];
         foreach ($request->getRequestHeaders() as $name => $values) {
@@ -127,6 +132,10 @@ final class ServerRunner implements Runner
             foreach ($response['headers'] as [$name, $value]) {
                 $out[\strtolower($name)][] = $value;
             }
+            if (isset($out[ServiceServer::HANDOVER])) {
+                // The script handed its client over: what it sends from now on goes nowhere
+                return $out[ServiceServer::HANDOVER][0];
+            }
             // What arrived with the head: a response complete already (a small page, which the
             // server sends at the end in one batch) goes out with a Content-Length in one write
             $body     = '';
@@ -161,6 +170,8 @@ final class ServerRunner implements Runner
                 }
             }
             $request->end();
+
+            return null;
         } finally {
             // The body ends with its end frame, as the protocol wants, also when the script stopped reading it
             $pump?->finish();

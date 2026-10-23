@@ -111,6 +111,28 @@ namespace Swerve\Classic {
     }
 
     /**
+     * Hand the request's client over to the worker that forwarded it: WebSocket::setup() and
+     * ServerSentEvents::setup(). The closure goes to the worker through the service socket
+     * (serialized by Serializor: it must be static, and its `use` values must travel), the
+     * response head names it, and from then on the script's output goes nowhere.
+     */
+    final class Handover
+    {
+        public static function setup(string $kind, \Closure $closure, array $options): void
+        {
+            if (\headers_sent($file, $line)) {
+                throw new \LogicException("Handing the client over must come before any output (output started at $file:$line)");
+            }
+            if (null !== (new \ReflectionFunction($closure))->getClosureThis()) {
+                throw new \LogicException('The function handed over must be static: it runs in a Swerve worker, where $this does not exist');
+            }
+            $id = Services::call(['handover', \Serializor\Serializor::serialize([$kind, $closure, $options])]);
+            \header("X-Swerve-Handover: $id");
+            \flush(); // the head goes out now: the worker takes the client over as it arrives
+        }
+    }
+
+    /**
      * Swerve::cache() in a Classic script, with the PSR-16 interface when the application has it
      * loaded. Values are serialized here, with the application's classes, and stored as they are.
      */
@@ -254,6 +276,41 @@ namespace Swerve\Classic {
 }
 
 namespace Swerve {
+    if (!\class_exists(WebSocket::class, false)) {
+        /** A WebSocket from a Classic script: see classic-client.php. */
+        final class WebSocket
+        {
+            /**
+             * Upgrade the request to a WebSocket that `$callback` runs in a Swerve worker, as
+             * WebSocket::from() does; the script goes on as if its client had left.
+             *
+             * @param \Closure(WebSocket): void $callback a static function; its `use` values travel as copies
+             */
+            public static function setup(\Closure $callback, array $subprotocols = [], ?array $origins = null, int $maxMessage = 1 << 20): void
+            {
+                \Swerve\Classic\Handover::setup('websocket', $callback, [$subprotocols, $origins, $maxMessage]);
+            }
+        }
+    }
+
+    if (!\class_exists(ServerSentEvents::class, false)) {
+        /** Server-Sent Events from a Classic script: see classic-client.php. */
+        final class ServerSentEvents
+        {
+            /**
+             * Turn the response into an event stream that `$callback` writes from a Swerve worker;
+             * the script goes on as if its client had left.
+             *
+             * @param \Closure(ServerSentEvents): void $callback a static function; its `use` values travel as copies
+             * @param array<string, string|list<string>> $headers more response headers
+             */
+            public static function setup(\Closure $callback, array $headers = []): void
+            {
+                \Swerve\Classic\Handover::setup('sse', $callback, [$headers]);
+            }
+        }
+    }
+
     if (!\class_exists(Swerve::class, false)) {
         /** Swerve's services in a Classic script: see classic-client.php. */
         final class Swerve
@@ -292,6 +349,16 @@ namespace Swerve {
 }
 
 namespace {
+    // Serializor, from Swerve's own installation, for the handovers
+    if ('' !== ($serializor = (string) \getenv('SWERVE_SERIALIZOR'))) {
+        \spl_autoload_register(static function (string $class) use ($serializor): void {
+            if (\str_starts_with($class, 'Serializor\\')) {
+                require $serializor . '/' . \strtr(\substr($class, 11), '\\', '/') . '.php';
+            }
+        });
+    }
+    unset($serializor);
+
     // The request names the worker's service socket; the application doesn't see the header
     \Swerve\Classic\Services::$path = $_SERVER['HTTP_X_SWERVE_SERVICES'] ?? null;
     unset($_SERVER['HTTP_X_SWERVE_SERVICES']);

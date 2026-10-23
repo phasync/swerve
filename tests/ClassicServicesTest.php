@@ -62,3 +62,27 @@ it('hides the private header from the application, and a client can\'t send one'
     $addr = services_start();
     expect(services_get($addr, '/header', "X-Swerve-Services: /tmp/evil.sock\r\n"))->toBe('false');
 });
+
+it('hands a script\'s client over to the worker: a WebSocket its closure runs there', function () {
+    $addr = services_start();
+    $ws   = ws_connect($addr, '/ws');
+    ws_send($ws, 0x1, 'hi');
+    expect(ws_read($ws))->toBe([0x1, 'echo: hi']);
+    ws_send($ws, 0x1, 'again');
+    expect(ws_read($ws))->toBe([0x1, 'echo: again']);
+});
+
+it('hands a script\'s client over to the worker: an event stream', function () {
+    $addr = services_start();
+    $conn = stream_socket_client("tcp://$addr");
+    fwrite($conn, "GET /sse HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+    $response = (string) stream_get_contents($conn);
+    expect($response)->toContain("content-type: text/event-stream")
+        ->and($response)->toContain("data: one\n\n")
+        ->and($response)->toContain("data: two\n\n")
+        ->and($response)->not->toContain('discarded');
+});
+
+it('refuses a closure that isn\'t static', function () {
+    expect(services_get(services_start(), '/not-static'))->toContain('must be static');
+});

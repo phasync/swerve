@@ -30,6 +30,15 @@ final class ServiceServer
     /** The request header that names the socket, which no client may send. */
     public const HEADER = 'x-swerve-services';
 
+    /** The response header of a script that handed its client over (WebSocket::setup()): the id. */
+    public const HANDOVER = 'x-swerve-handover';
+
+    /** Seconds a handover waits to be taken, after which nobody will. */
+    private const HANDOVER_TTL = 30.0;
+
+    /** @var array<string, array{string, float}> handover id => Serializor's payload, and when it came */
+    private static array $handovers = [];
+
     public const CALL      = 1;
     public const REPLY     = 2;
     public const JSON      = 3;
@@ -136,7 +145,36 @@ final class ServiceServer
             'cache.delete' => Cache::instance()->deleteMultiple($call[1]),
             'cache.clear'  => Cache::instance()->clear(),
             'publish'      => self::publish($call[1], $call[2]),
+            'handover'     => self::store($call[1]),
         };
+    }
+
+    /** Keep what a script's WebSocket::setup() serialized, for the worker that sees its response head. */
+    private static function store(string $payload): string
+    {
+        $now = \microtime(true);
+        foreach (self::$handovers as $id => [, $at]) {
+            if ($now - $at > self::HANDOVER_TTL) {
+                unset(self::$handovers[$id]);
+            }
+        }
+        $id                    = \bin2hex(\random_bytes(16));
+        self::$handovers[$id] = [$payload, $now];
+
+        return $id;
+    }
+
+    /**
+     * What a script handed over under $id: taken once.
+     *
+     * @throws \UnexpectedValueException for an unknown or expired id
+     */
+    public static function take(string $id): string
+    {
+        $payload = self::$handovers[$id][0] ?? throw new \UnexpectedValueException("A script named the handover $id, which this worker doesn't have");
+        unset(self::$handovers[$id]);
+
+        return $payload;
     }
 
     private static function publish(string $topic, string $encoded): null

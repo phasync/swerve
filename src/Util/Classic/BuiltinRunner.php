@@ -132,7 +132,7 @@ final class BuiltinRunner implements Runner
             }
         };
         try {
-            $this->exchange($request, $process, $script, $scriptName, $pathInfo, $release);
+            $handover = $this->exchange($request, $process, $script, $scriptName, $pathInfo, $release);
         } catch (\Throwable $e) {
             $release();
             if (!$e instanceof IOException) {
@@ -152,6 +152,9 @@ final class BuiltinRunner implements Runner
             return;
         }
         $release();
+        if (null !== $handover) {
+            Handover::run($request, $handover);
+        }
     }
 
     /** An idle process (if it is still running), a freshly started one, or waits for a release. */
@@ -288,7 +291,8 @@ final class BuiltinRunner implements Runner
     }
 
     /** Sends the request to the backend and streams its response to $request. */
-    private function exchange(ClientRequest $request, BuiltinProcess $process, string $script, string $scriptName, ?string $pathInfo, \Closure $release): void
+    /** @return string|null the handover the script named in its response head (WebSocket::setup()) */
+    private function exchange(ClientRequest $request, BuiltinProcess $process, string $script, string $scriptName, ?string $pathInfo, \Closure $release): ?string
     {
         $headers = $request->getRequestHeaders();
         $host    = $headers['host'][0] ?? $request->local();
@@ -346,7 +350,7 @@ final class BuiltinRunner implements Runner
                 $this->backendWrite($conn, $process, "0\r\n\r\n");
             }
 
-            $this->relayResponse($request, $conn, $process, $release);
+            return $this->relayResponse($request, $conn, $process, $release);
         } finally {
             $conn->close();
             $this->preconnect($process);
@@ -432,7 +436,8 @@ final class BuiltinRunner implements Runner
     }
 
     /** Reads the response head, sends it on, then streams the body; releases $process as soon as the backend's side of it is read. */
-    private function relayResponse(ClientRequest $request, Duplex $conn, BuiltinProcess $process, \Closure $release): void
+    /** @return string|null the handover the script named, its response not relayed; null when relayed */
+    private function relayResponse(ClientRequest $request, Duplex $conn, BuiltinProcess $process, \Closure $release): ?string
     {
         $buf = '';
         while (!\str_contains($buf, "\r\n\r\n")) {
@@ -464,6 +469,12 @@ final class BuiltinRunner implements Runner
             $name  = \trim(\substr($line, 0, $pos));
             $value = \trim(\substr($line, $pos + 1));
             $lower = \strtolower($name);
+            if (ServiceServer::HANDOVER === $lower) {
+                // The script handed its client over: what it sends from now on goes nowhere
+                $release();
+
+                return $value;
+            }
             if ('content-length' === $lower) {
                 $contentLength = (int) $value;
             }
@@ -498,7 +509,7 @@ final class BuiltinRunner implements Runner
             $release(); // the backend closed early: also done with it, just short a response
             $request->end();
 
-            return;
+            return null;
         }
 
         $request->sendResponseHeaders($status, $outHeaders);
@@ -517,6 +528,8 @@ final class BuiltinRunner implements Runner
             $release();
         }
         $request->end();
+
+        return null;
     }
 
     private function relayChunked(ClientRequest $request, Duplex $conn, BuiltinProcess $process, string $buf, \Closure $release): void

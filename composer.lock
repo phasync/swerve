@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "175f6f363751f4c04f69a0f2895c91f0",
+    "content-hash": "5b3cf2031ac80b312403d3992062f750",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -65,6 +65,58 @@
             "time": "2026-10-19T11:28:48+00:00"
         },
         {
+            "name": "frodeborli/serializor",
+            "version": "dev-master",
+            "dist": {
+                "type": "path",
+                "url": "/home/frode/dev/serializor",
+                "reference": "c4854f10a9598d1c70f47ae6356bb8ec6dca79e3"
+            },
+            "require": {
+                "php": "^8.1"
+            },
+            "require-dev": {
+                "laravel/serializable-closure": "^2.0",
+                "maantje/charts": "^0.8.1",
+                "opis/closure": "^4.4",
+                "pestphp/pest": "^1.18"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Serializor\\": "src/"
+                },
+                "files": [
+                    "Serializor.php"
+                ]
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "Tests\\": "tests/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "PHP Serializor will serialize almost anything in PHP, including closures and anonymous classes.",
+            "keywords": [
+                "SerializableClosure",
+                "opis closure",
+                "serialization",
+                "serialize"
+            ],
+            "transport-options": {
+                "symlink": true,
+                "relative": false
+            }
+        },
+        {
             "name": "phasync/babel",
             "version": "dev-main",
             "dist": {
@@ -119,7 +171,7 @@
             "dist": {
                 "type": "path",
                 "url": "/home/frode/dev/phasync-hooked",
-                "reference": "e6330b25853603ca366430e04e6c372acb3bc5a5"
+                "reference": "a5ab101cabd92957a798050786f4b166831f91fe"
             },
             "require": {
                 "phasync/phasync": "^2.0.4",
@@ -273,7 +325,7 @@
             "dist": {
                 "type": "path",
                 "url": "/home/frode/dev/phasync-plug",
-                "reference": "f272b5453a43492ec87b0873404bd4783a28117e"
+                "reference": "7f4adc7328cc1adcc5c2251611b4e0b4b1f2ac31"
             },
             "require": {
                 "phasync/babel": "*",
@@ -6102,10 +6154,18 @@
             "time": "2026-10-05T23:14:19+00:00"
         }
     ],
-    "aliases": [],
+    "aliases": [
+        {
+            "package": "frodeborli/serializor",
+            "version": "9999999-dev",
+            "alias": "2.1.99",
+            "alias_normalized": "2.1.99.0"
+        }
+    ],
     "minimum-stability": "stable",
     "stability-flags": {
         "friendsofphp/php-cs-fixer": 20,
+        "frodeborli/serializor": 20,
         "phasync/babel": 20,
         "phasync/hooked": 20,
         "phasync/plug": 20
