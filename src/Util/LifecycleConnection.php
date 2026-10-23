@@ -3,43 +3,42 @@
 namespace Swerve\Util;
 
 /**
- * The master's record of one worker process, see Cluster.
+ * The master's record of one lifecycle's connection, see Cluster.
  *
  * @internal
  */
-final class WorkerProcess
+final class LifecycleConnection
 {
-    /** Forked; loading the application and opening its listeners. */
+    /** Said hello; loading the application. */
     public const STARTING = 0;
-    /** Sent 'R': listening and serving. */
+    /** Sent 'R': accept()ing. */
     public const SERVING = 1;
-    /** Asked to drain ('T', or SIGTERM from outside): finishing its requests, then exiting. */
+    /** Asked to drain ('T', or SIGTERM from outside): finishing its requests, then ending. */
     public const DRAINING = 2;
 
     public int $state = self::STARTING;
     public ?float $readyAt = null;
     public ?float $drainingSince = null;
 
-    /** Sent 'Q': it serves requests, so it started fine, see Cluster::exited(). */
+    /** Sent 'Q': it served, so it started fine. */
     public bool $served = false;
-    /** Sent 'C': asks to be replaced, see Cluster::handover(). */
+    /** Sent 'C': recycling (logged only; the ext and the lifecycle's own linger timer do the rest). */
     public bool $recycle = false;
-    /** Draining, but serving its upgraded connections until they close or the linger time is over: sent 'G', see Cluster::drain(). */
+    /** Draining, but keeping its upgraded connections until they close or the linger time is over. */
     public bool $lingering = false;
     /** Sent 'F': a PHP fatal error ends it. */
     public bool $fatal = false;
 
     /** Bytes read from it that don't make a whole frame yet, see Topics::parse(). */
     public string $in = '';
-    /** Bytes for it that its pipe did not take yet, see Cluster::send(). */
+    /** Bytes for it that its connection did not take yet. */
     public string $out = '';
     /** Why the master SIGKILLed it, for the exit log; set once, so it is killed once. */
     public ?string $killReason = null;
 
     /**
-     * @param resource|null $pipe     the master's end of the socket pair; null once it reached EOF
-     * @param int           $inbox    its inbox, see Inboxes
-     * @param int|null      $replaces the SERVING worker this one takes over from, in a reload or recycle
+     * @param resource|null $pipe  the master's end of its connection; null once it reached EOF
+     * @param int           $inbox its inbox, see Inboxes
      */
     public function __construct(
         public readonly int $pid,
@@ -49,7 +48,6 @@ final class WorkerProcess
         public readonly float $started,
         public float $lastSeen,
         public readonly int $inbox,
-        public readonly ?int $replaces,
     ) {
     }
 }

@@ -92,14 +92,26 @@ final class System {
      */
     public static function listen(string $address): mixed
     {
-        return self::$unixListeners[$address] ??= self::listenUnix(\substr($address, 5));
+        return self::$unixListeners[$address] ??= self::listenUnix(\substr($address, 5), 0666);
     }
 
     /** @var array<string, resource> */
     private static array $unixListeners = [];
 
+    /**
+     * The master's own control socket (SWERVE_MASTER): a unix listener at $path, mode 0600 (the
+     * master's own use only), not shared with anything inherited across proc_open: every
+     * lifecycle connects to it as a client instead.
+     *
+     * @return resource non-blocking
+     */
+    public static function listenControl(string $path): mixed
+    {
+        return self::listenUnix($path, 0600);
+    }
+
     /** @return resource */
-    private static function listenUnix(string $path): mixed
+    private static function listenUnix(string $path, int $mode): mixed
     {
         if (\file_exists($path)) {
             if ('socket' !== \filetype($path)) {
@@ -124,7 +136,7 @@ final class System {
                 throw new \RuntimeException("Could not listen at $path: $errstr", $errno);
             }
         }
-        \chmod($path, 0666);
+        \chmod($path, $mode);
         \stream_set_blocking($listener, false);
 
         return $listener;

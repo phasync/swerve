@@ -12,15 +12,22 @@ use Swerve\StopReason;
 use Swerve\WorkerStoppingException;
 
 /**
- * A worker process's side of the supervision, see Cluster: tells the master it is alive
- * and ready, asks to be recycled when it leaks, and drains its servers when the master asks
- * ('T' over the socket pair), on SIGTERM from outside, or when the master died. After a
- * recycle the master sends 'G' instead: the worker then lingers, draining but keeping its
- * upgraded connections until they are gone, or until `--linger` seconds passed, see stopLingering().
+ * A lifecycle's side of the supervision, see Cluster: tells the master it is alive and ready,
+ * asks to be recycled when it leaks, and drains when the master asks ('T' over its connection),
+ * on SIGTERM from outside, or when the master connection ends. After a recycle the master sends
+ * 'G' instead: the lifecycle then lingers, draining but keeping its upgraded connections until
+ * they are gone, or until `--linger` seconds passed, see stopLingering(). 'U' asks it to call
+ * `phasync\ext\worker_detach()` first, so the ext starts this slot's replacement at once, before
+ * it drains: see Cluster.
+ *
+ * The master's connection is a plain unix stream (see inc/lifecycle.php): its end, read as EOF
+ * here, is the lifecycle's end, whether the master closed it on purpose or died. A stuck event
+ * loop can't read that EOF, so the watchdog's alarm also peeks at the connection itself (without
+ * waiting) before giving up and self-killing: see the SIGALRM handler.
  *
  * SIGINT and SIGHUP are ignored: Ctrl+C and a closing terminal signal the whole process
- * group, and only the master decides what happens to the workers. SIGQUIT logs what the
- * worker is doing: the requests in flight, and where the code runs.
+ * group, and only the master decides what happens to a lifecycle. SIGQUIT logs what it is
+ * doing: the requests in flight, and where the code runs.
  *
  * @internal
  */
@@ -70,13 +77,13 @@ final class Worker
     private float $lastTick = 0.0;
     /** When the worker started: the SIGQUIT dump's silence before the first heartbeat. */
     private readonly float $startedAt;
-    /** Bytes for the master that the pipe did not take yet, see send(). */
+    /** Bytes for the master that the connection did not take yet, see send(). */
     private string $out = '';
-    /** Seconds without a tick after which SIGALRM checks whether the master is alive; 0 = never. */
+    /** Seconds without a tick after which SIGALRM checks whether the master connection is alive; 0 = never. */
     private readonly int $stallCheck;
 
     /**
-     * @param resource             $pipe     the worker's end of the socket pair to the master
+     * @param resource             $master   the lifecycle's connection to the master (see inc/lifecycle.php)
      * @param float                $watchdog the master's watchdog timeout, see the SIGALRM handler; 0 = off
      * @param int                  $inboxId  the worker's inbox, see Inboxes
      * @param resource             $inbox    its read end
@@ -84,8 +91,7 @@ final class Worker
      */
     public function __construct(
         public readonly int $slot,
-        private $pipe,
-        private readonly int $masterPid,
+        private $master,
         private readonly float $grace,
         private readonly float $linger,
         float $watchdog,
@@ -113,27 +119,31 @@ final class Worker
             }
             $this->logger->warning('Silent for {s} s; in flight: {requests}; at {at}', ['s' => \round(\microtime(true) - ($this->lastTick ?: $this->startedAt), 1), 'requests' => $this->describeInFlight(), 'at' => \implode(' < ', $at)]);
         });
-        // The master's watchdog can't stop a worker whose event loop is stuck once the master is
-        // gone, and such a worker would keep its listener, taking a share of the connections of
-        // the next swerve on the address and never answering them. heartbeat() re-arms the alarm,
-        // so it only goes off when the loop stalled; being async, the handler still runs.
+        // The master's watchdog can't stop a lifecycle whose event loop is stuck once the master
+        // connection is gone, and such a lifecycle would keep asking worker_next() for
+        // connections, taking a share of them and never answering. heartbeat() re-arms the
+        // alarm, so it only goes off when the loop stalled; being async, the handler still runs.
         //
         // A signal cuts short the application's blocking calls (sleep(), stream_select()), so the
         // alarm comes a second after the watchdog's timeout, when a live master has killed the
-        // worker already: while the master lives, it never goes off. With the watchdog off,
-        // stalls are allowed, and there is no alarm once the worker serves; the application may
-        // use SIGALRM then.
+        // worker already (by its pid): while the master lives, it never goes off. With the
+        // watchdog off, stalls are allowed, and there is no alarm once the worker serves; the
+        // application may use SIGALRM then.
         //
         // Until the worker serves, the alarm comes a second after READY_TIMEOUT instead, past
         // which the master kills a worker not ready: one stuck loading the application (a
         // database connect without a timeout) must not outlive a master that died meanwhile.
+        //
+        // The master connection's own EOF (awaitMaster()) is the normal way a dead master is
+        // noticed; this alarm is only for when the event loop is too stuck to read it: a plain,
+        // non-suspending peek at the connection (no cooperative wait: the loop is stuck).
         $this->stallCheck = $watchdog > 0 ? (int) \ceil($watchdog) + 1 : 0;
         phasync::onSignal(\SIGALRM, function () {
-            if (\posix_getppid() !== $this->masterPid) {
+            if ($this->masterGone()) {
                 if ($this->ticking) {
-                    $this->logger->critical('Master process died while the event loop was stuck for {s} s; exiting', ['s' => \round(\microtime(true) - $this->lastTick, 1)]);
+                    $this->logger->critical('Master connection died while the event loop was stuck for {s} s; exiting', ['s' => \round(\microtime(true) - $this->lastTick, 1)]);
                 } else {
-                    $this->logger->critical('Master process died while the application was loading; exiting');
+                    $this->logger->critical('Master connection died while the application was loading; exiting');
                 }
                 \posix_kill(\getmypid(), \SIGKILL); // stuck: nothing else is sure to end it
             }
@@ -149,17 +159,28 @@ final class Worker
             $error = \error_get_last();
             if (($error['type'] ?? 0) & (\E_ERROR | \E_CORE_ERROR | \E_COMPILE_ERROR | \E_PARSE)) {
                 // Blocking: the process is ending, and a frame half sent must not swallow the 'F'
-                \stream_set_blocking($this->pipe, true);
-                @\fwrite($this->pipe, $this->out . 'F');
+                \stream_set_blocking($this->master, true);
+                @\fwrite($this->master, $this->out . 'F');
                 \ini_set('memory_limit', '-1');
                 $this->logger->critical('PHP fatal error: {message} in {file}:{line}; in flight: {requests}', $error + ['requests' => $this->describeInFlight()]);
             }
         });
-        // Blocked by the master around the fork: a signal that came meanwhile arrives now
-        \pcntl_sigprocmask(\SIG_UNBLOCK, [\SIGTERM, \SIGINT, \SIGHUP, \SIGUSR1, \SIGUSR2, \SIGQUIT]);
-        \stream_set_blocking($pipe, false);
+        \stream_set_blocking($master, false);
         Topics::$toMaster = fn (string $topic, string $message, bool $json = false) => $this->send(Topics::frame($topic, $message, $json));
         Topics::connect($inboxId, $peers, $logger);
+    }
+
+    /**
+     * A non-suspending peek at the master connection, for the SIGALRM handler: whether it has
+     * already reached EOF. Never waits (the event loop may be stuck): a plain stream_select()
+     * with no timeout.
+     */
+    private function masterGone(): bool
+    {
+        $read = [$this->master];
+        $write = $except = null;
+
+        return false !== @\stream_select($read, $write, $except, 0) && [] !== $read && \feof($this->master);
     }
 
     /**
@@ -343,8 +364,11 @@ final class Worker
     }
 
     /**
-     * Ask the master for a replacement, once. This worker serves on until the replacement
-     * listens and the master asks it to drain.
+     * Recycle: tell the master (for its log, see Cluster), detach from the worker-parent's index
+     * (the ext forks a replacement for it at once, so no master round trip is needed to get
+     * one), then drain, but linger: this lifecycle keeps its upgraded connections (and any plain
+     * request already running) until they end, or `--linger` seconds pass. With nothing to
+     * linger for, it simply ends at once, as its drain() returns to an empty accept() loop.
      */
     private function recycle(string $why): void
     {
@@ -352,12 +376,19 @@ final class Worker
             return;
         }
         $this->recycleSent = true;
-        $this->logger->notice('Recycling: {why}; asking the master for a replacement', ['why' => $why]);
+        $this->logger->notice('Recycling: {why}', ['why' => $why]);
         $this->send('C');
+        if (\function_exists('phasync\ext\worker_detach')) {
+            \phasync\ext\worker_detach();
+        }
+        $this->stopReason = StopReason::Recycle;
+        $this->drain($why, true);
     }
 
     /**
-     * The heartbeat, acting on the master's death, and the end of the linger time.
+     * The heartbeat, and the end of the linger time; the master connection's death is noticed by
+     * awaitMaster()'s EOF, which drains directly (or by the SIGALRM handler, if the loop is too
+     * stuck to read it).
      *
      * The heartbeat comes from a coroutine in the event loop, not from a timer signal: async
      * signal handlers run even during a busy loop, and would hide the stall the master's
@@ -374,16 +405,8 @@ final class Worker
             if (!$this->draining) {
                 $this->checkMemory(); // leaks while idle, or in long responses such as SSE
             }
-            if (!$this->draining && \posix_getppid() !== $this->masterPid) {
-                $this->logger->critical('Master process died; draining');
-                $this->drain('the master died');
-            } elseif (null !== $this->lingerEnd) {
-                if (\posix_getppid() !== $this->masterPid) {
-                    $this->logger->critical('Master process died; closing the lingering connections');
-                    $this->stopLingering('the master died');
-                } elseif ($now >= $this->lingerEnd) {
-                    $this->stopLingering('the linger time is over');
-                }
+            if (null !== $this->lingerEnd && $now >= $this->lingerEnd) {
+                $this->stopLingering('the linger time is over');
             }
             phasync::sleep(self::TICK);
         }
@@ -409,18 +432,27 @@ final class Worker
     }
 
     /**
-     * Act on what the master sends: 'T' to drain, 'G' to drain but linger, 'L' to reopen the log file after log
-     * rotation, and the replies to its requests, see Cache and Topics. Bytes, not signals: a signal cuts short the
-     * blocking calls (sleep(), stream_select()) of the requests in flight, which a drain is there
-     * to let finish. Ends at the end of the pipe, when the master died; tick() acts on that.
+     * Act on what the master sends: 'U' to detach from this slot (a replacement starts at once;
+     * see Cluster) before draining, 'T' to drain, 'G' to drain but linger, 'L' to reopen the log
+     * file after log rotation, and the replies to its requests, see Cache and Topics. Bytes, not
+     * signals: a signal cuts short the blocking calls (sleep(), stream_select()) of the requests
+     * in flight, which a drain is there to let finish. The connection's end (the master closed
+     * it, or died) drains this lifecycle directly: see the class's docblock.
      */
     private function awaitMaster(): void
     {
         $buffer            = '';
         Cache::markListening();
         while (true) {
-            $bytes = (string) \fread(phasync::readable($this->pipe, \PHP_FLOAT_MAX), 65536);
-            if ('' === $bytes && \feof($this->pipe)) {
+            $bytes = (string) \fread(phasync::readable($this->master, \PHP_FLOAT_MAX), 65536);
+            if ('' === $bytes && \feof($this->master)) {
+                if (!$this->draining) {
+                    $this->stopReason = StopReason::Shutdown;
+                    $this->drain('the master connection ended');
+                } elseif (null !== $this->lingerEnd) {
+                    $this->stopLingering('the master connection ended');
+                }
+
                 return;
             }
             $buffer .= $bytes;
@@ -432,6 +464,13 @@ final class Worker
             });
             if (\str_contains($status, 'L') && $this->logger instanceof Logger) {
                 $this->logger->reopen();
+            }
+            if (\str_contains($status, 'U')) {
+                try {
+                    \phasync\ext\worker_detach();
+                } catch (\Throwable $e) {
+                    $this->logger->error('worker_detach() failed: {exception}', ['exception' => $e]);
+                }
             }
             if (\str_contains($status, 'G') && !$this->draining) {
                 $this->stopReason = StopReason::Recycle;

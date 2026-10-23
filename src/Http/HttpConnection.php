@@ -170,11 +170,21 @@ final class HttpConnection
     public readonly bool $proxied;
 
     /**
+     * Whether serve() returned by handing the connection to its caller instead of closing it
+     * (see $onIdle): true once $onIdle said so.
+     */
+    private bool $handedOff = false;
+
+    /**
      * @param \Closure(\Swerve\ClientRequest): void $handler     the application's
      * @param ?Logger                               $access      the access log, if on
      * @param int                                   $maxBodySize a larger request body gets 413, by its Content-Length before
      *                                                           the application runs, or when a chunk would exceed it
      * @param ?TrustedProxies                       $proxies     whose X-Forwarded-* headers are believed, when this peer is one of them
+     * @param ?\Closure(self): bool                 $onIdle      asked after a keep-alive response, before reading the next
+     *                                                           request: true stops serve() here, without closing or lingering,
+     *                                                           so the caller may do something else with $io (park it, say);
+     *                                                           null (the default): never, serve() always owns the connection
      */
     public function __construct(
         public readonly Duplex $io,
@@ -183,6 +193,7 @@ final class HttpConnection
         public readonly ?Logger $access,
         public readonly int $maxBodySize = self::MAX_BODY,
         public readonly ?TrustedProxies $proxies = null,
+        public readonly ?\Closure $onIdle = null,
     ) {
         $peer             = $io->peer();
         $this->remoteAddr = \trim(\substr($peer, 0, (int) \strrpos($peer, ':')), '[]');
@@ -221,6 +232,11 @@ final class HttpConnection
                 // in the handler runs once all of it is sent.
                 $keepAlive = (new \Scope())->run(phasync::run(...), $this->runRequest(...), $request);
                 unset($request);
+                if ($keepAlive && !$this->draining && null !== $this->onIdle && ($this->onIdle)($this)) {
+                    $this->handedOff = true;
+
+                    return; // the caller owns $this->io now: see $onIdle
+                }
                 // With the next request already buffered (pipelined), and the response written
                 // without waiting, nothing would suspend this coroutine: a client sending many
                 // requests at once would have the worker to itself until all are answered
@@ -239,6 +255,9 @@ final class HttpConnection
         } catch (\Throwable $e) {
             $this->logger->error('A connection failed: {exception}', ['exception' => $e]);
         } finally {
+            if ($this->handedOff) {
+                return;
+            }
             // swerve's own ending of the connection: shielded, so it completes while the worker stops
             phasync::shielded(function () {
                 if ($this->linger && !self::$exiting) {

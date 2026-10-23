@@ -5,13 +5,16 @@ namespace Swerve\Util;
 /**
  * The master's part of publish/subscribe: the inboxes, and who is subscribed.
  *
- * An inbox is a datagram socket pair the master makes before it forks any worker. The process
- * that holds the inbox reads one end; every other worker holds the other end and writes to it,
- * so a published message goes from the publisher straight to the workers with subscribers, never
- * through the master. A worker process gets a free inbox when it is forked, and the master takes
- * it back when the process is gone; a replacement started during a reload or a recycle has an
- * inbox of its own while the old process drains or lingers, so there are four times as many
- * inboxes as slots (see Cluster::MAX_LINGERING).
+ * An inbox is a datagram socket pair the master makes before it proc_open's the worker-parent. The
+ * process that holds the inbox reads one end; every other worker holds the other end and writes
+ * to it, so a published message goes from the publisher straight to the workers with subscribers,
+ * never through the master. Both ends of every inbox are inherited by the worker-parent (see
+ * Cluster, Inboxes::streams()), and so by every lifecycle it forks; a lifecycle learns which
+ * inbox is its own at hello, and re-opens that descriptor (and the others' write ends) itself,
+ * each time it starts (see inc/lifecycle.php). The master takes an inbox back when the
+ * lifecycle's connection ends; a replacement lifecycle (a reload, a recycle with upgraded
+ * connections) has an inbox of its own while the old one drains or lingers, so there are four
+ * times as many inboxes as slots (see Cluster::MAX_LINGERING).
  *
  * The master alone knows which inboxes have subscribers on a topic, as a bitmap: bit N is set
  * while the process in inbox N has a subscription. A worker asks for a topic's bitmap before it
@@ -71,26 +74,47 @@ final class Inboxes
     }
 
     /**
-     * In the new worker process, right after the fork: close the read end of every inbox but its
-     * own, and the write end of its own, so that only the owner reads an inbox and nobody writes
-     * to itself.
+     * The read end of every inbox, and the write end of every inbox: for the master to pass to
+     * the worker-parent process (see Cluster), at fixed descriptor numbers a lifecycle re-opens
+     * with `php://fd/N` (see inc/lifecycle.php). Replaces adopt(), which closed the fork's unused
+     * ends directly; a proc_open'd process can't do that for its own future (forked) children,
+     * so each lifecycle closes what it does not need itself, by descriptor number.
+     *
+     * @return array{0: array<int, resource>, 1: array<int, resource>}
+     */
+    public function streams(): array
+    {
+        return [$this->read, $this->write];
+    }
+
+    /**
+     * In a lifecycle, right after hello told it which inbox is its own: re-open every inbox's
+     * read and write descriptor by number (see streams(), Cluster::startWorkerParent(), the
+     * SWERVE_INBOX_* env), then close what it does not need (every other inbox's read end, and
+     * its own write end), exactly as the old fork-time adopt() did, so that only the owner reads
+     * its inbox and nobody writes to itself.
      *
      * @return array{0: resource, 1: array<int, resource>} the inbox to read, and the others to write to
      */
-    public function adopt(int $own): array
+    public static function adoptFromFds(int $own, int $fdBase, int $count): array
     {
-        $peers = $this->write;
-        foreach ($this->read as $inbox => $read) {
+        $read = $write = [];
+        for ($inbox = 0; $inbox < $count; ++$inbox) {
+            $read[$inbox]  = \fopen('php://fd/' . ($fdBase + $inbox), 'r+');
+            $write[$inbox] = \fopen('php://fd/' . ($fdBase + $count + $inbox), 'r+');
+            \stream_set_blocking($read[$inbox], false);
+            \stream_set_blocking($write[$inbox], false);
+        }
+        $peers = $write;
+        foreach ($read as $inbox => $stream) {
             if ($inbox !== $own) {
-                \fclose($read);
+                \fclose($stream);
             }
         }
         \fclose($peers[$own]);
         unset($peers[$own]);
-        $read = $this->read[$own];
-        $this->read = $this->write = [];
 
-        return [$read, $peers];
+        return [$read[$own], $peers];
     }
 
     /**
