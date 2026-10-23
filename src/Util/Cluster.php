@@ -10,7 +10,8 @@ use Swerve\Cache;
  * The master process: starts the worker-parent (a `php -d phasync.workers=N` process, the ext's
  * C parent) and supervises it and the lifecycles it runs until stopped. The master itself never
  * loads the application and is not a phasync process: a plain stream_select() loop, so a bug in
- * the application, or an event loop stall, can't take the master down.
+ * the application, or an event loop stall, can't take the master down. There is exactly one
+ * worker-parent for the whole run; it is restarted if it dies.
  *
  * Every lifecycle (see inc/lifecycle.php) connects to the master's own unix socket (its path is
  * SWERVE_MASTER) when it starts, and says hello: its slot (PHASYNC_WORKER) and pid. The master
@@ -20,26 +21,22 @@ use Swerve\Cache;
  * times a second, 'R' once a lifecycle is ready to accept(), 'Q' at its first request, 'C' to ask
  * to be recycled, 'D' when it drains; the end of the connection is the lifecycle's end (not
  * necessarily the process's: the ext may run another lifecycle in the same process next). The
- * master writes 'T' to drain, 'G' to drain but linger (an upgraded connection's recycle), 'X' at
- * shutdown and 'L' to reopen the log file; cache and subscription requests (see Cache, Inboxes)
- * go over it too, framed as Topics::frame() says. A connection silent longer than the watchdog
+ * master writes 'T' to drain, 'U' to detach and drain (a rolling reload's slot) and 'X' at
+ * shutdown, 'L' to reopen the log file; cache and subscription requests (see Cache, Inboxes) go
+ * over it too, framed as Topics::frame() says. A connection silent longer than the watchdog
  * timeout is stuck: its pid gets SIGQUIT, to log what it is stuck in, then SIGKILL.
  *
- * Recycling (--max-memory, --max-requests) needs no master involvement when a lifecycle has no
- * upgraded connections to keep: it simply stops calling accept(), its lifecycle ends, and the ext
- * runs the next one in the same process, fresh. With upgraded connections, the lifecycle calls
- * phasync\ext\worker_detach() itself (the ext forks a replacement for its index at once) and then
- * lingers up to --linger seconds before it finishes. The master only logs 'C' and relies on the
- * ext's replacement and the lifecycle's own linger timer; see Worker.
+ * Recycling (--max-memory, --max-requests) needs no master involvement: the lifecycle itself
+ * calls phasync\ext\worker_detach() (the ext forks a replacement for its index at once) and
+ * lingers up to --linger seconds before it finishes; the master only logs 'C', see Worker.
  *
- * A reload (SIGHUP or SIGUSR2) starts a second worker-parent, of the next generation, on the
- * current code (a fresh `php` process: a fresh opcache compile), inheriting the same listener and
- * inbox descriptors, so both can accept() meanwhile ("the lot keeps accepting"). Once every slot
- * of the new generation is ready, every lifecycle of the old generation is told to drain ('T');
- * the old worker-parent is reaped once they are gone, or SIGKILLed (by process group: it runs
- * under `setsid`) after the grace period. Signals: SIGTERM, SIGINT or SIGQUIT drain every
- * lifecycle within the grace period, SIGKILL what remains, and stop the worker-parent the same
- * way. SIGUSR1 only reopens the log file.
+ * A reload (SIGHUP or SIGUSR2) replaces every lifecycle one slot at a time: the master sends 'U'
+ * to the lifecycle currently serving a slot, which detaches (its replacement, on the current
+ * code, is forked for that same index at once: "the lot keeps accepting", there is no new
+ * listener) and drains (no linger: a reload's code is outdated and must not keep serving); once
+ * the replacement says hello and becomes ready, the master moves to the next slot. Signals:
+ * SIGTERM, SIGINT or SIGQUIT drain every lifecycle within the grace period, SIGKILL what remains,
+ * and stop the worker-parent the same way. SIGUSR1 only reopens the log file.
  *
  * The master reaps every child that ends, also those it did not start itself: as PID 1 in a
  * container, or a subreaper, it inherits the orphans of the application's background jobs.
@@ -71,17 +68,13 @@ final class Cluster
     public const CRASH_LOOP = 3;
     /** How long a stuck lifecycle gets to log what it is stuck in, after SIGQUIT and before SIGKILL. */
     public const REPORT_WAIT = 0.1;
-    /** After SIGKILL, the longest wait for the processes to be reaped before the master exits anyway. */
+    /** After SIGKILL, the longest wait for the worker-parent to be reaped before the master exits anyway. */
     public const KILL_WAIT = 5.0;
     public const MONITOR_EVERY = 1.0;
     public const MONITOR_SHARE = 10;
     public const PAUSED = 1.0;
     /** Lingering lifecycles a slot may have at once (see Inboxes: four inboxes per slot). */
     public const MAX_LINGERING = 3;
-    /** Descriptor number the HTTP listener is passed at (phasync.workers_listener matches it). */
-    public const LISTENER_FD = 3;
-    /** First descriptor number of the inboxes: their read ends, then their write ends, see Inboxes::adoptFromFds(). */
-    public const INBOX_FD_BASE = 4;
 
     /** @var array<int, LifecycleConnection> by an id of our own (hello order), not the pid */
     private array $connections = [];
@@ -91,8 +84,9 @@ final class Cluster
     private array $pendingIn = [];
     private int $nextId = 1;
 
-    /** @var array<int, int> consecutive failed starts per slot, current generation */
+    /** @var array<int, int> consecutive failed starts per slot */
     private array $failures = [];
+    /** Bumped on every reload, for the log only: there is one worker-parent throughout. */
     private int $generation = 0;
     private bool $everReady = false;
     private ?int $exitCode = null;
@@ -108,23 +102,28 @@ final class Cluster
     private ?array $scanPending = null;
     private readonly int $masterPid;
 
-    /** @var array<int, array{pid: int, process: resource, started: float, stopping: bool}> by generation */
-    private array $workerParents = [];
+    /** A rolling reload in progress: the slot currently being replaced, one at a time. */
+    private bool $reloading = false;
+    private int $reloadSlot = 0;
+
+    private ?int $workerParentPid = null;
+    /** @var resource|null */
+    private $workerParentProcess = null;
+    private float $workerParentStarted = 0;
+    private bool $stopping = false;
 
     /** @var resource the master's own unix socket, non-blocking */
     private $masterListener;
     private readonly string $masterSocketPath;
 
     /**
-     * @param float                 $grace       seconds a draining lifecycle gets before SIGKILL
-     * @param float                 $linger      seconds a recycled lifecycle may keep its upgraded connections; 0 = not at all
-     * @param float                 $watchdog    seconds of silence after which a lifecycle is killed; 0 = off
-     * @param string|null           $monitorDir  reload when a PHP file below it changes
-     * @param string                $serving     what is served where, logged once the first lifecycle is ready
-     * @param list<string>          $workerParentArgv the worker-parent's command line (php binary and every argument);
-     *                                                 `-d phasync.workers_listener=` . self::LISTENER_FD is in it already when $listener is given
-     * @param array<string, string> $workerParentEnv  env common to every generation (SWERVE_MASTER* and the fd layout are added here)
-     * @param resource|null         $listener         the HTTP listener, at descriptor self::LISTENER_FD in every generation; null for --no-http
+     * @param float                 $grace            seconds a draining lifecycle gets before SIGKILL
+     * @param float                 $linger           seconds a recycled lifecycle may keep its upgraded connections; 0 = not at all
+     * @param float                 $watchdog         seconds of silence after which a lifecycle is killed; 0 = off
+     * @param string|null           $monitorDir       reload when a PHP file below it changes
+     * @param string                $serving          what is served where, logged once the first lifecycle is ready
+     * @param list<string>          $workerParentArgv the worker-parent's command line (php binary and every argument)
+     * @param array<string, string> $workerParentEnv  its environment (SWERVE_MASTER* are added here)
      */
     public function __construct(
         private readonly int $numWorkers,
@@ -136,7 +135,6 @@ final class Cluster
         private readonly string $serving,
         private readonly array $workerParentArgv,
         private readonly array $workerParentEnv,
-        private $listener = null,
         int $cacheBytes = 64 << 20,
     ) {
         $this->cache = new LruCache(maxBytes: $cacheBytes);
@@ -209,42 +207,27 @@ final class Cluster
     }
 
     /**
-     * proc_open the worker-parent of the current (or, for a reload, the next) generation, under
-     * `setsid` so the master can signal it and every lifecycle it forks as one process group
-     * without signalling itself.
+     * proc_open the worker-parent, under `setsid` so the master can signal it and every
+     * lifecycle it forks as one process group without signalling itself.
      */
     private function startWorkerParent(): void
     {
-        $generation = $this->generation;
-        [$reads, $writes] = $this->inboxes->streams();
-        $env        = $this->workerParentEnv + [
-            'SWERVE_MASTER'        => $this->masterSocketPath,
-            'SWERVE_MASTER_PID'    => (string) $this->masterPid,
-            'SWERVE_GENERATION'    => (string) $generation,
-            'SWERVE_INBOX_COUNT'   => (string) \count($reads),
-            'SWERVE_INBOX_FD_BASE' => (string) self::INBOX_FD_BASE,
+        $env = $this->workerParentEnv + [
+            'SWERVE_MASTER'     => $this->masterSocketPath,
+            'SWERVE_MASTER_PID' => (string) $this->masterPid,
         ];
-        $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
-        if (null !== $this->listener) {
-            $descriptors[self::LISTENER_FD] = $this->listener;
-        }
-        $fd = self::INBOX_FD_BASE;
-        foreach ($reads as $stream) {
-            $descriptors[$fd++] = $stream;
-        }
-        foreach ($writes as $stream) {
-            $descriptors[$fd++] = $stream;
-        }
-        $process = \proc_open(['setsid', ...$this->workerParentArgv], $descriptors, $pipes, null, $env);
+        // stdout/stderr go to the master's own (it logs nothing of its own over them, but a
+        // closed-pipe read end would SIGPIPE it on PHP's fatal-error text or a stray echo);
+        // nothing reads stdin.
+        $process = \proc_open(['setsid', ...$this->workerParentArgv], [0 => ['pipe', 'r'], 1 => \STDOUT, 2 => \STDERR], $pipes, null, $env);
         if (false === $process) {
             throw new \RuntimeException('Could not start the worker-parent process');
         }
-        foreach ($pipes as $pipe) {
-            \fclose($pipe); // its stdio is not ours to read: it logs nothing of its own
-        }
-        $pid = \proc_get_status($process)['pid'];
-        $this->workerParents[$generation] = ['pid' => $pid, 'process' => $process, 'started' => self::now(), 'stopping' => false];
-        $this->logger->info('Started the worker-parent {pid} (generation {generation})', ['pid' => $pid, 'generation' => $generation]);
+        \fclose($pipes[0]);
+        $this->workerParentProcess = $process;
+        $this->workerParentPid     = \proc_get_status($process)['pid'];
+        $this->workerParentStarted = self::now();
+        $this->logger->info('Started the worker-parent {pid}', ['pid' => $this->workerParentPid]);
     }
 
     /**
@@ -254,9 +237,9 @@ final class Cluster
     {
         while (false !== $conn = @\stream_socket_accept($this->masterListener, 0)) {
             \stream_set_blocking($conn, false);
-            $id                    = $this->nextId++;
-            $this->pending[$id]    = $conn;
-            $this->pendingIn[$id]  = '';
+            $id                   = $this->nextId++;
+            $this->pending[$id]   = $conn;
+            $this->pendingIn[$id] = '';
         }
         \error_clear_last();
     }
@@ -272,7 +255,7 @@ final class Cluster
         }
         $this->lastRead       = self::now();
         $this->onlyHeartbeats = false;
-        $read = [$this->masterListener];
+        $read = [];
         foreach ($this->pending as $id => $conn) {
             $read["p$id"] = $conn;
         }
@@ -280,6 +263,11 @@ final class Cluster
             if ($w->pipe) {
                 $read["c$id"] = $w->pipe;
             }
+        }
+        if (!$read) {
+            \usleep((int) ($timeout * 1_000_000));
+
+            return;
         }
         $write = [];
         foreach ($this->connections as $id => $w) {
@@ -297,10 +285,6 @@ final class Cluster
         $now                  = self::now();
         $this->onlyHeartbeats = true;
         foreach ($read as $key => $stream) {
-            if ($stream === $this->masterListener) {
-                $this->onlyHeartbeats = false;
-                continue; // acceptPending() handles it next round
-            }
             $id = (int) \substr($key, 1);
             if ('p' === $key[0]) {
                 $this->readHello($id, $now);
@@ -310,11 +294,11 @@ final class Cluster
         }
     }
 
-    /** More bytes of a pending hello (12: slot, pid, generation, all 4-byte big endian). */
+    /** More bytes of a pending hello (8 bytes: slot, pid, both 4-byte big endian). */
     private function readHello(int $id, float $now): void
     {
-        $conn   = $this->pending[$id];
-        $bytes  = (string) @\fread($conn, 64);
+        $conn  = $this->pending[$id];
+        $bytes = (string) @\fread($conn, 64);
         if ('' === $bytes && \feof($conn)) {
             \fclose($conn);
             unset($this->pending[$id], $this->pendingIn[$id]);
@@ -323,10 +307,10 @@ final class Cluster
         }
         $this->onlyHeartbeats = false;
         $this->pendingIn[$id] .= $bytes;
-        if (\strlen($this->pendingIn[$id]) < 12) {
+        if (\strlen($this->pendingIn[$id]) < 8) {
             return;
         }
-        ['slot' => $slot, 'pid' => $pid, 'generation' => $generation] = \unpack('Nslot/Npid/Ngeneration', $this->pendingIn[$id]);
+        ['slot' => $slot, 'pid' => $pid] = \unpack('Nslot/Npid', $this->pendingIn[$id]);
         unset($this->pending[$id], $this->pendingIn[$id]);
         if ($slot < 0 || $slot >= $this->numWorkers) {
             $this->logger->error('A lifecycle said hello for slot {slot}, outside 0..{max}: closing its connection', ['slot' => $slot, 'max' => $this->numWorkers - 1]);
@@ -345,12 +329,12 @@ final class Cluster
             return;
         }
         $this->noInbox = false;
-        $delay         = ($this->failures[$slot] ?? 0) > 0 ? $this->backoff($this->failures[$slot]) : 0.0;
+        $delay = ($this->failures[$slot] ?? 0) > 0 ? $this->backoff($this->failures[$slot]) : 0.0;
         \stream_set_blocking($conn, false);
         @\fwrite($conn, \pack('Nd', $inbox, $delay));
-        $w                        = new LifecycleConnection($pid, $slot, $generation, $conn, $now, $now, $inbox);
-        $this->connections[$id]   = $w;
-        $this->logger->log($this->everReady ? 'notice' : 'info', 'Started lifecycle {pid} in slot {slot} (generation {generation})', ['pid' => $pid, 'slot' => $slot, 'generation' => $generation]);
+        $w                      = new LifecycleConnection($pid, $slot, $this->generation, $conn, $now, $now, $inbox);
+        $this->connections[$id] = $w;
+        $this->logger->log($this->everReady ? 'notice' : 'info', 'Started lifecycle {pid} in slot {slot}', ['pid' => $pid, 'slot' => $slot]);
     }
 
     /** Status bytes and frames of an established connection, as the worker's pipe used to carry them. */
@@ -408,87 +392,45 @@ final class Cluster
             $this->everReady = true;
             $this->logger->notice($this->serving);
         }
-        if ($w->generation === $this->generation && $this->reloadInProgress()) {
-            $readySlots = [];
-            foreach ($this->connections as $other) {
-                if ($other->generation === $this->generation && LifecycleConnection::SERVING === $other->state) {
-                    $readySlots[$other->slot] = true;
-                }
-            }
-            if (\count($readySlots) >= $this->numWorkers) {
-                $this->completeReload();
-            }
-        }
-    }
-
-    /** Whether an older generation is still draining: the reload isn't over yet. */
-    private function reloadInProgress(): bool
-    {
-        foreach ($this->workerParents as $generation => $info) {
-            if ($generation !== $this->generation && !$info['stopping']) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /** Every slot of the current generation is ready: drain every older one. */
-    private function completeReload(): void
-    {
-        foreach ($this->workerParents as $generation => $info) {
-            if ($generation === $this->generation || $info['stopping']) {
-                continue;
-            }
-            $this->workerParents[$generation]['stopping'] = true;
-            $drained = 0;
-            foreach ($this->connections as $w) {
-                if ($w->generation === $generation && LifecycleConnection::DRAINING !== $w->state) {
-                    $this->drain($w);
-                    ++$drained;
-                }
-            }
-            $this->logger->notice('Reload complete: draining {n} lifecycles of the old generation {generation}', ['n' => $drained, 'generation' => $generation]);
+        if ($this->reloading && $w->slot === $this->reloadSlot) {
+            ++$this->reloadSlot;
+            $this->advanceReload();
         }
     }
 
     private function reap(): void
     {
         while (($pid = \pcntl_waitpid(-1, $status, \WNOHANG)) > 0) {
-            foreach ($this->workerParents as $generation => $info) {
-                if ($info['pid'] === $pid) {
-                    unset($this->workerParents[$generation]);
-                    $this->workerParentExited($generation, $status);
-                    continue 2;
-                }
+            if ($pid === $this->workerParentPid) {
+                $this->workerParentExited($status);
+                continue;
             }
             $this->logger->info('Reaped process {pid}, not the worker-parent: {how}', ['pid' => $pid, 'how' => $this->describe($status, false)]);
         }
     }
 
-    /** The worker-parent of $generation ended: every lifecycle of that generation is gone too. */
-    private function workerParentExited(int $generation, int $status): void
+    /** The worker-parent died: every lifecycle is gone too, and the master restarts it. */
+    private function workerParentExited(int $status): void
     {
-        $expected = $this->stopSignals > 0 || (isset($this->workerParents[$generation]) && $this->workerParents[$generation]['stopping']);
+        $this->workerParentPid = $this->workerParentProcess = null;
         foreach ($this->connections as $id => $w) {
-            if ($w->generation === $generation) {
-                $this->ended($w, assumeGone: true);
-                unset($this->connections[$id]);
+            if ($w->pipe) {
+                \fclose($w->pipe);
             }
+            $this->leaveInbox($w);
+            $this->inboxes->release($w->inbox);
+            unset($this->connections[$id]);
         }
-        if ($this->stopSignals) {
+        if ($this->stopSignals || $this->stopping) {
             return;
         }
-        if ($generation === $this->generation) {
-            $this->logger->error('The worker-parent process died: {how}; restarting it', ['how' => $this->describe($status, false)]);
-            $this->startWorkerParent();
-        } elseif (!$expected) {
-            $this->logger->warning('An old generation\'s worker-parent died while draining: {how}', ['how' => $this->describe($status, false)]);
-        }
+        $this->logger->error('The worker-parent process died: {how}; restarting it', ['how' => $this->describe($status, false)]);
+        $this->reloading = false;
+        $this->startWorkerParent();
     }
 
     /** A lifecycle's connection ended: free its inbox, and act as a failed start if it never served. */
-    private function ended(LifecycleConnection $w, bool $assumeGone = false): void
+    private function ended(LifecycleConnection $w): void
     {
         if ($w->pipe) {
             \fclose($w->pipe);
@@ -502,8 +444,8 @@ final class Cluster
                 break;
             }
         }
-        $now    = self::now();
-        $ctx    = ['pid' => $w->pid, 'slot' => $w->slot, 'up' => self::duration($now - $w->started)];
+        $now = self::now();
+        $ctx = ['pid' => $w->pid, 'slot' => $w->slot, 'up' => self::duration($now - $w->started)];
         if (LifecycleConnection::DRAINING === $w->state) {
             $this->logger->info('Lifecycle {pid} (slot {slot}) ended after draining (up {up})', $ctx);
 
@@ -516,10 +458,7 @@ final class Cluster
 
             return;
         }
-        if ($w->generation !== $this->generation) {
-            return; // an old generation's lifecycle, during a reload: not this slot's backoff
-        }
-        $delay = $this->backoff(++$this->failures[$w->slot]);
+        $delay        = $this->backoff(++$this->failures[$w->slot]);
         $ctx['delay'] = self::seconds($delay);
         if (!$this->everReady && \min($this->failures) > 0) {
             $this->logger->critical('The application failed to start: every worker failed; stopping');
@@ -560,8 +499,7 @@ final class Cluster
             } elseif (LifecycleConnection::DRAINING === $w->state && $now - $w->drainingSince > $this->grace + ($w->lingering ? $this->linger : 0)) {
                 $this->kill($w, $w->lingering ? 'linger time and grace expired' : 'grace expired', 'warning');
             }
-            if (LifecycleConnection::SERVING === $w->state && ($this->failures[$w->slot] ?? 0) > 0 && $now - $w->readyAt >= self::STABLE_AFTER
-                && $w->generation === $this->generation) {
+            if (LifecycleConnection::SERVING === $w->state && ($this->failures[$w->slot] ?? 0) > 0 && $now - $w->readyAt >= self::STABLE_AFTER) {
                 $this->failures[$w->slot] = 0;
                 $this->logger->notice('Slot {slot} recovered', ['slot' => $w->slot]);
             }
@@ -620,23 +558,51 @@ final class Cluster
     }
 
     /**
-     * Start a worker-parent of the next generation on the current code, inheriting the same
-     * listener and inbox descriptors; its lifecycles' hellos complete the reload, see onReady().
+     * Replace every slot's lifecycle, one at a time: sends 'U' (detach, then drain) to the slot
+     * currently in front, see advanceReload(); onReady() moves to the next slot once its
+     * replacement is ready.
      */
     private function reload(string $why): void
     {
         $this->reopenLog();
-        if ($this->reloadInProgress()) {
+        if ($this->reloading) {
             $this->logger->notice('Reload requested ({why}), but one is already in progress: ignored', ['why' => $why]);
 
             return;
         }
         ++$this->generation;
+        $this->reloading  = true;
+        $this->reloadSlot = 0;
         for ($slot = 0; $slot < $this->numWorkers; ++$slot) {
             $this->failures[$slot] = 0;
         }
-        $this->logger->notice('Reload requested ({why}): starting generation {generation}', ['why' => $why, 'generation' => $this->generation]);
-        $this->startWorkerParent();
+        $this->logger->notice('Reload requested ({why}): replacing {n} lifecycles one at a time', ['why' => $why, 'n' => $this->numWorkers]);
+        $this->advanceReload();
+    }
+
+    /** Detach-and-drain the slot currently in front of the rolling reload; skips an empty slot. */
+    private function advanceReload(): void
+    {
+        while ($this->reloadSlot < $this->numWorkers) {
+            $found = false;
+            foreach ($this->connections as $w) {
+                if ($w->slot === $this->reloadSlot && LifecycleConnection::SERVING === $w->state) {
+                    $found = true;
+                    $this->send($w, 'U');
+                    $w->state         = LifecycleConnection::DRAINING;
+                    $w->drainingSince = self::now();
+                    $this->leaveInbox($w);
+                    $this->logger->info('Reload: detaching and draining slot {slot} (lifecycle {pid})', ['slot' => $w->slot, 'pid' => $w->pid]);
+
+                    return; // onReady() advances to the next slot once the replacement is ready
+                }
+            }
+            if (!$found) {
+                ++$this->reloadSlot; // not serving (starting, or none yet): nothing to detach here
+            }
+        }
+        $this->reloading = false;
+        $this->logger->notice('Reload complete');
     }
 
     private function reopenLog(): void
@@ -649,42 +615,22 @@ final class Cluster
         }
     }
 
-    private function drain(LifecycleConnection $w, bool $linger = false, string $byte = 'T'): void
-    {
-        $this->send($w, $linger ? 'G' : $byte);
-        $w->state         = LifecycleConnection::DRAINING;
-        $w->drainingSince = self::now();
-        $w->lingering     = $linger;
-        if (!$linger) {
-            $this->leaveInbox($w);
-        }
-    }
-
     private function stopAll(int $code): int
     {
-        $start = self::now();
+        $this->stopping = true;
+        $start          = self::now();
         $this->logger->notice('Shutting down: draining {n} lifecycles (grace {g} s)', ['n' => \count($this->connections), 'g' => self::seconds($this->grace)]);
-        $this->drainAll('shutdown');
-        $this->logger->notice('Stopped in {s} s', ['s' => \round(self::now() - $start, 2)]);
-        System::unlinkSocket('unix:' . $this->masterSocketPath);
-
-        return $code;
-    }
-
-    private function drainAll(string $why): void
-    {
-        $start = self::now();
         foreach ($this->connections as $w) {
             if (LifecycleConnection::DRAINING !== $w->state) {
-                $this->drain($w, false, 'shutdown' === $why ? 'X' : 'T');
+                $this->send($w, 'X');
+                $w->state         = LifecycleConnection::DRAINING;
+                $w->drainingSince = self::now();
+                $this->leaveInbox($w);
             }
-        }
-        foreach ($this->workerParents as $generation => $info) {
-            $this->workerParents[$generation]['stopping'] = true;
         }
         $deadline = $start + $this->grace;
         $signals  = \min($this->stopSignals, 1);
-        while (($this->connections || $this->workerParents) && self::now() < $deadline) {
+        while (($this->connections || null !== $this->workerParentPid) && self::now() < $deadline) {
             $this->acceptPending();
             $this->readPipes(0.1);
             $this->reap();
@@ -693,20 +639,24 @@ final class Cluster
                 break;
             }
         }
-        if ($this->connections || $this->workerParents) {
-            $this->logger->warning('Grace expired: killing the worker-parent process group(s)');
-            foreach ($this->workerParents as $info) {
-                \posix_kill(-$info['pid'], \SIGKILL); // setsid: its pgid is its own pid, covering every lifecycle it forked
+        if ($this->connections || null !== $this->workerParentPid) {
+            $this->logger->warning('Grace expired: killing the worker-parent\'s process group');
+            if (null !== $this->workerParentPid) {
+                \posix_kill(-$this->workerParentPid, \SIGKILL); // setsid: its pgid is its own pid, covering every lifecycle it forked
             }
             $until = self::now() + self::KILL_WAIT;
-            while ($this->workerParents && self::now() < $until) {
+            while (null !== $this->workerParentPid && self::now() < $until) {
                 $this->reap();
                 \usleep(10_000);
             }
-            if ($this->workerParents) {
+            if (null !== $this->workerParentPid) {
                 $this->logger->emergency('The worker-parent process did not die after SIGKILL');
             }
         }
+        $this->logger->notice('Stopped in {s} s', ['s' => \round(self::now() - $start, 2)]);
+        System::unlinkSocket("unix:{$this->masterSocketPath}");
+
+        return $code;
     }
 
     private function changedFile(): ?string
