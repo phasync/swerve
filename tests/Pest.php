@@ -107,8 +107,13 @@ function temp_path(bool $dir = false): string
  */
 function swerve_spawn(array $args, ?string $fixture, array $php = [], array $env = [], array $out = [], ?string $cwd = null, array $wrap = [])
 {
-    if (in_array('--ext', $args, true) && !getenv('PHASYNC_EXT_SO') && [] === glob(__DIR__ . '/../vendor/phasync/phasync/ext/phasync-*.so')) {
-        // phasync's dev-main bundles no binaries (only its release tags do): otherwise every --ext
+    // bin/swerve.php requires the extension unconditionally (the no-ext path is deferred, see
+    // PLAN.md): every spawned swerve gets --ext, unless a test already asked for it itself.
+    if (!in_array('--ext', $args, true)) {
+        $args[] = '--ext';
+    }
+    if (!getenv('PHASYNC_EXT_SO') && [] === glob(__DIR__ . '/../vendor/phasync/phasync/ext/phasync-*.so')) {
+        // phasync's dev-main bundles no binaries (only its release tags do): otherwise every
         // test fails as "swerve did not start serving", with an empty log
         throw new RuntimeException('--ext needs a phasync extension binary: set PHASYNC_EXT_SO to one');
     }
@@ -149,16 +154,17 @@ function free_address(): string
  * and wait until it answers. --grace=2 unless $args has one, so stopping stays fast.
  *
  * @param string[] $args more command line arguments
+ * @param string[] $wrap a command that execs PHP, such as ['sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh']
  *
  * @return array{0: resource, 1: string} the process and its address
  */
-function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2, array $php = [], array $env = []): array
+function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2, array $php = [], array $env = [], array $wrap = []): array
 {
     $addr = free_address();
     if (!preg_grep('/^--grace=/', $args)) {
         $args[] = '--grace=2';
     }
-    $process  = swerve_spawn(["--http=$addr", "--workers=$workers", ...$args], $fixture, $php, $env);
+    $process  = swerve_spawn(["--http=$addr", "--workers=$workers", ...$args], $fixture, $php, $env, wrap: $wrap);
     $deadline = microtime(true) + 10;
     while (null === http_get($addr, '/hello')) {
         if (microtime(true) > $deadline) {
@@ -789,8 +795,11 @@ dataset('modes', ['plain' => [[]], 'ext' => [['--ext']]]);
  */
 function ws_start(array $mode, int $workers = 1, array $env = []): array
 {
+    if ([] === $mode) {
+        test()->markTestSkipped('no-ext path deferred (PLAN.md): swerve_spawn() now always adds --ext');
+    }
     [$process, $addr, $log] = swerve_start($mode, $workers, env: $env, fixture: 'realtime.php');
-    expect(probe($addr, '/ext'))->toBe($mode || extension_loaded('phasync') ? '1' : '0'); // or loaded by php.ini
+    expect(probe($addr, '/ext'))->toBe('1');
 
     return [$process, $addr, $log];
 }

@@ -535,9 +535,7 @@ test('a worker at its connection limit says so in the log', function () {
 });
 
 test('a worker at its connection limit without the phasync extension does not advise raising ulimit -n, which can\'t help', function () {
-    if (extension_loaded('phasync')) {
-        $this->markTestSkipped('the phasync extension is loaded');
-    }
+    $this->markTestSkipped('no-ext path deferred (PLAN.md): swerve_spawn() now always adds --ext');
     $addr     = free_address();
     $log      = temp_path();
     $process  = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '--grace=2'], 'app.php', wrap: ['sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh']);
@@ -561,13 +559,12 @@ test('a worker at its connection limit without the phasync extension does not ad
     native_stop($process);
 });
 
-test('a worker serves at most half of PHP_FD_SETSIZE connections without the phasync extension, the open-file limit less 64 with it', function () {
+test('a worker serves at most the open-file limit less 64 connections, with the phasync extension', function () {
     $addr    = free_address();
     $log     = temp_path();
     $process = swerve_spawn(["--http=$addr", '--workers=1', '-v', "--log=$log", '--grace=2'], 'app.php', wrap: ['sh', '-c', 'ulimit -n 4096 && exec "$@"', 'sh']);
-    $max     = extension_loaded('phasync') ? 4096 - 64 : PHP_FD_SETSIZE / 2;
     [[$line]] = log_wait($log, '/at most \d+ connections/', 5);
-    expect($line)->toContain("at most $max connections");
+    expect($line)->toContain('at most ' . (4096 - 64) . ' connections');
     native_stop($process);
 });
 
@@ -915,9 +912,9 @@ test('a log reader that stops reading stops neither the server nor its shutdown'
     fclose($reader);
 });
 
-// The signal must not cut a blocking call short (EINTR). Without the extension usleep() blocks,
-// so the request finishes; with it, usleep() is a wait like any other, and a stop (reload,
-// shutdown) ends the request there with a whole 503. A recycle lingers: the request finishes.
+// The signal must not cut a blocking call short (EINTR). With ext-phasync (always loaded now,
+// see swerve_spawn()) usleep() is a wait like any other, and a stop (reload, shutdown) ends the
+// request there with a whole 503. A recycle lingers: the request finishes.
 test('a drain does not cut short a blocking call in a request in flight', function (?int $signal, array $args) {
     [$process, $addr, $log] = swerve_start($args, workers: 1, env: ['SWERVE_TEST_DIR' => test_dir()]);
     if (null === $signal) {
@@ -930,8 +927,8 @@ test('a drain does not cut short a blocking call in a request in flight', functi
         swerve_signal($process, $signal);
     }
     $response = native_read_response($conn);
-    if (null !== $signal && 503 === $response['status']) {
-        expect(extension_loaded('phasync') || in_array('--ext', $args, true))->toBeTrue();
+    if (null !== $signal) {
+        expect($response['status'])->toBe(503);
     } else {
         expect($response['status'])->toBe(200);
         expect((float) $response['body'])->toBeGreaterThanOrEqual(1.99);
@@ -1754,9 +1751,3 @@ test('a worker\'s accepts leave no error behind for the application\'s shutdown 
     expect(\array_filter($recorded))->toBe([]); // phasync/swerve#2: "stream_socket_accept(): Accept failed"
 });
 
-test('startup: the log recommends the extension when it is not loaded, and says nothing when it is', function () {
-    [$process, $addr, $log] = swerve_start(workers: 1);
-    native_stop($process);
-    $notice = '/The phasync extension is not loaded/';
-    expect(log_count($log, $notice))->toBe(extension_loaded('phasync') ? 0 : 1, file_get_contents($log));
-});
