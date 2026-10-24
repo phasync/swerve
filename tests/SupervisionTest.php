@@ -584,7 +584,10 @@ test('a leaking worker is recycled before memory_limit, without failing a reques
     expect($now)->not->toBe($pid);
     expect($failed)->toBeLessThanOrEqual(resets_allowed());
     log_wait($log, '/exited after draining \(exit 0/', 2);
-    expect_log_order($log, ['/Recycling: memory [\d.]+ MiB over limit/', '/took over, draining \d+ \(recycle\)/', '/exited after draining \(exit 0/']);
+    // The recycled worker ends as soon as nothing is left to linger for -- before or after
+    // its replacement readies, so the two lines are not ordered (0.3: detach + early exit)
+    expect_log_order($log, ['/Recycling: memory [\d.]+ MiB over limit/', '/exited after draining \(exit 0/']);
+    expect(log_count($log, '/took over, draining \d+ \(recycle\)/'))->toBe(1);
     expect(log_count($log, '/exit 255/'))->toBe(0);
     native_stop($process);
 });
@@ -686,18 +689,21 @@ test('a recycling worker that dies before its replacement is ready leaves no rec
     [$process, $addr, $log] = swerve_start(['--max-memory=12M'], workers: 1, php: ['-d', 'memory_limit=-1'], env: ['SWERVE_TEST_DIR' => $dir]);
     probe($addr, '/leak?kb=16000');
     log_wait($log, '/Started worker \d+ in slot 0 \(generation 0\), replacing/');
-    expect(probe($addr, '/exit'))->toBeNull();
-    $deadline = microtime(true) + 3;
-    while (count($ready = log_wait($log, '/Worker (\d+) \(slot 0\) ready/')) < 2) {
+    expect(probe($addr, '/exit'))->toBeNull(); // queued while the replacement loads, then fatal to it
+    // Three readies: the original worker, the replacement the queued /exit kills, and the
+    // replacement's replacement -- which then serves, the recycle cleanly behind it
+    $deadline = microtime(true) + 6;
+    while (count($ready = log_wait($log, '/Worker (\d+) \(slot 0\) ready/')) < 3) {
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(50_000);
     }
-    $pid = $ready[1][1];
+    $pid = $ready[2][1];
     for ($i = 0; $i < 10; ++$i) {
         expect(probe($addr, '/pid'))->toBe($pid);
         usleep(100_000);
     }
-    expect(file_get_contents($log))->not->toContain('took over')->not->toContain('Restarting slot');
+    expect(log_count($log, '/took over, draining/'))->toBe(1); // the first replacement did take over
+    expect(file_get_contents($log))->not->toContain('Restarting slot');
     native_stop($process);
 });
 

@@ -123,6 +123,10 @@ final class Cluster
     private array $pendingDeaths = [];
     /** @var array<int, string> The last reported death cause per slot (for crash-loop lines). */
     private array $lastHow = [];
+    /** @var array<int, array{int, string, bool}> slot => [pid, why, lingering]: drain completed, its takeover not yet logged. */
+    private array $pendingTakeovers = [];
+    /** @var array<int, array{int, int, string, bool}> pid => [pid, slot, why, lingering]: draining, for noteCleanDrain(). */
+    private array $drainInfo = [];
     /** pid => [slot, up, killReason] of connections that just ended: the worker's exit closes its
      * socket before the worker-parent's reap reports the death (up to one lot tick later), so the
      * report usually arrives second; deathReport() logs the died line from these. */
@@ -423,6 +427,7 @@ final class Cluster
             unset($this->recentlyEnded[$pid]);
             if ($drained && 'exit 0' === $how) {
                 $this->logger->info('Worker {pid} (slot {slot}) exited after draining (exit 0), up {up}', ['pid' => $pid, 'slot' => $slot, 'up' => $up]);
+                $this->noteCleanDrain($pid, $slot);
             } else {
                 $this->logDied($pid, $slot, $up, $how, $killReason, $fatal);
             }
@@ -492,6 +497,9 @@ final class Cluster
                 break;
             }
         }
+        if ('' === $replacing && null !== ($old = $this->drainedForSlot($slot, $generation))) {
+            $replacing = ", replacing worker $old"; // its predecessor drained out already
+        }
         $this->logger->log($this->everReady ? 'notice' : 'info', "Started worker {pid} in slot {slot} (generation {generation})$replacing", ['pid' => $pid, 'slot' => $slot, 'generation' => $generation]);
     }
 
@@ -548,6 +556,9 @@ final class Cluster
             if (!$w->lingering) {
                 $this->leaveInbox($w);
             }
+            if (!$w->takeoverLogged && $w->generation === $this->generation) {
+                $this->drainInfo[$w->pid] = [$w->pid, $w->slot, $w->recycle ? 'recycle' : 'reload', $w->lingering];
+            }
             if (!$this->stopSignals && !$w->recycle) {
                 $this->logger->warning('Worker {pid} (slot {slot}) is draining on a {why} the master did not send', ['pid' => $w->pid, 'slot' => $w->slot, 'why' => $w->drainWhy ?? 'signal']);
             }
@@ -561,8 +572,60 @@ final class Cluster
      * when it drained first (its 'C' forks the replacement at once, so either order happens).
      * An older generation's lifecycles are drained by completeReload() instead, all together.
      */
+    /**
+     * A drain that completed (exit 0) before its replacement readied: takeoverLog() pairs the
+     * two from here. A drain that did not -- the worker died of an exit() or a signal first --
+     * is no takeover, and leaves nothing behind either.
+     */
+    /** The pid of the slot's worker that is draining (or drained out cleanly), if one is tracked. */
+    private function drainedForSlot(int $slot, int $generation): ?int
+    {
+        if ($generation !== $this->generation) {
+            return null;
+        }
+        foreach ($this->drainInfo as $info) {
+            if ($info[1] === $slot) {
+                return $info[0];
+            }
+        }
+
+        return $this->pendingTakeovers[$slot][0] ?? null;
+    }
+
+    private function noteCleanDrain(int $pid, int $slot): void
+    {
+        $w = $this->drainInfo[$pid] ?? null;
+        if (null === $w) {
+            return;
+        }
+        unset($this->drainInfo[$pid]);
+        [$oldPid, , $why, $lingering] = $w;
+        foreach ($this->connections as $other) {
+            if ($other->slot === $slot && $other->generation === $this->generation && LifecycleConnection::SERVING === $other->state && !$other->takeoverLogged) {
+                // Its replacement readied first (the drain's exit 0 arrived last): the takeover
+                // is complete right now
+                $other->takeoverLogged = true;
+                $this->logger->notice('Slot {slot}: worker {new} took over, draining {old} ({why})' . ($lingering ? '; its upgraded connections may stay up to {linger} s' : ''), [
+                    'slot' => $slot, 'new' => $other->pid, 'old' => $oldPid, 'why' => $why, 'linger' => self::seconds($this->linger),
+                ]);
+
+                return;
+            }
+        }
+        $this->pendingTakeovers[$slot] = $w;
+    }
+
     private function takeoverLog(LifecycleConnection $w): void
     {
+        if (LifecycleConnection::SERVING === $w->state && isset($this->pendingTakeovers[$w->slot])) {
+            // Its predecessor drained and ended before this one readied: the pairing above
+            // never had both connections at once, but the takeover is no less one
+            [$oldPid, $why, $lingering] = $this->pendingTakeovers[$w->slot];
+            unset($this->pendingTakeovers[$w->slot]);
+            $this->logger->notice('Slot {slot}: worker {new} took over, draining {old} ({why})' . ($lingering ? '; its upgraded connections may stay up to {linger} s' : ''), [
+                'slot' => $w->slot, 'new' => $w->pid, 'old' => $oldPid, 'why' => $why, 'linger' => self::seconds($this->linger),
+            ]);
+        }
         foreach ($this->connections as $other) {
             if ($other === $w || $other->slot !== $w->slot || $other->generation !== $w->generation || $other->takeoverLogged) {
                 continue;
@@ -737,6 +800,7 @@ final class Cluster
         $ctx    = ['pid' => $w->pid, 'slot' => $w->slot, 'up' => self::duration($now - $w->started)];
         $how    = $w->deathHow ?? ($this->pendingDeaths[$w->pid] ?? null);
         unset($this->pendingDeaths[$w->pid]);
+
         if (LifecycleConnection::DRAINING === $w->state) {
             $this->drainedOnce[$w->generation][$w->slot] = true;
             $this->killIfFullyDrained($w->generation);
@@ -753,6 +817,7 @@ final class Cluster
             }
             if ('exit 0' === $how) {
                 $this->logger->info('Worker {pid} (slot {slot}) exited after draining (exit 0), up {up}', $ctx);
+                $this->noteCleanDrain($w->pid, $w->slot);
 
                 return;
             }
