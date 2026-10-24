@@ -125,13 +125,6 @@ if (\in_array('--ext', $argv, true)) {
         exit(1);
     }
 }
-// phasync.workers (the worker-parent model, see Cluster) needs the extension; the no-ext path
-// (the plug alone, running every worker as this one process) isn't built yet.
-if (!\extension_loaded('phasync')) {
-    \fwrite(\STDERR, "swerve: ext-phasync is required for now: run with --ext (see `swerve --help`)\n");
-    exit(1);
-}
-
 pcntl_async_signals(true);
 
 /*
@@ -324,6 +317,15 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $listenerIni = [] === $listeners
         ? '-1'
         : \implode(',', \range(Cluster::LISTENER_FD, Cluster::LISTENER_FD + \count($listeners) - 1));
+
+    // phasync.workers (the worker-parent model, see Cluster), needed from here on, needs the
+    // extension; the no-ext path (the plug alone, running every worker as this one process)
+    // isn't built yet. Checked this late, not at the top of the file, so --help/--version and
+    // every argument error above answer without it (swerve#73).
+    if (!\extension_loaded('phasync')) {
+        \fwrite(\STDERR, "swerve: ext-phasync is required for now: run with --ext (see `swerve --help`)\n");
+        exit(1);
+    }
 
     /*
      * The worker-parent: a `php -d phasync.workers=N ... inc/lifecycle.php` process (the ext's C
