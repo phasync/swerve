@@ -1528,6 +1528,44 @@ test('-S answers many requests in a row, including one whose router redeclares a
     }
 });
 
+/*
+ * swerve#74: -S's one-accept()-per-lifecycle contract means a connection never dispatches a
+ * request no accept() asked for. Three requests pipelined in one write arrive together: only
+ * the first is this lifecycle's own (what its one accept() call pulled); the other two, still
+ * sitting in the buffer once it is answered, are nobody's -- closing the connection instead of
+ * running them here is what keeps a router that declares a function at its top level from
+ * seeing "Cannot redeclare", and the worker serving the next, unrelated request afterwards.
+ */
+test('-S closes a connection instead of running a pipelined request no accept() asked for', function () {
+    $dir = temp_path(true);
+    file_put_contents("$dir/index.php", "<?php function f(){} echo 'ok';\n");
+    $addr    = free_address();
+    $log     = temp_path();
+    $process = swerve_spawn(["--http=$addr", '--workers=1', "--log=$log", '-vv', '--grace=2', '-S'], null, cwd: $dir);
+    $deadline = microtime(true) + 10;
+    while ('ok' !== probe($addr, '/')) {
+        if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
+            throw new RuntimeException("swerve did not start serving:\n" . file_get_contents($log));
+        }
+        usleep(20_000);
+    }
+    try {
+        $conn    = native_connect($addr);
+        $request = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+        fwrite($conn, $request . $request . $request);
+        // Only the first request is answered; the connection closes without a second or third
+        // response, and without the worker crashing on the router's own function declaration.
+        expect(native_read_response($conn)['body'])->toBe('ok');
+        expect(native_read_response($conn))->toBeNull();
+        fclose($conn);
+        // The worker is still alive and healthy: a fresh request after the pipelined one answers.
+        expect(probe($addr, '/'))->toBe('ok');
+        expect(log_count($log, '/Cannot redeclare|CRITICAL|Fatal error/'))->toBe(0, (string) file_get_contents($log));
+    } finally {
+        native_stop($process);
+    }
+});
+
 test('--http takes an IPv6 address', function () {
     $probe = stream_socket_server('tcp://[::1]:0');
     $addr  = stream_socket_get_name($probe, false);
