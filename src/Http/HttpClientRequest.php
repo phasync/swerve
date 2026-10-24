@@ -409,11 +409,17 @@ final class HttpClientRequest implements ClientRequest
             if ($this->ended) {
                 return; // the try/finally below already did, the normal way
             }
-            try {
-                $this->end();
-            } catch (\Throwable $e) {
-                if (null === $this->gone) {
-                    $c->logger->error('{request} failed after exit(): {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);
+            if ($this->wire) {
+                // The head (and perhaps some of the body) is already on the wire: the cleanest
+                // end the client can still get is a finished frame (swerve#75). A response that
+                // never began is not synthesized -- a bare 200 with no body would be a lie, and
+                // the client of a request its worker exit()ed in sees the connection close.
+                try {
+                    $this->end();
+                } catch (\Throwable $e) {
+                    if (null === $this->gone) {
+                        $c->logger->error('{request} failed after exit(): {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);
+                    }
                 }
             }
             $this->finished = $this->ended = true;

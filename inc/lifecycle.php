@@ -110,7 +110,7 @@ phasync::run(static function () use ($worker, $args, $logger): void {
         $worker->ready();
     }
     $worker->serve(
-        static function () use ($appFile): void {
+        static function () use ($appFile, $logger): void {
             \chdir(\dirname($appFile));
             // A relative public root of the application's accept() resolves here, whatever it
             // chdir()s to later (Swerve::accept()).
@@ -122,6 +122,14 @@ phasync::run(static function () use ($worker, $args, $logger): void {
             \Swerve\Cache::$loader = \phasync::getFiber();
             try {
                 require Plug::path($appFile, \dirname($appFile));
+            } catch (\Swerve\WorkerStoppingException | \phasync\ShutdownException $e) {
+                throw $e; // the stop path, not a load failure: Worker::serve() ends it quietly
+            } catch (\Throwable $e) {
+                // An application that cannot load gets its own exit code (a master counts
+                // such starts apart from a request-time exit(1)): the worker process dies
+                // with it (see run_lifecycle() in the extension), a fresh worker follows
+                $logger->critical('The application failed to load: {exception}', ['exception' => $e]);
+                exit(Worker::EXIT_BAD_APP);
             } finally {
                 \Swerve\Cache::$loader = null;
             }

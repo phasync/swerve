@@ -118,6 +118,15 @@ final class Cluster
     private array $workerParents = [];
     /** Consecutive failures starting the current generation's worker-parent during a reload (the old one keeps serving meanwhile); reset once a lifecycle of it readies. */
     private int $workerParentFailures = 0;
+    /** Death reports the worker-parent made on its stderr (pid => "exit 7" / "signal 9 (SIGKILL)")
+     * whose lifecycle connection has not ended yet; ended() logs them. */
+    private array $pendingDeaths = [];
+    /** @var array<int, string> The last reported death cause per slot (for crash-loop lines). */
+    private array $lastHow = [];
+    /** pid => [slot, up, killReason] of connections that just ended: the worker's exit closes its
+     * socket before the worker-parent's reap reports the death (up to one lot tick later), so the
+     * report usually arrives second; deathReport() logs the died line from these. */
+    private array $recentlyEnded = [];
     /** When to retry starting the current generation's worker-parent after such a failure; 0 = no retry pending. */
     private float $workerParentRetryAt = 0;
     /**
@@ -256,10 +265,11 @@ final class Cluster
             // lifecycle made its own, and an ordered channel worked per worker, not per topic.
             'SWERVE_ORDERED_DIR'   => OrderedLog::directory(),
         ];
-        // stdout/stderr go to the master's own (it logs nothing of its own over them, but a
-        // closed-pipe read end would SIGPIPE it on PHP's fatal-error text or a stray echo);
-        // nothing reads stdin.
-        $descriptors = [0 => ['pipe', 'r'], 1 => \STDOUT, 2 => \STDERR];
+        // stdout goes to the master's own (a closed-pipe read end would SIGPIPE it on a stray
+        // echo). stderr is a pipe the master reads: the worker-parent reports every abnormal
+        // worker death on it (see deathReport()), and PHP's or the app's own stderr text
+        // (warnings, the engine's fatal message) belongs in the log too. Nothing reads stdin.
+        $descriptors = [0 => ['pipe', 'r'], 1 => \STDOUT, 2 => ['pipe', 'w']];
         foreach (\array_values($this->listeners) as $i => $listener) {
             $descriptors[self::LISTENER_FD + $i] = $listener;
         }
@@ -274,8 +284,9 @@ final class Cluster
             throw new \RuntimeException('Could not start the worker-parent process');
         }
         \fclose($pipes[0]);
+        \stream_set_blocking($pipes[2], false);
         $pid = \proc_get_status($process)['pid'];
-        $this->workerParents[$generation] = ['pid' => $pid, 'process' => $process, 'started' => self::now(), 'stopping' => false];
+        $this->workerParents[$generation] = ['pid' => $pid, 'process' => $process, 'started' => self::now(), 'stopping' => false, 'stderr' => $pipes[2], 'stderrBuf' => ''];
         $this->logger->info('Started the worker-parent {pid} (generation {generation})', ['pid' => $pid, 'generation' => $generation]);
     }
 
@@ -313,6 +324,11 @@ final class Cluster
                 $read["c$id"] = $w->pipe;
             }
         }
+        foreach ($this->workerParents as $generation => $info) {
+            if (isset($info['stderr'])) {
+                $read["s$generation"] = $info['stderr'];
+            }
+        }
         $write = [];
         foreach ($this->connections as $id => $w) {
             if ($w->pipe && '' !== $w->out) {
@@ -338,8 +354,93 @@ final class Cluster
                 $this->readHello($id, $now);
                 continue;
             }
+            if ('s' === $key[0]) {
+                $this->readStderr($id);
+                continue;
+            }
             $this->readStatus($this->connections[$id], $now);
         }
+    }
+
+    /** More bytes of a worker-parent's stderr: death reports for deathReport(), the rest is logged. */
+    private function readStderr(int $generation): void
+    {
+        if (!isset($this->workerParents[$generation]['stderr'])) {
+            return;
+        }
+        $bytes = (string) @\fread($this->workerParents[$generation]['stderr'], 65536);
+        if ('' === $bytes && \feof($this->workerParents[$generation]['stderr'])) {
+            \fclose($this->workerParents[$generation]['stderr']);
+            unset($this->workerParents[$generation]['stderr'], $this->workerParents[$generation]['stderrBuf']);
+            return;
+        }
+        $this->onlyHeartbeats = false;
+        $this->workerParents[$generation]['stderrBuf'] .= $bytes;
+        while (false !== ($eol = \strpos($this->workerParents[$generation]['stderrBuf'], "\n"))) {
+            $line = \substr($this->workerParents[$generation]['stderrBuf'], 0, $eol);
+            $this->workerParents[$generation]['stderrBuf'] = \substr($this->workerParents[$generation]['stderrBuf'], $eol + 1);
+            $this->stderrLine($generation, $line);
+        }
+        \error_clear_last();
+    }
+
+    private function stderrLine(int $generation, string $line): void
+    {
+        // The ext reports an abnormal worker death: "phasync: workers: slot 2 (pid 1234) died: exit 7"
+        if (\preg_match('/^phasync: workers: slot (\d+) \(pid (\d+)\) died: (.+)$/', $line, $m)) {
+            $this->deathReport((int) $m[2], $m[3]);
+            return;
+        }
+        if (\preg_match('/^phasync: workers: slot (\d+) keeps dying within (\d+)ms of starting \((\d+) times in a row\) -- delaying its next start by (\d+)ms$/', $line, $m)) {
+            $this->logger->warning('Slot {slot} keeps dying within {fast}ms of starting ({n} times in a row); the worker-parent delays its next start by {ms} ms', [
+                'slot' => (int) $m[1], 'fast' => $m[2], 'n' => (int) $m[3], 'ms' => $m[4],
+            ]);
+            return;
+        }
+        if ('' === \trim($line)) {
+            return;
+        }
+        // Anything else is PHP's or the application's own stderr text (a PHP warning, a stray
+        // echo, the engine's own fatal message, an ext notice): it belongs in the log as it is.
+        $this->logger->error($line);
+    }
+
+    /** The worker-parent reported a worker's death: keep it for ended(), which logs it in context. */
+    private function deathReport(int $pid, string $how): void
+    {
+        foreach ($this->connections as $w) {
+            if ($w->pid === $pid) {
+                $w->deathHow = $how;
+                return;
+            }
+        }
+        if (isset($this->recentlyEnded[$pid])) {
+            // Its connection already ended: the exit closed the socket before the worker-parent's
+            // reap reported the death -- the report came second, the usual order.
+            [$slot, $up, $killReason, $fatal, $drained] = $this->recentlyEnded[$pid];
+            unset($this->recentlyEnded[$pid]);
+            if ($drained && 'exit 0' === $how) {
+                $this->logger->info('Worker {pid} (slot {slot}) exited after draining (exit 0), up {up}', ['pid' => $pid, 'slot' => $slot, 'up' => $up]);
+            } else {
+                $this->logDied($pid, $slot, $up, $how, $killReason, $fatal);
+            }
+            return;
+        }
+        $this->pendingDeaths[$pid] = $how; // its connection's EOF is still in flight
+        if (\count($this->pendingDeaths) > 64) {
+            \array_shift($this->pendingDeaths);
+        }
+    }
+
+    /** "Worker 123 (slot 0) died: exit 7, up 1.2 s" / "died: signal 9 (SIGKILL), killed: watchdog: silent, up ..." */
+    private function logDied(int $pid, int $slot, string $up, string $how, ?string $killReason, bool $fatal = false): void
+    {
+        $killed = null !== $killReason ? ', killed: ' . $killReason : '';
+        $after  = $fatal ? ' after a PHP fatal error' : '';
+        $this->logger->error("Worker {pid} (slot {slot}) died: {how}$after$killed, up {up}", [
+            'pid' => $pid, 'slot' => $slot, 'how' => $how, 'up' => $up,
+        ]);
+        $this->lastHow[$slot] = $how; // ended() runs before the report arrives, usually
     }
 
     /** More bytes of a pending hello (12: slot, pid, generation, all 4-byte big endian). */
@@ -382,7 +483,14 @@ final class Cluster
         @\fwrite($conn, \pack('Nd', $inbox, $delay));
         $w                        = new LifecycleConnection($pid, $slot, $generation, $conn, $now, $now, $inbox);
         $this->connections[$id]   = $w;
-        $this->logger->log($this->everReady ? 'notice' : 'info', 'Started lifecycle {pid} in slot {slot} (generation {generation})', ['pid' => $pid, 'slot' => $slot, 'generation' => $generation]);
+        $replacing                = '';
+        foreach ($this->connections as $other) {
+            if ($other !== $w && $other->slot === $slot && $other->generation === $generation) {
+                $replacing = ", replacing worker $other->pid"; // a recycle's predecessor still drains
+                break;
+            }
+        }
+        $this->logger->log($this->everReady ? 'notice' : 'info', "Started worker {pid} in slot {slot} (generation {generation})$replacing", ['pid' => $pid, 'slot' => $slot, 'generation' => $generation]);
     }
 
     /** Status bytes and frames of an established connection, as the worker's pipe used to carry them. */
@@ -472,7 +580,7 @@ final class Cluster
         $now        = self::now();
         $w->state   = LifecycleConnection::SERVING;
         $w->readyAt = $now;
-        $this->logger->info('Lifecycle {pid} (slot {slot}) ready in {s} s', ['pid' => $w->pid, 'slot' => $w->slot, 's' => \round($now - $w->started, 2)]);
+        $this->logger->info('Worker {pid} (slot {slot}) ready in {s} s', ['pid' => $w->pid, 'slot' => $w->slot, 's' => \round($now - $w->started, 2)]);
         $this->takeoverLog($w);
         if (!$this->everReady) {
             $this->everReady = true;
@@ -550,6 +658,9 @@ final class Cluster
         while (($pid = \pcntl_waitpid(-1, $status, \WNOHANG)) > 0) {
             foreach ($this->workerParents as $generation => $info) {
                 if ($info['pid'] === $pid) {
+                    if (isset($info['stderr'])) {
+                        \fclose($info['stderr']);
+                    }
                     unset($this->workerParents[$generation]);
                     $this->workerParentExited($generation, $status);
                     continue 2;
@@ -570,8 +681,8 @@ final class Cluster
                 unset($this->connections[$id]);
             }
         }
-        if ($this->stopSignals) {
-            return;
+        if ($this->stopSignals || null !== $this->exitCode) {
+            return; // stopping: signals, or a give-up (every worker failed to start)
         }
         if ($generation !== $this->generation) {
             if (!$expected) {
@@ -620,12 +731,40 @@ final class Cluster
         }
         $now    = self::now();
         $ctx    = ['pid' => $w->pid, 'slot' => $w->slot, 'up' => self::duration($now - $w->started)];
+        $how    = $w->deathHow ?? ($this->pendingDeaths[$w->pid] ?? null);
+        unset($this->pendingDeaths[$w->pid]);
         if (LifecycleConnection::DRAINING === $w->state) {
-            $this->logger->info('Lifecycle {pid} (slot {slot}) ended after draining (up {up})', $ctx);
             $this->drainedOnce[$w->generation][$w->slot] = true;
             $this->killIfFullyDrained($w->generation);
+            if (null === $how) {
+                // Draining, but how it ended is not known yet (the worker-parent's reap
+                // report usually arrives after this EOF): a SIGTERM mid-shutdown, a fatal
+                // in a shutdown function, is no clean drain -- say so when it arrives.
+                $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, true];
+                if (\count($this->recentlyEnded) > 64) {
+                    \array_shift($this->recentlyEnded);
+                }
+
+                return;
+            }
+            if ('exit 0' === $how) {
+                $this->logger->info('Worker {pid} (slot {slot}) exited after draining (exit 0), up {up}', $ctx);
+
+                return;
+            }
+            $this->logDied($w->pid, $w->slot, $ctx['up'], $how, $w->killReason, $w->fatal);
 
             return;
+        }
+        if (null !== $how) {
+            // The worker-parent reported the death on its stderr (it usually arrives after
+            // this EOF: the exit closes the socket at once, the reap a lot tick later).
+            $this->logDied($w->pid, $w->slot, $ctx['up'], $how, $w->killReason, $w->fatal);
+        } else {
+            $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, false];
+            if (\count($this->recentlyEnded) > 64) {
+                \array_shift($this->recentlyEnded);
+            }
         }
         if ($w->served || null !== $w->readyAt) {
             // It served, or was ready: the ext simply runs its next lifecycle (or, if the process
@@ -639,16 +778,16 @@ final class Cluster
         }
         $delay = $this->backoff(++$this->failures[$w->slot]);
         $ctx['delay'] = self::seconds($delay);
-        if (!$this->everReady && \min($this->failures) > 0) {
+        if (null === $this->exitCode && !$this->everReady && \min($this->failures) > 0) {
             $this->logger->critical('The application failed to start: every worker failed; stopping');
             $this->exitCode = 1;
 
             return;
         }
         if ($this->failures[$w->slot] >= self::CRASH_LOOP) {
-            $this->logger->critical('Slot {slot} is crash-looping: {n} failed starts in a row; next start in {delay} s', $ctx + ['n' => $this->failures[$w->slot]]);
+            $this->logger->critical('Slot {slot} is crash-looping: {n} failed starts in a row (last: {how}); next start in {delay} s', $ctx + ['n' => $this->failures[$w->slot], 'how' => $how ?? ($this->lastHow[$w->slot] ?? 'unknown')]);
         } else {
-            $this->logger->warning('Lifecycle {pid} (slot {slot}) failed to start; retrying in {delay} s', $ctx);
+            $this->logger->warning('Restarting slot {slot} in {delay} s', $ctx);
         }
     }
 
@@ -692,7 +831,7 @@ final class Cluster
                 $silent  = \round($now - $w->lastSeen, 1);
                 $stuck[] = [$w, $silent];
                 \posix_kill($w->pid, \SIGQUIT);
-                $this->logger->error('Lifecycle {pid} (slot {slot}) sent no heartbeat for {s} s: killing it (busy loop or blocking call)', ['pid' => $w->pid, 'slot' => $w->slot, 's' => $silent]);
+                $this->logger->error('Worker {pid} (slot {slot}) sent no heartbeat for {s} s: killing it (busy loop or blocking call)', ['pid' => $w->pid, 'slot' => $w->slot, 's' => $silent]);
             } elseif (LifecycleConnection::DRAINING === $w->state && $now - $w->drainingSince > $this->grace + ($w->lingering ? $this->linger : 0)) {
                 $this->kill($w, $w->lingering ? 'linger time and grace expired' : 'grace expired', 'warning');
             }
@@ -749,7 +888,7 @@ final class Cluster
         $w->killReason = $reason;
         \posix_kill($w->pid, \SIGKILL);
         if (null !== $level) {
-            $this->logger->log($level, 'Killing lifecycle {pid} (slot {slot}): {reason}', ['pid' => $w->pid, 'slot' => $w->slot, 'reason' => $reason]);
+            $this->logger->log($level, 'Killing worker {pid} (slot {slot}): {reason}', ['pid' => $w->pid, 'slot' => $w->slot, 'reason' => $reason]);
         }
 
         return true;

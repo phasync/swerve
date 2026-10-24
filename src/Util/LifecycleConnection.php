@@ -30,6 +30,9 @@ final class LifecycleConnection
     public bool $takeoverLogged = false;
     /** Sent 'F': a PHP fatal error ends it. */
     public bool $fatal = false;
+    /** How this worker died, as the worker-parent reported it on its stderr ("exit 7",
+     * "signal 9 (SIGKILL)"); null while it lives, or when it ended cleanly. */
+    public ?string $deathHow = null;
 
     /** Bytes read from it that don't make a whole frame yet, see Topics::parse(). */
     public string $in = '';

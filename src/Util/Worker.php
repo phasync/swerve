@@ -104,6 +104,9 @@ final class Worker
         array $peers,
     ) {
         $this->startedAt = \microtime(true);
+        // The SIGQUIT dump and the stall alarm must run even inside the busy loop or blocking
+        // call they report on: handlers between opcodes, not only when the event loop ticks.
+        \pcntl_async_signals(true);
         \pcntl_signal(\SIGINT, \SIG_IGN);
         \pcntl_signal(\SIGHUP, \SIG_IGN);
         // The master's meanings of these (log reopen, reload) are not a worker's
@@ -164,6 +167,8 @@ final class Worker
                 // Blocking: the process is ending, and a frame half sent must not swallow the 'F'
                 \stream_set_blocking($this->master, true);
                 @\fwrite($this->master, $this->out . 'F');
+                // Raise the limit before touching the logger: a worker that died of
+                // memory_limit has none left to build (or buffer) the line with
                 \ini_set('memory_limit', '-1');
                 $this->logger->critical('PHP fatal error: {message} in {file}:{line}; in flight: {requests}', $error + ['requests' => $this->describeInFlight()]);
             }

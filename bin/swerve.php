@@ -109,7 +109,35 @@ function swerve_ini_flags(): array
 
 // The command line as the operator gave it, for a reload to start over from
 if (false === \getenv('SWERVE_ARGS')) {
-    \putenv('SWERVE_ARGS=' . \json_encode(phasync\ext\_original_args()));
+    /*
+     * The command line for every lifecycle to parse (inc/lifecycle.php): this process's own,
+     * from this script's path on -- never the interpreter's: an unknown `-d memory_limit=...`
+     * stops Args' parse at it, and every option after it (--log for one) would be lost.
+     */
+    $clean = [];
+    $orig  = phasync\ext\_original_args();
+    foreach ($orig as $i => $a) {
+        if (!\str_starts_with((string) $a, '-') && \realpath((string) $a) === __FILE__) {
+            $clean = \array_slice($orig, $i + 1);
+
+            break;
+        }
+    }
+    \putenv('SWERVE_ARGS=' . \json_encode([] === $clean && [] !== $orig ? $orig : \array_values($clean)));
+    /*
+     * The operator's own `-d` options, for the worker-parent's argv below (the re-executed
+     * master's command line has swerve_ini_flags()'s defaults between the interpreter's, so
+     * SWERVE_ARGS can no longer serve as the source of just the operator's).
+     */
+    $operatorIni = [];
+    for ($i = 0, $n = \count($orig); $i < $n; ++$i) {
+        if ('-d' === $orig[$i] && $i + 1 < $n) {
+            $operatorIni[] = (string) $orig[++$i];
+        } elseif (\str_starts_with((string) $orig[$i], '-d') && \strlen((string) $orig[$i]) > 2) {
+            $operatorIni[] = \substr((string) $orig[$i], 2);
+        }
+    }
+    \putenv('SWERVE_OPERATOR_INI=' . \json_encode($operatorIni));
 }
 if ('1' !== \getenv('SWERVE_INI_REEXEC')) {
     \putenv('SWERVE_INI_REEXEC=1');
@@ -339,10 +367,19 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $extFlags = '1' === \getenv('PHASYNC_EXT_REEXEC') && \is_string($so = \phasync\ext\_resolve_so())
         ? ['-d', "extension=$so"]
         : [];
+    // The operator's own -d options (SWERVE_OPERATOR_INI, kept when SWERVE_ARGS was):
+    // they go after swerve_ini_flags()'s defaults, just as in this process's own re-exec, so
+    // `-d memory_limit=32M` limits the lifecycles, not just the master.
+    $operatorIni  = [];
+    foreach ((array) \json_decode((string) \getenv('SWERVE_OPERATOR_INI'), true) as $ini) {
+        $operatorIni[] = '-d';
+        $operatorIni[] = (string) $ini;
+    }
     $workerParentArgv = [
         \PHP_BINARY,
         ...$extFlags,
         ...swerve_ini_flags(),
+        ...$operatorIni,
         '-d', "phasync.workers=$workerCount",
         '-d', "phasync.workers_listener=$listenerIni",
         __DIR__ . '/../inc/lifecycle.php',
