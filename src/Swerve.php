@@ -610,6 +610,11 @@ final class Swerve
      */
     public static function accept(?string $webRoot, string|\Closure $handler): \Fiber
     {
+        // The first accept() ends the application's boot: snapshot its $_SERVER now, in this
+        // Scope (the loader's; since ext-scope 0.4 $_SERVER is Scope state, and a request's own
+        // Scope never saw what the application set while booting). A swerve.php that returns
+        // instead of looping gets its snapshot from inc/lifecycle.php when the file returns.
+        self::bootServer();
         $fiber = \Fiber::getCurrent();
         if (null !== $fiber && isset((self::$requestFibers ??= new \WeakMap())[$fiber])) {
             throw new \LogicException('Swerve::accept() cannot be called from inside the request it is serving: call it only from the worker script\'s own loop');
@@ -860,7 +865,21 @@ final class Swerve
         return \preg_match('/^\[?(.+?)\]?:(\d+)$/', $address, $m) ? [$m[1], $m[2]] : [$address, ''];
     }
 
-    /** $_SERVER as the application left it after booting, once: see configureHttp(). */
+    /**
+     * Snapshot the boot `$_SERVER` now, if accept() did not already: the worker script's swerve.php
+     * just returned (inc/lifecycle.php calls this there), in this same Scope, so what it set while
+     * booting (its `.env` values, a framework's flags) is visible here. It cannot wait for the first
+     * request: since ext-scope 0.4 `$_SERVER` is Scope state, and a request reads its own Scope's,
+     * which never saw the application's.
+     *
+     * @internal
+     */
+    public static function captureBootServer(): void
+    {
+        self::bootServer();
+    }
+
+    /** $_SERVER as the application left it after booting: see captureBootServer() and accept(). */
     private static function bootServer(): array
     {
         if (null === self::$bootServer) {

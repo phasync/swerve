@@ -111,7 +111,20 @@ phasync::run(static function () use ($worker, $args, $logger): void {
     $worker->serve(
         static function () use ($appFile): void {
             \chdir(\dirname($appFile));
-            require Plug::path($appFile, \dirname($appFile));
+            // The loader fiber: cache()/publish() called directly in swerve.php throw (waiting
+            // could never end, the worker serves after the file returns); coroutines it starts
+            // wait instead (see Cache::awaitListening()). Reset in finally: after the file has
+            // returned, no fiber is the loader.
+            \Swerve\Cache::$loader = \phasync::getFiber();
+            try {
+                require Plug::path($appFile, \dirname($appFile));
+            } finally {
+                \Swerve\Cache::$loader = null;
+            }
+            // Every request's $_SERVER starts from what the application left here while booting.
+            // Captured now, in this Scope: since ext-scope 0.4 $_SERVER is Scope state, and a
+            // request's own Scope never saw the application's (swerve 0.3: ServerEnvTest).
+            Swerve::captureBootServer();
         },
         // Nothing to signal here: accept()'s own suspensions (worker_next(), the request queue's
         // flag) get the WorkerStoppingException like every other coroutine, and unwind the
