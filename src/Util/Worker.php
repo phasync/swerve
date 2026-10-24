@@ -432,6 +432,13 @@ final class Worker
                     try {
                         \phasync\ext\worker_handover();
                         break;
+                    } catch (\LogicException $e) {
+                        // The accept loop's worker_next() took the REPLACE_OK first (the two
+                        // share the channel): the handover is on, this call is moot
+                        if (!\str_contains($e->getMessage(), 'already handed over')) {
+                            throw $e;
+                        }
+                        break;
                     } catch (\RuntimeException $e) {
                         // The lot keeps only so many detached (lingering) lifecycles per slot:
                         // with the backlog full this recycle waits for one of them to end,

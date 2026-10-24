@@ -689,21 +689,21 @@ test('a recycling worker that dies before its replacement is ready leaves no rec
     [$process, $addr, $log] = swerve_start(['--max-memory=12M'], workers: 1, php: ['-d', 'memory_limit=-1'], env: ['SWERVE_TEST_DIR' => $dir]);
     probe($addr, '/leak?kb=16000');
     log_wait($log, '/Started worker \d+ in slot 0 \(generation 0\), replacing/');
-    expect(probe($addr, '/exit'))->toBeNull(); // queued while the replacement loads, then fatal to it
-    // Three readies: the original worker, the replacement the queued /exit kills, and the
-    // replacement's replacement -- which then serves, the recycle cleanly behind it
+    // The recycling worker serves on until the replacement asks (the handover), so it is the
+    // one the /exit reaches: it dies mid-recycle, and the lot promotes the replacement early.
+    expect(probe($addr, '/exit'))->toBeNull();
+    // Two readies: the original worker, and the replacement -- which then serves, no recycle behind
     $deadline = microtime(true) + 6;
-    while (count($ready = log_wait($log, '/Worker (\d+) \(slot 0\) ready/')) < 3) {
+    while (count($ready = log_wait($log, '/Worker (\d+) \(slot 0\) ready/')) < 2) {
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(50_000);
     }
-    $pid = $ready[2][1];
+    $pid = $ready[1][1];
     for ($i = 0; $i < 10; ++$i) {
         expect(probe($addr, '/pid'))->toBe($pid);
         usleep(100_000);
     }
-    expect(log_count($log, '/took over, draining/'))->toBe(1); // the first replacement did take over
-    expect(file_get_contents($log))->not->toContain('Restarting slot');
+    expect(file_get_contents($log))->not->toContain('took over')->not->toContain('Restarting slot');
     native_stop($process);
 });
 
@@ -1007,7 +1007,7 @@ test('a worker still loading the application when the master dies ends itself', 
  * Reload
  */
 
-test('SIGHUP stops every worker, then restarts swerve (same PID) running the new code, with opcache on', function () {
+test('SIGHUP starts a new generation on the new code (same master PID), the old one drains out; with opcache on', function () {
     $dir                          = test_dir();
     [$process, $addr, $log, $pid] = swerve_start(php: ['-d', 'opcache.enable_cli=1'], env: ['SWERVE_TEST_DIR' => $dir]);
     $old                          = worker_pids($addr, 2);
@@ -1016,15 +1016,21 @@ test('SIGHUP stops every worker, then restarts swerve (same PID) running the new
     swerve_signal($process, SIGHUP);
 
     log_wait($log, '/Reload complete/', 8);
-    expect(is_alive($old[0]) || is_alive($old[1]))->toBeFalse();
-    expect(is_alive($pid))->toBeTrue(); // the same master process, now running a fresh swerve
     for ($i = 0; $i < 10; ++$i) {
-        expect(probe($addr, '/version'))->toBe('v2');
+        expect(probe($addr, '/version'))->toBe('v2'); // the new generation serves at once
     }
+    // ...while the old generation drains out behind it, and is gone shortly after
+    expect(log_count($log, '/exited after draining/') >= 2 || log_wait($log, '/exited after draining/', 5) >= 0)->toBeTrue();
+    $deadline = microtime(true) + 5;
+    while ((is_alive($old[0]) || is_alive($old[1])) && microtime(true) < $deadline) {
+        usleep(50_000);
+    }
+    expect(is_alive($old[0]) || is_alive($old[1]))->toBeFalse();
+    expect(is_alive($pid))->toBeTrue(); // the same master process throughout
     expect_log_order($log, [
-        '/Reload requested \(SIGHUP\): stopping 2 workers, then restarting swerve/',
+        '/Reload requested \(SIGHUP\): starting generation 1/',
+        '/Reload complete/',
         '/exited after draining/', '/exited after draining/',
-        '/swerve .* serving/', '/Reload complete/',
     ]);
     native_stop($process);
 });

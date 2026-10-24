@@ -77,8 +77,16 @@ System::pinToNumaNode($slot);
 $source = \str_pad((string) $slot, \strlen((string) (\max(1, (int) \getenv('SWERVE_WORKERS')) - 1)), ' ', \STR_PAD_LEFT);
 $logLevel = $args->verbosity >= 2 ? LogLevel::DEBUG : ($args->verbosity == 1 ? LogLevel::INFO : LogLevel::NOTICE);
 if ($args->log) {
+    // PHP's own errors go to the file too: after a fatal error such as memory_limit, PHP
+    // still writes its message, where a handler of ours may have no memory left to run
+    \ini_set('log_errors', '1');
+    \ini_set('error_log', $args->log);
+    \ini_set('display_errors', '0');
     $logger = new Logger(\fopen($args->log, 'a'), $source, $logLevel, $args->log, !$args->noAccessLog);
 } elseif ($args->quiet) {
+    // -q silences PHP's own errors too, whatever the operator's -d display_errors said
+    \ini_set('display_errors', '0');
+    \ini_set('log_errors', '0');
     $logger = new NullLogger();
 } else {
     $logger = new Logger(\STDOUT, $source, $logLevel, access: !$args->noAccessLog);

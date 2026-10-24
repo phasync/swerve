@@ -667,10 +667,12 @@ final class Swerve
                     try {
                         $conn = \phasync\ext\worker_next();
                     } catch (\Throwable $e) {
-                        // worker_detach()d (a recycle's handover arrived, or the master's 'U'):
-                        // no connection ever comes to this lifecycle again, so this coroutine's
-                        // work is over. (The ext throws a plain \Error; 'detached' is its word.)
-                        if (!\str_contains($e->getMessage(), 'detach')) {
+                        // worker_detach()d (a recycle's handover arrived, or the master's 'U'),
+                        // or stopping (SIGTERM, the parent's own shutdown forwarded): no
+                        // connection ever comes to this lifecycle again, so this coroutine's
+                        // work is over. (The ext throws a plain \Error; 'detached'/'stopping' is
+                        // its word.)
+                        if (!\str_contains($e->getMessage(), 'detach') && !\str_contains($e->getMessage(), 'stopping')) {
                             throw $e;
                         }
                         Worker::current()->handedOver(); // a handover's: drain as the recycle it is
@@ -793,6 +795,9 @@ final class Swerve
     {
         foreach (self::$connections as $connection) {
             $connection->drain($linger);
+        }
+        if (0 !== ($upgraded = \Swerve\Psr\Bridge::upgrades())) {
+            self::log()->info('{u} upgraded connection' . ($upgraded > 1 ? 's' : '') . ' open', ['u' => $upgraded]);
         }
         if (!$linger) {
             return; // Worker::stop() cancels whatever is left

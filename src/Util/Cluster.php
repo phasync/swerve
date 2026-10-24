@@ -127,6 +127,8 @@ final class Cluster
     private array $pendingTakeovers = [];
     /** @var array<int, array{int, int, string, bool}> pid => [pid, slot, why, lingering]: draining, for noteCleanDrain(). */
     private array $drainInfo = [];
+    /** @var array<int, float> generation => when to SIGKILL its worker-parent (the reports first). */
+    private array $pendingParentKill = [];
     /** pid => [slot, up, killReason] of connections that just ended: the worker's exit closes its
      * socket before the worker-parent's reap reports the death (up to one lot tick later), so the
      * report usually arrives second; deathReport() logs the died line from these. */
@@ -649,6 +651,12 @@ final class Cluster
         $w->state   = LifecycleConnection::SERVING;
         $w->readyAt = $now;
         $this->logger->info('Worker {pid} (slot {slot}) ready in {s} s', ['pid' => $w->pid, 'slot' => $w->slot, 's' => \round($now - $w->started, 2)]);
+        if ($this->stopSignals || null !== $this->exitCode) {
+            // Readied into a shutdown: drained like the ones the stop found already connected
+            $this->drain($w, false, 'T');
+
+            return;
+        }
         $this->takeoverLog($w);
         if (!$this->everReady) {
             $this->everReady = true;
@@ -873,9 +881,10 @@ final class Cluster
     }
 
     /**
-     * Once every slot of a stopping generation has drained at least once, kill its worker-parent's
-     * process group outright, rather than waiting for the process to exit on its own: see
-     * $drainedOnce.
+     * Once every slot of a stopping generation has drained at least once, kill its
+     * worker-parent, rather than waiting for the process to exit on its own (it never would:
+     * its slots all stand empty). Briefly delayed: its reap reports of the drained workers --
+     * the 'exited after draining' lines -- arrive first, unless it is slower than that.
      */
     private function killIfFullyDrained(int $generation): void
     {
@@ -887,7 +896,7 @@ final class Cluster
             return;
         }
         unset($this->drainedOnce[$generation]);
-        \posix_kill($info['pid'], \SIGKILL); // its lifecycles die with it (PR_SET_PDEATHSIG)
+        $this->pendingParentKill[$generation] = self::now() + 0.5;
     }
 
     /**
@@ -898,6 +907,14 @@ final class Cluster
     private function deadlines(): void
     {
         $now = self::now();
+        foreach ($this->pendingParentKill as $generation => $when) {
+            if ($now >= $when) {
+                unset($this->pendingParentKill[$generation]);
+                if (isset($this->workerParents[$generation])) {
+                    \posix_kill($this->workerParents[$generation]['pid'], \SIGKILL); // its lifecycles die with it
+                }
+            }
+        }
         if ($now - $this->lastDeadlines > self::PAUSED) {
             foreach ($this->connections as $w) {
                 $w->lastSeen = $now;
@@ -1042,6 +1059,11 @@ final class Cluster
     private function drainAll(string $why): void
     {
         $start = self::now();
+        // No new connections from now on: close the listeners at once, so a client connecting
+        // during the drain is refused, not accepted into a backlog nobody will ever serve
+        foreach ($this->listeners as $listener) {
+            @\fclose($listener);
+        }
         foreach ($this->workerParents as $generation => $info) {
             $this->workerParents[$generation]['stopping'] = true;
             // SIGTERM the worker-parent first, same as completeReload(): it's what stops the ext
