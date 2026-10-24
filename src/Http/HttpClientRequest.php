@@ -397,6 +397,28 @@ final class HttpClientRequest implements ClientRequest
         $keepAlive = false;
         $status    = 500;
         $caught    = false; // a catch below ran and already dealt with the response its own way
+        // exit()/die() deep in the handler runs through the fiber Swerve::dispatch() starts for
+        // it (see Swerve::serveConnection()): the bailout unwinds that fiber alone, abandoned
+        // without ever resuming back into this call, so neither a catch above nor the finally
+        // below runs (unlike a bailout that stays within this same call, which 6dd9a86 already
+        // covers). A registered shutdown function is the one thing PHP still runs then -- same
+        // as the $_SERVER restore in Swerve::run(), which relies on exactly this -- so an
+        // unfinished response (a head, and perhaps some of its body, already on the wire) is
+        // finished there instead of left for the lifecycle's end to just cut off (swerve#75).
+        \register_shutdown_function(function () use ($start, $c): void {
+            if ($this->ended) {
+                return; // the try/finally below already did, the normal way
+            }
+            try {
+                $this->end();
+            } catch (\Throwable $e) {
+                if (null === $this->gone) {
+                    $c->logger->error('{request} failed after exit(): {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);
+                }
+            }
+            $this->finished = $this->ended = true;
+            $c->access?->request($this->method, $this->target, $this->wire ? $this->status : 500, (\hrtime(true) - $start) / 1e9);
+        });
         try {
             ($c->handler)($this);
             if (null !== $this->error) {
