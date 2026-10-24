@@ -75,6 +75,10 @@ final class Swerve
     private static bool $readySent = false;
     /** A closure's handler form, cached: see resolveHandler(). */
     private static ?\WeakMap $handlerKinds = null;
+    /** Public roots resolved to their real path, by the path as given: see accept(). */
+    private static array $webRoots = [];
+    /** The application file's own directory: a relative $webRoot of accept()'s resolves here. */
+    private static ?string $appDirectory = null;
     /** $_SERVER as the application left it after booting (its own values, not the command line's), see bootServer(). */
     private static ?array $bootServer = null;
     private static int $maxBody = HttpConnection::MAX_BODY;
@@ -582,7 +586,8 @@ final class Swerve
      *
      * A static file under `$webRoot`, or a redirect to add a directory's trailing slash, never
      * reaches `$handler`: see {@see Router}. `$webRoot` null serves no static files; everything
-     * goes to `$handler`.
+     * goes to `$handler`. A relative `$webRoot` resolves against the application file's own
+     * directory, once, so a `chdir()` by the application cannot move it.
      *
      * A kept-alive connection either stays here directly for its next request (when this
      * worker has nothing better to do: another call to accept() is already waiting) or is
@@ -600,9 +605,10 @@ final class Swerve
      *
      * @param string|\Closure(ServerRequestInterface): \Psr\Http\Message\ResponseInterface $handler
      *
-     * @throws \LogicException called from inside the request it is already serving (it is the
-     *                          worker script's own loop, not something a request's handler calls),
-     *                          or with `--no-http` (no listener to ask for a connection)
+     * @throws \InvalidArgumentException `$webRoot` is not a directory
+     * @throws \LogicException           called from inside the request it is already serving (it is the
+     *                                   worker script's own loop, not something a request's handler calls),
+     *                                   or with `--no-http` (no listener to ask for a connection)
      * @throws \Throwable      whatever the ext (or phasync/hooked without it) throws when this
      *                         process is not a worker, or already has an outstanding call
      *
@@ -615,6 +621,20 @@ final class Swerve
         // Scope never saw what the application set while booting). A swerve.php that returns
         // instead of looping gets its snapshot from inc/lifecycle.php when the file returns.
         self::bootServer();
+        if (null !== $webRoot && !isset(self::$webRoots[$webRoot])) {
+            // Router compares realpath()s against this root, so a relative one would never
+            // match. Resolve it once, against the application file's own directory (not the
+            // current directory: the application may have chdir()d itself, at load or per
+            // request, and must not move its public root).
+            $real = \realpath(\preg_match('#^(?:/|[A-Za-z]:[\\\\/])#', $webRoot)
+                ? $webRoot
+                : (self::$appDirectory ?? \getcwd()) . '/' . $webRoot);
+            if (false === $real || !\is_dir($real)) {
+                throw new \InvalidArgumentException("Swerve::accept()'s public root $webRoot is not a directory");
+            }
+            self::$webRoots[$webRoot] = $real;
+        }
+        $webRoot = null === $webRoot ? null : self::$webRoots[$webRoot];
         $fiber = \Fiber::getCurrent();
         if (null !== $fiber && isset((self::$requestFibers ??= new \WeakMap())[$fiber])) {
             throw new \LogicException('Swerve::accept() cannot be called from inside the request it is serving: call it only from the worker script\'s own loop');
@@ -863,6 +883,17 @@ final class Swerve
     private static function address(string $address): array
     {
         return \preg_match('/^\[?(.+?)\]?:(\d+)$/', $address, $m) ? [$m[1], $m[2]] : [$address, ''];
+    }
+
+    /**
+     * The application file's own directory: inc/lifecycle.php tells accept() here, so a relative
+     * $webRoot resolves there no matter what the application chdir()s to (see accept()).
+     *
+     * @internal
+     */
+    public static function setAppDirectory(string $directory): void
+    {
+        self::$appDirectory = $directory;
     }
 
     /**

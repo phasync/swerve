@@ -111,6 +111,9 @@ phasync::run(static function () use ($worker, $args, $logger): void {
     $worker->serve(
         static function () use ($appFile): void {
             \chdir(\dirname($appFile));
+            // A relative public root of the application's accept() resolves here, whatever it
+            // chdir()s to later (Swerve::accept()).
+            Swerve::setAppDirectory(\dirname($appFile));
             // The loader fiber: cache()/publish() called directly in swerve.php throw (waiting
             // could never end, the worker serves after the file returns); coroutines it starts
             // wait instead (see Cache::awaitListening()). Reset in finally: after the file has
