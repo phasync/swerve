@@ -64,6 +64,7 @@ final class HttpClientRequest implements ClientRequest
     private int $left       = 0;      // LENGTH: bytes still to write
     private string $out     = '';     // the complete head, until it is written
     private bool $wire      = false;  // the final head went out: an error can no longer be answered
+    private bool $accessLogged = false; // this request's access line was written, see runRequest()
     private bool $ended     = false;
     private bool $finished  = false;  // run() is over
     private bool $raw       = false;  // after 101
@@ -428,7 +429,16 @@ final class HttpClientRequest implements ClientRequest
                 }
             }
             $this->finished = $this->ended = true;
-            $c->access?->request($this->method, $this->target, $this->wire ? $this->status : 500, (\hrtime(true) - $start) / 1e9);
+            if (!$this->accessLogged) {
+                // The finally at the end of this method can still run for the same request (a
+                // lifecycle that ends with one accept() per request cancels the coroutine, and
+                // its finally runs then), so the line is written once, by whoever gets here
+                // first -- and this handler gets here first exactly when the request's own fiber
+                // was abandoned, which is when the status it has (the head that went out, or
+                // none) is the one worth keeping.
+                $this->accessLogged = true;
+                $c->access?->request($this->method, $this->target, $this->wire ? $this->status : 500, (\hrtime(true) - $start) / 1e9);
+            }
         });
         try {
             ($c->handler)($this);
@@ -484,7 +494,10 @@ final class HttpClientRequest implements ClientRequest
                 }
             }
             $this->finished = $this->ended = true;
-            $c->access?->request($this->method, $this->target, $status, (\hrtime(true) - $start) / 1e9);
+            if (!$this->accessLogged) {
+                $this->accessLogged = true;
+                $c->access?->request($this->method, $this->target, $status, (\hrtime(true) - $start) / 1e9);
+            }
         }
 
         return $keepAlive;

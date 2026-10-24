@@ -425,11 +425,16 @@ final class Cluster
         if (isset($this->recentlyEnded[$pid])) {
             // Its connection already ended: the exit closed the socket before the worker-parent's
             // reap reported the death -- the report came second, the usual order.
-            [$slot, $up, $killReason, $fatal, $drained] = $this->recentlyEnded[$pid];
+            [$slot, $up, $killReason, $fatal, $drained, $served] = $this->recentlyEnded[$pid] + [5 => false];
             unset($this->recentlyEnded[$pid]);
+            $ctx = ['pid' => $pid, 'slot' => $slot, 'up' => $up];
             if ($drained && 'exit 0' === $how) {
-                $this->logger->info('Worker {pid} (slot {slot}) exited after draining (exit 0), up {up}', ['pid' => $pid, 'slot' => $slot, 'up' => $up]);
+                $this->logger->info('Worker {pid} (slot {slot}) exited after draining (exit 0), up {up}', $ctx);
                 $this->noteCleanDrain($pid, $slot);
+            } elseif ('exit 0' === $how && !$fatal && $served) {
+                // The application ended a request the way PHP-FPM lets it: with exit()/die().
+                // Not a death (see the same rule in ended(), for when the report arrives first).
+                $this->logger->debug('Worker {pid} (slot {slot}) exited (exit 0) with the application exit()ed, up {up}', $ctx);
             } else {
                 $this->logDied($pid, $slot, $up, $how, $killReason, $fatal);
             }
@@ -817,7 +822,7 @@ final class Cluster
                 // Draining, but how it ended is not known yet (the worker-parent's reap
                 // report usually arrives after this EOF): a SIGTERM mid-shutdown, a fatal
                 // in a shutdown function, is no clean drain -- say so when it arrives.
-                $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, true];
+                $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, true, true];
                 if (\count($this->recentlyEnded) > 64) {
                     \array_shift($this->recentlyEnded);
                 }
@@ -835,11 +840,24 @@ final class Cluster
             return;
         }
         if (null !== $how) {
+            if ('exit 0' === $how && !$w->fatal && ($w->served || null !== $w->readyAt)) {
+                // PHP-FPM is the measure: a request that ends with die() ended normally, and an
+                // application run in the shape that resets per request (the only safe one for
+                // WordPress, whose redirects and wp_die() *are* exit()) would fill a log with
+                // this otherwise. Status 0 is the application saying "done", not a death: the
+                // ext runs the next lifecycle, the slot's backoff is cleared, and the line is as
+                // loud as the event. A non-zero status, a fatal (255) or a signal is still
+                // reported below, as it always was.
+                $this->logger->debug('Worker {pid} (slot {slot}) exited (exit 0) with the application exit()ed, up {up}', $ctx);
+                $this->failures[$w->slot] = 0;
+
+                return;
+            }
             // The worker-parent reported the death on its stderr (it usually arrives after
             // this EOF: the exit closes the socket at once, the reap a lot tick later).
             $this->logDied($w->pid, $w->slot, $ctx['up'], $how, $w->killReason, $w->fatal);
         } else {
-            $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, false];
+            $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, false, (bool) ($w->served || null !== $w->readyAt)];
             if (\count($this->recentlyEnded) > 64) {
                 \array_shift($this->recentlyEnded);
             }
