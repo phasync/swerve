@@ -635,6 +635,7 @@ final class Cluster
                 continue;
             }
             $old->takeoverLogged = true;
+            unset($this->drainInfo[$old->pid]); // paired here: noteCleanDrain() must not log it again
             $this->logger->notice('Slot {slot}: worker {new} took over, draining {old} ({why})' . ($old->lingering ? '; its upgraded connections may stay up to {linger} s' : ''), [
                 'slot' => $old->slot, 'new' => $new->pid, 'old' => $old->pid,
                 'why' => $old->recycle ? 'recycle' : 'reload', 'linger' => self::seconds($this->linger),

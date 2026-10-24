@@ -421,34 +421,41 @@ final class Worker
         $this->logger->notice('Recycling: {why}', ['why' => $why]);
         $this->send('C');
         if (\function_exists('phasync\ext\worker_handover')) {
-            $waitLogged = false;
-            while (true) {
-                try {
-                    \phasync\ext\worker_handover();
-                    break;
-                } catch (\RuntimeException $e) {
-                    // The lot keeps only so many detached (lingering) lifecycles per slot: with
-                    // the backlog full this recycle waits for one of them to end, serving on
-                    // meanwhile -- the replacement is forked when the handover goes through.
-                    if (!\str_contains($e->getMessage(), 'too many detached')) {
-                        throw $e;
-                    }
-                    if (!$waitLogged) {
-                        $waitLogged = true;
-                        $this->send('W'); // the master logs the wait once
-                    }
-                    phasync::sleep(0.05);
-                    if ($this->draining) {
-                        return; // drained meanwhile (a reload, a shutdown): no recycle then
+            /* service(), not inline: the retry loop below can take seconds (a full lingering
+             * backlog), and the acceptor awaits every request's fiber -- run here, it would
+             * hold the slot's own requests hostage against a lingering worker's exit, a
+             * deadlock the load tests find at once. A service belongs to no run() and
+             * outlives the request that started the recycle. */
+            phasync::service(function () use ($why): void {
+                $waitLogged = false;
+                while (true) {
+                    try {
+                        \phasync\ext\worker_handover();
+                        break;
+                    } catch (\RuntimeException $e) {
+                        // The lot keeps only so many detached (lingering) lifecycles per slot:
+                        // with the backlog full this recycle waits for one of them to end,
+                        // serving on meanwhile -- the replacement is forked when it goes through.
+                        if (!\str_contains($e->getMessage(), 'too many detached')) {
+                            throw $e;
+                        }
+                        if (!$waitLogged) {
+                            $waitLogged = true;
+                            $this->send('W'); // the master logs the wait once
+                        }
+                        phasync::sleep(0.05);
+                        if ($this->draining) {
+                            return; // drained meanwhile (a reload, a shutdown): no recycle then
+                        }
                     }
                 }
-            }
-            /* Serve on: the lot detaches this worker -- worker_next() throws as it does for a
-             * detach -- only when the replacement asks its first, so a replacement that never
-             * readies never costs the slot its serving worker. Swerve::accept() calls
-             * handedOver() then, which drains as a recycle does. */
-            $this->handoverPending = true;
-            $this->recycleWhy     = $why;
+                /* Serve on: the lot detaches this worker -- worker_next() throws as it does
+                 * for a detach -- only when the replacement asks its first, so a replacement
+                 * that never readies never costs the slot its serving worker.
+                 * Swerve::accept() calls handedOver() then, which drains as a recycle does. */
+                $this->handoverPending = true;
+                $this->recycleWhy     = $why;
+            });
 
             return;
         }

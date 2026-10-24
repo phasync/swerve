@@ -63,11 +63,11 @@ test('a recycled worker keeps its WebSocket, past the grace period, and exits on
         ws_send($conn, 1, 'still here');
         expect(ws_read($conn))->toBe([1, 'still here']);
         expect(linger_alive($old))->toBeTrue();
-        expect(log_count($log, "/Lifecycle $old \\(slot 0\\) ended/"))->toBe(0);
+        expect(log_count($log, "/Worker $old \\(slot 0\\) exited/"))->toBe(0);
 
         linger_close($conn);
-        log_wait($log, "/Lifecycle $old \\(slot 0\\) ended after draining/", 3);
-        expect(log_count($log, '/Killing lifecycle/'))->toBe(0);
+        log_wait($log, "/Worker $old \\(slot 0\\) exited after draining/", 3);
+        expect(log_count($log, '/Killing worker/'))->toBe(0);
     } finally {
         native_stop($process);
     }
@@ -100,7 +100,7 @@ test('--linger ends the lingering: the callback of Swerve::onShutdown() runs the
         expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
         expect(microtime(true) - $recycled)->toBeGreaterThan(1.0);
         expect(ws_read($conn))->toBeNull();
-        log_wait($log, "/Lifecycle $old \\(slot 0\\) ended after draining/", 3);
+        log_wait($log, "/Worker $old \\(slot 0\\) exited after draining/", 3);
         $text = file_get_contents($log);
         preg_match("/took over, draining $old \\(recycle\\)/", $text, $over, PREG_OFFSET_CAPTURE);
         preg_match('/onShutdown callback ran/', $text, $ran, PREG_OFFSET_CAPTURE);
@@ -144,7 +144,7 @@ test('a reload ends the lingering too', function () {
         linger_until_replaced($addr, $old, $log);
         swerve_signal($process, SIGHUP);
         expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
-        log_wait($log, "/Lifecycle $old \\(slot 0\\) ended after draining/", 4);
+        log_wait($log, "/Worker $old \\(slot 0\\) exited after draining/", 4);
     } finally {
         native_stop($process);
     }
