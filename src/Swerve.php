@@ -65,6 +65,8 @@ final class Swerve
     private static ?\stdClass $queueFlag = null;
     /** Calls to accept() currently blocked with nothing to do: a worker with spare capacity, see onIdle(). */
     private static int $idle = 0;
+    /** Raised whenever $idle goes up, or the lifecycle starts ending; see onIdle(). */
+    private static ?\stdClass $idleFlag = null;
     /** The background coroutine pulling connections (see accept()) was started once already. */
     private static bool $acceptorStarted = false;
     /** The fiber running each request's handler, so a nested accept() from inside it can be refused. */
@@ -585,9 +587,11 @@ final class Swerve
      * A kept-alive connection either stays here directly for its next request (when this
      * worker has nothing better to do: another call to accept() is already waiting) or is
      * handed back to the lot (`WorkerDuplex::park()`) for whichever worker is idle when its
-     * next request arrives; an app-set `Connection: close` always ends it. A connection with
-     * bytes already read but not yet parsed (pipelined requests) is never parked: it keeps
-     * being read here until its buffer is empty.
+     * next request arrives; an app-set `Connection: close` always ends it. A request never
+     * runs here unless an accept() call asked for one: with none waiting, a connection with
+     * bytes already read but not yet parsed (pipelined requests) waits for the next one
+     * instead (it can't be parked -- that would lose them); with one accept() per lifecycle
+     * (the -S shape) none ever comes, and the connection is closed as the lifecycle ends.
      *
      * The first call starts a background coroutine that keeps pulling connections with
      * `worker_next()`, independently of any one accept() call: a request from any connection
@@ -631,8 +635,18 @@ final class Swerve
                     self::serveConnection(\phasync\ext\worker_next(), $webRoot, $handler);
                 }
             });
+            // Wakes a connection's onIdle(), waiting for this worker script to call accept()
+            // again, once it never will: the ext still runs this (HttpConnection::$exiting, set
+            // the same way) even though the worker script's own exit() -- one accept() per
+            // lifecycle, the -S shape -- never reaches Worker::stop()'s own cancellation.
+            \register_shutdown_function(static function (): void {
+                if (null !== self::$idleFlag) {
+                    phasync::raiseFlag(self::$idleFlag);
+                }
+            });
         }
         ++self::$idle;
+        phasync::raiseFlag(self::$idleFlag ??= new \stdClass());
         try {
             while (!self::$queue) {
                 phasync::awaitFlag(self::$queueFlag ??= new \stdClass());
@@ -656,10 +670,25 @@ final class Swerve
     {
         $io = new WorkerDuplex($conn);
         $onIdle = static function (HttpConnection $connection) use ($io): bool {
-            if (self::$idle > 0 || !$connection->bufferEmpty()) {
-                return false; // this worker is idle anyway, or parking would lose buffered bytes
+            while (0 === self::$idle && !HttpConnection::$exiting && !$connection->bufferEmpty()) {
+                // Pipelined bytes nobody has asked for yet: wait for a puller -- a looped
+                // accept() catching up (it increments $idle before it next waits) -- instead of
+                // dispatching them here uninvited (swerve#74). With one accept() per lifecycle
+                // (the -S shape) none ever comes; the wait ends with the lifecycle instead,
+                // $exiting raising the same flag.
+                phasync::awaitFlag(self::$idleFlag ??= new \stdClass());
             }
-            $io->park();
+            if (self::$idle > 0) {
+                return false; // this worker is idle anyway: stays here for its next request
+            }
+            if ($connection->bufferEmpty()) {
+                $io->park(); // handed back to the lot: whichever lifecycle's accept() asks next gets it
+
+                return true;
+            }
+            // Pipelined bytes still nobody's, the lifecycle ending instead: worker_park() can't
+            // take them -- close instead of running them here (swerve#74).
+            $io->close();
 
             return true;
         };
