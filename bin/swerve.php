@@ -387,6 +387,11 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $workerParentEnv = \getenv() + [
         'SWERVE_ARGS'     => (string) \getenv('SWERVE_ARGS'),
         'SWERVE_APP_FILE' => $appFile,
+        // Where Composer's proxy pointed us at the project's autoloader: a PHP global of this
+        // process, so a fresh php process (the worker-parent, and every lifecycle forked from it)
+        // would otherwise fall back to a vendor directory of swerve's own -- and a package's
+        // integration file in `files` would load for the master alone, never in a worker.
+        'SWERVE_COMPOSER_AUTOLOAD' => (string) ($GLOBALS['_composer_autoload_path'] ?? ''),
         // The lifecycle's log lines carry their slot, right-aligned to the width the master's
         // own lines leave blank; it cannot derive the width from --workers=auto.
         'SWERVE_WORKERS'  => $workerCount,

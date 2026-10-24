@@ -1020,6 +1020,12 @@ final class Cluster
                 $this->leaveInbox($w);
             }
         }
+        // The cache starts empty with the new generation: what the old code stored is not for the
+        // new one -- a serialized object of a class that changed, a value whose meaning did. The
+        // master's own store goes, and the workers of the old generation, which keep serving until
+        // they drain, are told to forget what they hold so they cannot answer from it either.
+        $this->cache->clear();
+        $this->forgetAll(Topics::frame(Cache::FORGET, \serialize(null)));
         $this->logger->notice('Reload requested ({why}): starting generation {generation}', ['why' => $why, 'generation' => $this->generation]);
         $this->startWorkerParent();
     }

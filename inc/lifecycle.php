@@ -23,6 +23,11 @@ use Swerve\Util\Worker;
 // Composer "files" load fresh with its own require of vendor/autoload.php, as under PHP-FPM.
 require_once __DIR__ . '/../src/Util/WorkerAutoloader.php';
 require_once __DIR__ . '/../src/Util/Plug.php';
+if (!isset($GLOBALS['_composer_autoload_path']) && ($autoload = \getenv('SWERVE_COMPOSER_AUTOLOAD'))) {
+    // The master was started through Composer's proxy (or the test that stands in for it): it
+    // hands the path down, since the global it holds is a PHP one and died with that process
+    $GLOBALS['_composer_autoload_path'] = $autoload;
+}
 $vendorDir = isset($GLOBALS['_composer_autoload_path'])
     ? \dirname($GLOBALS['_composer_autoload_path'])
     : (\is_file(__DIR__ . '/../vendor/autoload.php') ? __DIR__ . '/../vendor' : \dirname(__DIR__, 3));
