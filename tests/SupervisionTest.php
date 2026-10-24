@@ -354,7 +354,10 @@ test('a child the master did not start ending (a wrapper\'s background job, an o
 });
 
 test('an application that exits 0 while loading fails to start with a non-zero exit code', function () {
-    $app = temp_path();
+    // Its own directory: swerve_spawn() takes the fixture's directory as swerve's working
+    // directory, and that is the directory of an application, not /tmp with a swerve.php in it
+    $dir = temp_path(true);
+    $app = "$dir/dies-at-load.php";
     file_put_contents($app, "<?php die('no config');\n");
     [$process, , $log, $pid] = swerve_start(fixture: $app, wait: false);
     [$code]                  = swerve_wait($process, 5);
