@@ -331,12 +331,25 @@ test('a reader that was away longer than the retention has lost messages: its su
         do {
             [$other, $otherPid] = ord_subscribe($addr, 'gap', 50);
         } while ($otherPid === $awayPid);
-        [$blocker]   = ord_connect($addr, $awayPid);
-        [$publisher] = ord_connect($addr, null, [$awayPid]);
+        // The /pid and the real request go in one pipeline: a finished response parks the
+        // connection back with the lot (swerve 0.3), so only requests written together are
+        // sure to run on the same worker (buffered bytes can't be parked, swerve#74). The
+        // block must stall the away worker's whole event loop while the publishes flow from
+        // another worker.
+        do {
+            $blocker = native_connect($addr);
+            fwrite($blocker, "GET /pid HTTP/1.1\r\nHost: t\r\n\r\nGET /block?ms=3000 HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head       = native_read_head($blocker);
+            $blockerPid = (int) fread($blocker, (int) $head['headers']['content-length']);
+        } while ($blockerPid !== $awayPid);
+        do {
+            $publisher = native_connect($addr);
+            fwrite($publisher, "GET /pid HTTP/1.1\r\nHost: t\r\n\r\nGET /publish-seq?topic=gap&ordered=1&id=g&count=50&sleep=60 HTTP/1.1\r\nHost: t\r\n\r\n");
+            $head  = native_read_head($publisher);
+            $pubPid = (int) fread($publisher, (int) $head['headers']['content-length']);
+        } while ($pubPid === $awayPid);
 
-        fwrite($blocker, "GET /block?ms=3000 HTTP/1.1\r\nHost: t\r\n\r\n");
         usleep(100000);
-        ord_publish($publisher, 'gap', 'g', 50, '&sleep=60');
         ord_done($publisher);
         expect(ord_events($other, 50))->toBe(array_map(static fn (int $i) => "g:$i:", range(0, 49)));
         expect(native_read_head($blocker)['status'])->toBe(200);

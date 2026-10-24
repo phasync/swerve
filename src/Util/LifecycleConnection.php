@@ -26,6 +26,8 @@ final class LifecycleConnection
     public bool $recycle = false;
     /** Draining, but keeping its upgraded connections until they close or the linger time is over. */
     public bool $lingering = false;
+    /** The takeover of its slot by a later lifecycle was logged, see Cluster. */
+    public bool $takeoverLogged = false;
     /** Sent 'F': a PHP fatal error ends it. */
     public bool $fatal = false;
 

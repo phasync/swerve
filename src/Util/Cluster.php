@@ -252,6 +252,9 @@ final class Cluster
             'SWERVE_GENERATION'    => (string) $generation,
             'SWERVE_INBOX_COUNT'   => (string) \count($reads),
             'SWERVE_INBOX_FD_BASE' => (string) $inboxBase,
+            // The ordered log's directory is the master's (it removes it): without this every
+            // lifecycle made its own, and an ordered channel worked per worker, not per topic.
+            'SWERVE_ORDERED_DIR'   => OrderedLog::directory(),
         ];
         // stdout/stderr go to the master's own (it logs nothing of its own over them, but a
         // closed-pipe read end would SIGPIPE it on PHP's fatal-error text or a stray echo);
@@ -417,13 +420,50 @@ final class Cluster
         $w->recycle = $w->recycle || \str_contains($tail, 'C');
         $w->served  = $w->served || \str_contains($tail, 'Q');
         $w->fatal   = $w->fatal || \str_contains($tail, 'F');
+        if (\str_contains($tail, 'W')) {
+            // Its slot's lingering backlog is full: the recycle goes on once one of them
+            // exits (the lifecycle retries its worker_detach() until then).
+            $this->logger->notice('Slot {slot}: recycle waits for a lingering worker to exit', ['slot' => $w->slot]);
+        }
         if (\str_contains($tail, 'D') && LifecycleConnection::DRAINING !== $w->state) {
             $w->state         = LifecycleConnection::DRAINING;
             $w->drainingSince = $now;
-            $this->leaveInbox($w);
-            if (!$this->stopSignals) {
+            // A lifecycle that asked to be recycled (its 'C' above) lingers with its upgraded
+            // connections for up to --linger seconds, keeping its inbox for its subscriptions;
+            // anything else that drains without being told (an operator's SIGTERM, systemd's)
+            // is a plain drain, worth a warning unless the master is stopping too.
+            $w->lingering = $w->recycle && $this->linger > 0;
+            if (!$w->lingering) {
+                $this->leaveInbox($w);
+            }
+            if (!$this->stopSignals && !$w->recycle) {
                 $this->logger->warning('Lifecycle {pid} (slot {slot}) is draining on a signal the master did not send', ['pid' => $w->pid, 'slot' => $w->slot]);
             }
+            $this->takeoverLog($w);
+        }
+    }
+
+    /**
+     * Log "worker {new} took over, draining {old} ({why})", once per drained lifecycle: from
+     * onReady() when the replacement readies after it drained, or from the 'D' handler above
+     * when it drained first (its 'C' forks the replacement at once, so either order happens).
+     * An older generation's lifecycles are drained by completeReload() instead, all together.
+     */
+    private function takeoverLog(LifecycleConnection $w): void
+    {
+        foreach ($this->connections as $other) {
+            if ($other === $w || $other->slot !== $w->slot || $other->generation !== $w->generation || $other->takeoverLogged) {
+                continue;
+            }
+            [$new, $old] = LifecycleConnection::SERVING === $w->state ? [$w, $other] : [$other, $w];
+            if (LifecycleConnection::DRAINING !== $old->state || LifecycleConnection::SERVING !== $new->state) {
+                continue;
+            }
+            $old->takeoverLogged = true;
+            $this->logger->notice('Slot {slot}: worker {new} took over, draining {old} ({why})' . ($old->lingering ? '; its upgraded connections may stay up to {linger} s' : ''), [
+                'slot' => $old->slot, 'new' => $new->pid, 'old' => $old->pid,
+                'why' => $old->recycle ? 'recycle' : 'reload', 'linger' => self::seconds($this->linger),
+            ]);
         }
     }
 
@@ -433,6 +473,7 @@ final class Cluster
         $w->state   = LifecycleConnection::SERVING;
         $w->readyAt = $now;
         $this->logger->info('Lifecycle {pid} (slot {slot}) ready in {s} s', ['pid' => $w->pid, 'slot' => $w->slot, 's' => \round($now - $w->started, 2)]);
+        $this->takeoverLog($w);
         if (!$this->everReady) {
             $this->everReady = true;
             $this->logger->notice($this->serving);
@@ -485,7 +526,17 @@ final class Cluster
             \posix_kill($info['pid'], \SIGTERM);
             $drained = 0;
             foreach ($this->connections as $w) {
-                if ($w->generation === $generation && LifecycleConnection::DRAINING !== $w->state) {
+                if ($w->generation !== $generation) {
+                    continue;
+                }
+                if ($w->lingering) {
+                    // A reload ends the lingering too: its connections close now, within the
+                    // grace period (the onShutdown callbacks tell them, a WebSocket its 1001).
+                    $this->send($w, 'T');
+                    $w->lingering     = false;
+                    $w->drainingSince = self::now();
+                    ++$drained;
+                } elseif (LifecycleConnection::DRAINING !== $w->state) {
                     $this->drain($w);
                     ++$drained;
                 }
@@ -719,6 +770,18 @@ final class Cluster
         ++$this->generation;
         for ($slot = 0; $slot < $this->numWorkers; ++$slot) {
             $this->failures[$slot] = 0;
+        }
+        foreach ($this->connections as $w) {
+            // A reload ends the lingering too, at once: its code is outdated whatever its
+            // recycle said, its connections close within the grace period (the onShutdown
+            // callbacks tell them, a WebSocket its 1001) -- and its inbox frees up for the
+            // next generation's lifecycle in the slot, which must not wait for it.
+            if ($w->lingering) {
+                $this->send($w, 'T');
+                $w->lingering     = false;
+                $w->drainingSince = self::now();
+                $this->leaveInbox($w);
+            }
         }
         $this->logger->notice('Reload requested ({why}): starting generation {generation}', ['why' => $why, 'generation' => $this->generation]);
         $this->startWorkerParent();

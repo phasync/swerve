@@ -92,6 +92,8 @@ final class Swerve
      * @var array<int, HttpConnection>
      */
     private static array $connections = [];
+    /** Raised as a connection leaves $connections: a lingering lifecycle watches its end, see drainConnections(). */
+    private static ?\stdClass $connectionsFlag = null;
     /** The most connections this worker serves at once, see connectionLimit(). */
     private static int $maxConnections = \PHP_INT_MAX;
     /** What serves more connections, for the log; see connectionLimit() and reclaim(). */
@@ -589,14 +591,15 @@ final class Swerve
      * goes to `$handler`. A relative `$webRoot` resolves against the application file's own
      * directory, once, so a `chdir()` by the application cannot move it.
      *
-     * A kept-alive connection either stays here directly for its next request (when this
-     * worker has nothing better to do: another call to accept() is already waiting) or is
-     * handed back to the lot (`WorkerDuplex::park()`) for whichever worker is idle when its
-     * next request arrives; an app-set `Connection: close` always ends it. A request never
-     * runs here unless an accept() call asked for one: with none waiting, a connection with
-     * bytes already read but not yet parsed (pipelined requests) waits for the next one
-     * instead (it can't be parked -- that would lose them); with one accept() per lifecycle
-     * (the -S shape) none ever comes, and the connection is closed as the lifecycle ends.
+     * A kept-alive connection is handed back to the lot (`WorkerDuplex::park()`) once its
+     * response is finished, and the lot hands it out again -- to whichever lifecycle's accept()
+     * asks first -- only once the client has actually written another request: keep-alive is
+     * the client's, but no worker sits on an idle connection, and requests spread across the
+     * workers. An app-set `Connection: close` always ends it instead. A request never runs
+     * here unless an accept() call asked for one: with none waiting, a connection with bytes
+     * already read but not yet parsed (pipelined requests) waits for the next one instead (it
+     * can't be parked -- that would lose them); with one accept() per lifecycle (the -S shape)
+     * none ever comes, and the connection is closed as the lifecycle ends.
      *
      * The first call starts a background coroutine that keeps pulling connections with
      * `worker_next()`, independently of any one accept() call: a request from any connection
@@ -657,7 +660,19 @@ final class Swerve
             self::serveConnection(\phasync\ext\worker_next(), $webRoot, $handler);
             phasync::go(static function () use ($webRoot, $handler): void {
                 while (true) {
-                    self::serveConnection(\phasync\ext\worker_next(), $webRoot, $handler);
+                    try {
+                        $conn = \phasync\ext\worker_next();
+                    } catch (\Throwable $e) {
+                        // worker_detach()d (a recycle, or the master's 'U'): no connection ever
+                        // comes to this lifecycle again, so this coroutine's work is over --
+                        // quietly. (The ext throws a plain \Error; 'detached' is its word.)
+                        if (!\str_contains($e->getMessage(), 'detach')) {
+                            throw $e;
+                        }
+
+                        return;
+                    }
+                    self::serveConnection($conn, $webRoot, $handler);
                 }
             });
             // Wakes a connection's onIdle(), waiting for this worker script to call accept()
@@ -703,13 +718,20 @@ final class Swerve
                 // $exiting raising the same flag.
                 phasync::awaitFlag(self::$idleFlag ??= new \stdClass());
             }
-            if (self::$idle > 0) {
-                return false; // this worker is idle anyway: stays here for its next request
-            }
+            // A finished keep-alive response always parks the connection back with the lot
+            // (worker_park()), which hands it out again -- to whichever lifecycle's accept()
+            // asks first -- only once the client has actually written another request: the
+            // browser's keep-alive is unaffected, but no worker sits on a client's idle
+            // connection, and requests spread across the workers. What can't be parked is
+            // bytes already read past the response (pipelining, swerve#74): those must run
+            // here, once an accept() call asks for them.
             if ($connection->bufferEmpty()) {
-                $io->park(); // handed back to the lot: whichever lifecycle's accept() asks next gets it
+                $io->park();
 
                 return true;
+            }
+            if (self::$idle > 0) {
+                return false; // a pipelined request is buffered and an accept() waits: serve it here
             }
             // Pipelined bytes still nobody's, the lifecycle ending instead: worker_park() can't
             // take them -- close instead of running them here (swerve#74).
@@ -741,6 +763,7 @@ final class Swerve
                 $connection->serve();
             } finally {
                 unset(self::$connections[$id]);
+                self::connectionEnded();
             }
         });
         // At the limit, nothing may be reclaimable yet (a connection just accepted, including
@@ -749,6 +772,50 @@ final class Swerve
         // above, included).
         while (\count(self::$connections) > self::$maxConnections && !self::reclaim()) {
             phasync::sleep();
+        }
+    }
+
+    /**
+     * The worker drains (inc/lifecycle.php's drain callback): every connection it still holds
+     * stops keeping idle clients (an upgraded one is kept while lingering, see
+     * {@see HttpConnection::drain()}). A lingering lifecycle -- a recycle keeping its upgraded
+     * connections for up to `--linger` seconds -- ends as soon as nothing is left to linger
+     * for, instead of at `--linger`'s end.
+     *
+     * @internal
+     */
+    public static function drainConnections(bool $linger): void
+    {
+        foreach (self::$connections as $connection) {
+            $connection->drain($linger);
+        }
+        if (!$linger) {
+            return; // Worker::stop() cancels whatever is left
+        }
+        // service(), not go(): a drain runs inside the request that triggered it (a recycle's
+        // max-requests request), and a go() here would join that request's nested run, which
+        // waits for its coroutines -- the watcher waiting for this very connection to end
+        // included. A self-deadlock. A service belongs to no run() and outlives the request.
+        phasync::service(static function (): void {
+            // Upgraded connections count too: a 101's pump outlives its request's connection
+            // here (it left $connections when its response ended), see Bridge::upgrades().
+            while (self::$connections || \Swerve\Psr\Bridge::upgrades() > 0) {
+                phasync::awaitFlag(self::$connectionsFlag ??= new \stdClass());
+            }
+            Worker::current()->lingerDone();
+        });
+    }
+
+    /**
+     * A connection, or an upgraded exchange (Bridge's 101 pump), ended: wakes the lingering
+     * lifecycle's watcher (drainConnections()).
+     *
+     * @internal
+     */
+    public static function connectionEnded(): void
+    {
+        if (null !== self::$connectionsFlag) {
+            phasync::raiseFlag(self::$connectionsFlag);
         }
     }
 

@@ -178,12 +178,16 @@ test('in a cluster, a message published in one worker reaches the subscribers in
             $pids[$pid]    = true;
         }
         expect(count($pids))->toBeGreaterThanOrEqual(min(2, $workers));
-        // One connection, so every publish is from the same worker: publish() never waits for
-        // the master, even its first call, so a publish from a different worker is not promised
-        // any order against these (see Swerve::publish()'s docblock)
+        // Pipelined on one connection, so every publish is from the same worker (a finished
+        // response parks the connection back to the lot, so sequential requests on it scatter
+        // over the workers; pipelined bytes are served where they are, swerve#74): publish()
+        // never waits for the master, even its first call, so a publish from a different worker
+        // is not promised any order against these (see Swerve::publish()'s docblock)
         $publisher = native_connect($addr);
         foreach (['one', 'two', 'three'] as $m) {
             fwrite($publisher, "GET /publish?topic=room&m=$m HTTP/1.1\r\nHost: t\r\n\r\n");
+        }
+        foreach (['one', 'two', 'three'] as $m) {
             $head = native_read_head($publisher);
             expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
         }
@@ -212,14 +216,18 @@ test('a worker that does not read its inbox does not hold up the publishers: the
                 $other = $conn;
             }
         }
-        // Stalls the subscriber's worker: a connection that asks for its pid, until it lands there
+        // Stalls the subscriber's worker: /pid and /busy pipelined on one connection, so both
+        // run on the same worker (a finished response parks the connection back to the lot, so
+        // a /busy written after the /pid response could land on the other worker; pipelined
+        // bytes are served where they are, swerve#74). A miss stalls the wrong worker 2 s.
         for ($busy = null; null === $busy;) {
             $conn = native_connect($addr);
-            fwrite($conn, "GET /pid HTTP/1.1\r\nHost: t\r\n\r\n");
+            fwrite($conn, "GET /pid HTTP/1.1\r\nHost: t\r\n\r\nGET /busy?s=2 HTTP/1.1\r\nHost: t\r\n\r\n");
             $head = native_read_head($conn);
             if ((int) fread($conn, (int) $head['headers']['content-length']) === $pid) {
-                fwrite($conn, "GET /busy?s=2 HTTP/1.1\r\nHost: t\r\n\r\n");
                 $busy = $conn;
+            } else {
+                fclose($conn);
             }
         }
         usleep(300000);
@@ -366,10 +374,12 @@ test('a message reaches every subscriber in every worker as the value published:
             $pids[$pid]    = true;
         }
         expect(count($pids))->toBe(2);
-        // One connection, so both publishes are from the same worker: see the note in the test above
+        // Pipelined on one connection, so both publishes are from the same worker: see the note in the test above
         $publisher = native_connect($addr);
         foreach (['/publish-json?topic=structured&m=hello', '/publish?topic=structured&m=plain'] as $path) {
             fwrite($publisher, "GET $path HTTP/1.1\r\nHost: t\r\n\r\n");
+        }
+        foreach (['/publish-json?topic=structured&m=hello', '/publish?topic=structured&m=plain'] as $path) {
             $head = native_read_head($publisher);
             expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
         }

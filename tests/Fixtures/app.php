@@ -197,9 +197,14 @@ return (function () use ($version) {
                         --$newsLive;
                     }
                 });
-            // A WebSocket that tells its worker's pid, then echoes
+            // A WebSocket that tells its worker's pid, echoes, and says goodbye (1001) when the worker shuts down; ?throw=1: a callback that throws is registered first
             case '/websocket-shutdown':
-                return \Swerve\WebSocketResponse::from($r, static function (WebSocket $ws) {
+                return \Swerve\WebSocketResponse::from($r, static function (WebSocket $ws) use ($query) {
+                    isset($query['throw']) && Swerve::onShutdown(static fn () => throw new \RuntimeException('the shutdown callback failed'));
+                    Swerve::onShutdown(static function () use ($ws) {
+                        Swerve::log()->notice('onShutdown callback ran');
+                        $ws->end(1001);
+                    });
                     $ws->send((string) \getmypid());
                     foreach ($ws as $message) {
                         $ws->isBinary() ? $ws->sendBinary($message) : $ws->send($message);

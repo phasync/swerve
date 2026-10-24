@@ -331,6 +331,19 @@ final class Worker
     }
 
     /**
+     * A lingering lifecycle's last connection ended ({@see \Swerve\Swerve::drainConnections()}):
+     * nothing is left to linger for, so it closes and exits now, not at `--linger`'s end.
+     *
+     * @internal
+     */
+    public function lingerDone(): void
+    {
+        if ($this->draining && null !== $this->lingerEnd) {
+            $this->stopLingering('nothing left to linger for');
+        }
+    }
+
+    /**
      * Called when a request starts; returns its id for requestDone(). The first one tells the
      * master this worker serves: when it dies from then on, a request killed it, not a failed
      * start, see Cluster::exited().
@@ -389,7 +402,28 @@ final class Worker
         $this->logger->notice('Recycling: {why}', ['why' => $why]);
         $this->send('C');
         if (\function_exists('phasync\ext\worker_detach')) {
-            \phasync\ext\worker_detach();
+            $waitLogged = false;
+            while (true) {
+                try {
+                    \phasync\ext\worker_detach();
+                    break;
+                } catch (\RuntimeException $e) {
+                    // The lot keeps only so many detached (lingering) lifecycles per slot: with
+                    // the backlog full this recycle waits for one of them to end, serving on
+                    // meanwhile -- the replacement is forked when the detach goes through.
+                    if (!\str_contains($e->getMessage(), 'too many detached')) {
+                        throw $e;
+                    }
+                    if (!$waitLogged) {
+                        $waitLogged = true;
+                        $this->send('W'); // the master logs the wait once
+                    }
+                    phasync::sleep(0.05);
+                    if ($this->draining) {
+                        return; // drained meanwhile (a reload, a shutdown): no recycle then
+                    }
+                }
+            }
         }
         $this->stopReason = StopReason::Recycle;
         $this->drain($why, true);

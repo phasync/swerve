@@ -164,6 +164,17 @@ final class Bridge
         return null !== $fiber && isset(self::$upgrading[$fiber]);
     }
 
+    /**
+     * How many `101` bodies are being pumped: the upgraded exchanges still live, which a
+     * lingering lifecycle waits for ({@see \Swerve\Swerve::drainConnections()}).
+     *
+     * @internal
+     */
+    public static function upgrades(): int
+    {
+        return \count(self::$upgrading ?? []);
+    }
+
     private static function pumpUpgrade(ClientRequest $client, StreamInterface $body): void
     {
         $fiber = \Fiber::getCurrent();
@@ -192,6 +203,7 @@ final class Bridge
             throw $e;
         } finally {
             unset(self::$upgrading[$fiber]);
+            \Swerve\Swerve::connectionEnded();
         }
     }
 }

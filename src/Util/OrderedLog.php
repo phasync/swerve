@@ -90,7 +90,9 @@ final class OrderedLog
      */
     public static function directory(): string
     {
-        return self::$directory ??= System::tempDirectory('swerve-ordered');
+        // Under a master the directory is its, given in the environment (it removes it);
+        // embedded, each process makes and removes its own.
+        return self::$directory ??= (\getenv('SWERVE_ORDERED_DIR') ?: System::tempDirectory('swerve-ordered'));
     }
 
     public static function publish(string $topic, mixed $message): void

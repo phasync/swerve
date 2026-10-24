@@ -130,11 +130,14 @@ phasync::run(static function () use ($worker, $args, $logger): void {
             // request's own Scope never saw the application's (swerve 0.3: ServerEnvTest).
             Swerve::captureBootServer();
         },
-        // Nothing to signal here: accept()'s own suspensions (worker_next(), the request queue's
-        // flag) get the WorkerStoppingException like every other coroutine, and unwind the
-        // application's own accept() loop; see Worker::drain(). An HTTP application's first
-        // accept() call sends 'R' itself (Swerve::accept()).
+        // accept()'s own suspensions (worker_next(), the request queue's flag) get the
+        // WorkerStoppingException like every other coroutine at the stop, and unwind the
+        // application's own accept() loop; until then its connections stop keeping idle
+        // clients, and a lingering lifecycle ends once nothing is left to linger for
+        // (Swerve::drainConnections()). An HTTP application's first accept() call sends 'R'
+        // itself (Swerve::accept()).
         static function (bool $linger): void {
+            Swerve::drainConnections($linger);
         },
     );
 });
