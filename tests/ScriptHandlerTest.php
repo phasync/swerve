@@ -149,3 +149,30 @@ test("a script's top-level \$x is visible to a function of its own via global \$
         native_stop($process);
     }
 });
+
+/*
+ * exit() bails out past Swerve::dispatch()'s own fiber (see Swerve::serveConnection()) without
+ * ever resuming back into HttpClientRequest::run(), so neither a catch there nor its finally
+ * runs (6dd9a86/swerve#67 covers a bailout that stays within that one call, not this). Output
+ * already written before exit() -- here, every echo but the last of three -- must still reach
+ * the client whole, with the chunked body properly closed, not just the first chunk followed by
+ * the connection cutting off (swerve#75).
+ */
+test('a script handler that echoes several chunks then exit()s still sends the whole body', function () {
+    $dir = temp_path(true);
+    mkdir("$dir/public");
+    file_put_contents("$dir/public/router.php", "<?php\necho 'a', 'b', 'c';\nexit;\n");
+    $root = realpath("$dir/public");
+    file_put_contents("$dir/swerve.php", "<?php\nwhile (true) {\n    Swerve\\Swerve::accept(" . var_export($root, true) . ', ' . var_export("$root/router.php", true) . ");\n}\n");
+
+    [$process, $addr] = swerve_start([], 1, fixture: "$dir/swerve.php");
+    try {
+        $conn = native_connect($addr);
+        fwrite($conn, "GET / HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+        $response = native_read_response($conn);
+        expect($response['body'])->toBe('abc');
+        expect($response['complete'])->toBeTrue();
+    } finally {
+        native_stop($process);
+    }
+});
