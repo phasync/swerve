@@ -655,6 +655,11 @@ final class Swerve
         }
         if (!self::$acceptorStarted) {
             self::$acceptorStarted = true;
+            // This is the moment this worker becomes a worker that serves connections, and the only
+            // place its supervision coroutines (timers, SIGTERM, the master, the inbox) are started:
+            // a script that never accepts keeps the loop empty so its own end is reachable -- see
+            // Worker::plumbing().
+            Worker::current()->plumbing();
             // The first worker_next() runs here, in the caller's own fiber, so --no-http (and
             // anything else the ext throws for a process that cannot accept) reaches it
             // directly, as documented; every one after is this background coroutine's own,

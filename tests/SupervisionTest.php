@@ -322,14 +322,23 @@ test('pausing the whole server (SIGSTOP, SIGCONT) does not make the watchdog kil
 
 test('a worker killed by SIGTERM in its shutdown after a fatal error is logged with the fatal error', function () {
     [$process, $addr, $log] = swerve_start(workers: 1, php: ['-d', 'memory_limit=64M']);
-    $worker                 = (int) probe($addr, '/pid');
-    $conn                   = send_get($addr, '/oom?small=1');
-    // SIGTERM over and over, as the master's drain would, so that one arrives while PHP shuts down
-    while (is_alive($worker)) {
-        posix_kill($worker, SIGTERM);
-        usleep(1000);
+    probe($addr, '/pid');
+    $conn = send_get($addr, '/oom?small=1');
+    // SIGTERM over and over, as the master's drain would, so that one arrives while PHP shuts down.
+    // Every pid this server started gets it, not one pinned pid: which worker of the slot takes the
+    // OOM request is the master's business (a memory recycle hands a slot over between requests),
+    // and this test is about how the death is *described*, not about which process took it.
+    $deadline = \microtime(true) + 5;
+    while (\microtime(true) < $deadline && !\preg_match('/died: /', (string) @\file_get_contents($log))) {
+        \preg_match_all('/Started worker (\d+)/', (string) @\file_get_contents($log), $seen);
+        foreach ($seen[1] as $pid) {
+            if (is_alive((int) $pid)) {
+                \posix_kill((int) $pid, SIGTERM);
+            }
+        }
+        \usleep(1000);
     }
-    $match = log_wait($log, "/Worker $worker \\(slot 0\\) died: (.*)/");
+    $match = log_wait($log, '/died: (.*)/');
     expect($match[0][1])->toContain('PHP fatal error');
     native_stop($process);
 });

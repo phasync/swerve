@@ -392,6 +392,23 @@ final class Cluster
         \error_clear_last();
     }
 
+    /**
+     * Is this process running? A zombie is not: it has exited and the worker-parent has not reaped
+     * it yet, which is exactly what a dying worker looks like between its exit() and the reap report
+     * that says how it died -- counting that as "a lifecycle ended" would swallow real deaths.
+     */
+    private static function alive(int $pid): bool
+    {
+        if ($pid <= 0 || !\posix_kill($pid, 0)) {
+            return false;
+        }
+        $stat = \file_get_contents("/proc/$pid/stat");
+        if (false !== $stat && \preg_match('/\) ([A-Z]) /', $stat, $m)) {
+            return 'Z' !== $m[1];
+        }
+        return true; // no /proc (or unreadable): the signal above is all there is to go on
+    }
+
     private function stderrLine(int $generation, string $line): void
     {
         // The ext reports an abnormal worker death: "phasync: workers: slot 2 (pid 1234) died: exit 7"
@@ -425,7 +442,7 @@ final class Cluster
         if (isset($this->recentlyEnded[$pid])) {
             // Its connection already ended: the exit closed the socket before the worker-parent's
             // reap reported the death -- the report came second, the usual order.
-            [$slot, $up, $killReason, $fatal, $drained, $served] = $this->recentlyEnded[$pid] + [5 => false];
+            [$slot, $up, $killReason, $fatal, $drained, $served, $generation] = $this->recentlyEnded[$pid] + [5 => false, 6 => -1];
             unset($this->recentlyEnded[$pid]);
             $ctx = ['pid' => $pid, 'slot' => $slot, 'up' => $up];
             if ($drained && 'exit 0' === $how) {
@@ -437,6 +454,11 @@ final class Cluster
                 $this->logger->debug('Worker {pid} (slot {slot}) exited (exit 0) with the application exit()ed, up {up}', $ctx);
             } else {
                 $this->logDied($pid, $slot, $up, $how, $killReason, $fatal);
+                if (!$served && !$drained) {
+                    // The report is what proves the death: the connection's EOF found the process
+                    // still running, so ended() left this count to whoever could prove otherwise.
+                    $this->failedStart($pid, $slot, $up, $how, $generation);
+                }
             }
             return;
         }
@@ -822,7 +844,7 @@ final class Cluster
                 // Draining, but how it ended is not known yet (the worker-parent's reap
                 // report usually arrives after this EOF): a SIGTERM mid-shutdown, a fatal
                 // in a shutdown function, is no clean drain -- say so when it arrives.
-                $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, true, true];
+                $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, true, true, $w->generation];
                 if (\count($this->recentlyEnded) > 64) {
                     \array_shift($this->recentlyEnded);
                 }
@@ -857,10 +879,22 @@ final class Cluster
             // this EOF: the exit closes the socket at once, the reap a lot tick later).
             $this->logDied($w->pid, $w->slot, $ctx['up'], $how, $w->killReason, $w->fatal);
         } else {
-            $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, false, (bool) ($w->served || null !== $w->readyAt)];
+            $this->recentlyEnded[$w->pid] = [$w->slot, $ctx['up'], $w->killReason, $w->fatal, false, (bool) ($w->served || null !== $w->readyAt), $w->generation];
             if (\count($this->recentlyEnded) > 64) {
                 \array_shift($this->recentlyEnded);
             }
+        }
+        if (null === $how && self::alive($w->pid)) {
+            // The connection ended and the process did not. That is the normal shape of a worker:
+            // it runs the application file, the file ends, the extension runs it again, and each
+            // run's connection closes with it. Whether this run accepted anything, took a second or
+            // slept for a hundred before its first accept(), is the application's business and not
+            // the master's -- there is nothing here to police, and reading it as a failed start is
+            // how a script that merely echoes gets its server stopped. A death is a death when the
+            // worker-parent reported one, or when the process is gone; see self::alive().
+            $this->logger->debug('Worker {pid} (slot {slot}) ended a lifecycle, up {up}', $ctx);
+
+            return;
         }
         if ($w->served || null !== $w->readyAt) {
             // It served, or was ready: the ext simply runs its next lifecycle (or, if the process
@@ -869,10 +903,26 @@ final class Cluster
 
             return;
         }
-        if ($w->generation !== $this->generation) {
+        $this->failedStart($w->pid, $w->slot, $ctx['up'], $how, $w->generation);
+    }
+
+    /**
+     * A worker died without ever having served or readied: count it against its slot, back the slot
+     * off, and say it as loudly as it needs saying. This is the master policing *dying*, which is
+     * its job -- unlike whether a worker accepts, or how long it takes to start doing so, which is
+     * not (see ended()).
+     *
+     * Two callers, because the two halves of a death arrive in either order: ended() when the
+     * worker-parent's report was already in hand, and deathReport() when the connection's EOF came
+     * first while the process was still on its way out.
+     */
+    private function failedStart(int $pid, int $slot, string $up, ?string $how, int $generation): void
+    {
+        if ($generation !== $this->generation) {
             return; // an old generation's lifecycle, during a reload: not this slot's backoff
         }
-        $delay = $this->backoff(++$this->failures[$w->slot]);
+        $ctx   = ['pid' => $pid, 'slot' => $slot, 'up' => $up];
+        $delay = $this->backoff(++$this->failures[$slot]);
         $ctx['delay'] = self::seconds($delay);
         if (null === $this->exitCode && !$this->everReady && \min($this->failures) > 0) {
             $this->logger->critical('The application failed to start: every worker failed; stopping');
@@ -882,17 +932,17 @@ final class Cluster
         }
         $recycling = false;
         foreach ($this->connections as $other) {
-            if ($other !== $w && $other->slot === $w->slot && $other->generation === $this->generation && $other->recycle) {
+            if ($other->pid !== $pid && $other->slot === $slot && $other->generation === $this->generation && $other->recycle) {
                 $recycling = true;
                 break;
             }
         }
-        if ($recycling && $this->failures[$w->slot] >= 5) {
+        if ($recycling && $this->failures[$slot] >= 5) {
             // A recycle's replacement that never readies: no crash loop -- the slot's worker
             // serves on (that is what the handover is for) -- but said loudly once
-            $this->logger->critical('Recycle of slot {slot} failed: the replacement never readied ({n} failed starts in a row); retrying in {delay} s; the old worker serves on', $ctx + ['n' => $this->failures[$w->slot]]);
-        } elseif ($this->failures[$w->slot] >= self::CRASH_LOOP) {
-            $this->logger->critical('Slot {slot} is crash-looping: {n} failed starts in a row (last: {how}); retrying in {delay} s', $ctx + ['n' => $this->failures[$w->slot], 'how' => $how ?? ($this->lastHow[$w->slot] ?? 'unknown')]);
+            $this->logger->critical('Recycle of slot {slot} failed: the replacement never readied ({n} failed starts in a row); retrying in {delay} s; the old worker serves on', $ctx + ['n' => $this->failures[$slot]]);
+        } elseif ($this->failures[$slot] >= self::CRASH_LOOP) {
+            $this->logger->critical('Slot {slot} is crash-looping: {n} failed starts in a row (last: {how}); retrying in {delay} s', $ctx + ['n' => $this->failures[$slot], 'how' => $how ?? ($this->lastHow[$slot] ?? 'unknown')]);
         } else {
             $this->logger->warning('Restarting slot {slot} in {delay} s (retrying in {delay} s)', $ctx);
         }
@@ -942,8 +992,18 @@ final class Cluster
         $stuck = [];
         foreach ($this->connections as $w) {
             if (LifecycleConnection::STARTING === $w->state && $now - $w->started > self::READY_TIMEOUT) {
-                $this->kill($w, 'not ready after ' . self::seconds(self::READY_TIMEOUT) . ' s', 'error');
-            } elseif (LifecycleConnection::STARTING !== $w->state && $this->watchdog > 0 && $now - $w->lastSeen > $this->watchdog) {
+                // Said once, and it is not an accusation: an application is free to do a hundred
+                // seconds of work before its first accept(), or never to accept at all. Nothing is
+                // killed for it -- see the note in ended() on what counts as a death. (A reload's
+                // replacement is reported the same way: the worker it replaces keeps serving.)
+                if (!$w->readyWarned) {
+                    $w->readyWarned = true;
+                    $this->logger->info('Worker {pid} (slot {slot}) has not accepted a connection yet, {up} after it started; the master does not mind how long an application takes before it accepts', ['pid' => $w->pid, 'slot' => $w->slot, 'up' => self::duration($now - $w->started)]);
+                }
+            } elseif (LifecycleConnection::STARTING !== $w->state && $this->watchdog > 0 && $now - $w->lastSeen > $this->watchdog
+                && (null !== $w->readyAt || $w->served)) {
+                // Only a worker that has taken connections can be stuck on one; a worker that has
+                // never accepted has no request to be late with, and goes unsupervised on purpose.
                 $silent  = \round($now - $w->lastSeen, 1);
                 $stuck[] = [$w, $silent];
                 \posix_kill($w->pid, \SIGQUIT);

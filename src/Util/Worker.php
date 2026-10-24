@@ -305,8 +305,15 @@ final class Worker
                 // its end, and the extension runs the next lifecycle in this same process with
                 // every process-global reset -- which is what makes a script that redeclares a
                 // function, or exit()s partway through, a non-issue there.
+                // Note what is *not* here: ready(). Only Swerve::accept() readies a worker -- the
+                // application decides whether it serves connections, and the master has no interest
+                // in that either (see Cluster::ended()).
                 $this->logger->debug('The application returned; this lifecycle ends here');
                 if ($left = phasync::shutdown(0.5, new ShutdownException('The application returned'))) {
+                    // Only an application that accepted connections can leave this many behind, and
+                    // even then it is worth the line: something of its own is still parked.
+                    // (Before the plumbing moved to accept() these four were swerve's own, and a
+                    // script that never accepted could not end its run at all.)
                     $this->logger->warning('Ending the lifecycle left {n} coroutines running', ['n' => $left]);
                 }
                 return;
@@ -315,16 +322,37 @@ final class Worker
                 $this->stop();
             }
         });
-        if (!$this->ticking) {
-            $this->ticking = true;
-            if (!$this->stallCheck) {
-                \pcntl_alarm(0); // the one for loading, see the constructor
-            }
-            phasync::go($this->tick(...));
-            phasync::go($this->awaitTerm(...));
-            phasync::go($this->awaitMaster(...));
-            phasync::go($this->awaitInbox(...));
+        if (!$this->stallCheck) {
+            \pcntl_alarm(0); // the one for loading, see the constructor
         }
+    }
+
+    /**
+     * The coroutines that keep a *serving* worker supervised: timers (memory recycling, deadlines,
+     * linger), SIGTERM/SIGINT, the master's control socket, this worker's inbox.
+     *
+     * They start at the application's first Swerve::accept() (see Swerve::accept()), not here, and
+     * that is not an optimisation. A worker runs the application file; the file ending is the end
+     * of the run and the extension starts it again, in this same process. So while the file runs,
+     * the only coroutines allowed to be parked are the ones the application itself started: any
+     * others hold phasync::run() open, the file never ends, and a `swerve hello.php` whose script
+     * merely echoes and returns is a worker that never runs it a second time.
+     *
+     * A script that never accepts gets no coroutines at all, which is the other half of it: nothing
+     * is created on its behalf. Signals for such a script are the extension's business -- the stop
+     * flag it sets ends the run between lifecycles -- and the supervisor's kill escalation, with
+     * PR_SET_PDEATHSIG on the tree, is what reaps it.
+     */
+    public function plumbing(): void
+    {
+        if ($this->ticking) {
+            return;
+        }
+        $this->ticking = true;
+        phasync::go($this->tick(...));
+        phasync::go($this->awaitTerm(...));
+        phasync::go($this->awaitMaster(...));
+        phasync::go($this->awaitInbox(...));
     }
 
     /**
