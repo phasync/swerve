@@ -297,8 +297,19 @@ final class Worker
                 exit(1);
             }
             if (!$this->draining) {
-                $this->logger->critical('A server stopped without being drained');
-                exit(1);
+                // The application's own accept() returned: this lifecycle is done, which is
+                // what a single-shot app script does -- `swerve -S [dir] [router.php]` builds
+                // exactly one awaited accept(), the shape of php -S and of php-fpm (one request
+                // per lifecycle). Not a failure, and not worth a fork either: the worker's own
+                // coroutines are cancelled so phasync::run() returns, the app script falls off
+                // its end, and the extension runs the next lifecycle in this same process with
+                // every process-global reset -- which is what makes a script that redeclares a
+                // function, or exit()s partway through, a non-issue there.
+                $this->logger->debug('The application returned; this lifecycle ends here');
+                if ($left = phasync::shutdown(0.5, new ShutdownException('The application returned'))) {
+                    $this->logger->warning('Ending the lifecycle left {n} coroutines running', ['n' => $left]);
+                }
+                return;
             }
             if (0 === --$this->running) {
                 $this->stop();

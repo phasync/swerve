@@ -409,11 +409,16 @@ final class HttpClientRequest implements ClientRequest
             if ($this->ended) {
                 return; // the try/finally below already did, the normal way
             }
-            if ($this->wire) {
+            if ($this->wire || '' !== $this->head) {
                 // The head (and perhaps some of the body) is already on the wire: the cleanest
-                // end the client can still get is a finished frame (swerve#75). A response that
-                // never began is not synthesized -- a bare 200 with no body would be a lie, and
-                // the client of a request its worker exit()ed in sees the connection close.
+                // end the client can still get is a finished frame (swerve#75). Or the head was
+                // only recorded, which is how a script that exit()s with no body leaves it --
+                // `wp_redirect() + exit`, `http_response_code(302) + header('Location: …')`,
+                // admin-ajax.php, wp-cron.php's 204: every SAPI sends that head at the end of
+                // the request, so it goes out here rather than being decided away as a response
+                // that never began. A request that recorded nothing is still not synthesized --
+                // a bare 200 with no body would be a lie, and the client of a request its worker
+                // exit()ed in before answering sees the connection close.
                 try {
                     $this->end();
                 } catch (\Throwable $e) {
