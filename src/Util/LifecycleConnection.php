@@ -30,6 +30,9 @@ final class LifecycleConnection
     public bool $takeoverLogged = false;
     /** Sent 'F': a PHP fatal error ends it. */
     public bool $fatal = false;
+
+    /** The reason it gave for draining (the "\0drain" frame ahead of its 'D'). */
+    public ?string $drainWhy = null;
     /** How this worker died, as the worker-parent reported it on its stderr ("exit 7",
      * "signal 9 (SIGKILL)"); null while it lives, or when it ended cleanly. */
     public ?string $deathHow = null;

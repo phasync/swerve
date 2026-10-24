@@ -560,8 +560,12 @@ final class Swerve
         return false;
     }
 
-    /** A warning that the worker runs short, at most once a minute: under a flood, every accept would log one. */
-    private static function logShort(): void
+    /**
+     * A warning that the worker runs short, at most once a minute: under a flood, every accept would log one.
+     *
+     * @internal Sapi says so too when the request plumbing itself runs out of descriptors.
+     */
+    public static function logShort(): void
     {
         $now = \microtime(true);
         if ($now - self::$shortLogged >= 60) {

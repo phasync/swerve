@@ -519,6 +519,8 @@ final class Cluster
                 if (null !== $reply) {
                     $this->send($w, Topics::frame(Inboxes::TOPIC, $reply));
                 }
+            } elseif ("\0drain" === $topic) {
+                $w->drainWhy = $message;
             } else {
                 throw new \UnexpectedValueException('A lifecycle sent a frame for an unknown topic');
             }
@@ -547,7 +549,7 @@ final class Cluster
                 $this->leaveInbox($w);
             }
             if (!$this->stopSignals && !$w->recycle) {
-                $this->logger->warning('Lifecycle {pid} (slot {slot}) is draining on a signal the master did not send', ['pid' => $w->pid, 'slot' => $w->slot]);
+                $this->logger->warning('Worker {pid} (slot {slot}) is draining on a {why} the master did not send', ['pid' => $w->pid, 'slot' => $w->slot, 'why' => $w->drainWhy ?? 'signal']);
             }
             $this->takeoverLog($w);
         }

@@ -626,7 +626,9 @@ final class Worker
         $this->lingerEnd    = $linger ? $this->drainStarted + $this->linger : null;
         // Asked by the master, the master logs it once for all; anything else is news
         $this->logger->log('the master asked' === $why ? 'info' : 'notice', $linger ? 'Draining, keeping upgraded connections for up to {s} s ({why})' : 'Draining ({why})', ['why' => $why, 's' => \round($this->linger)]);
-        $this->send('D'); // the master may not know: a SIGTERM from someone else, or its death
+        // The master may not know: a SIGTERM from someone else, or its death. The frame ahead
+        // of the byte says why it drains, for the master's own line about a drain not its own.
+        $this->send(Topics::frame("\0drain", $why) . 'D');
         $linger ? Topics::linger() : Topics::drain(); // drain() ends the long responses fed by subscriptions
         foreach ($this->drains as $drain) {
             $drain($linger);

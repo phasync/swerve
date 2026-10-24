@@ -483,7 +483,8 @@ test('SIGQUIT on a worker that never ticked (still loading the application) says
     file_put_contents("$dir/load-ms", '3000');
     [$process, $addr, $log, $pid] = swerve_start(['--watchdog=0'], workers: 1, env: ['SWERVE_TEST_DIR' => $dir], wait: false);
     $deadline = microtime(true) + 5;
-    while ('' === ($worker = trim((string) shell_exec("pgrep -P $pid")))) {
+    // The master's child is the worker-parent; the (still loading) worker is its child
+    while ('' === ($worker = trim((string) shell_exec("pgrep -P $pid | head -1 | xargs -r pgrep -P | head -1")))) {
         expect(microtime(true))->toBeLessThan($deadline);
         usleep(20_000);
     }

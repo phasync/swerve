@@ -66,11 +66,21 @@ final class Sapi
      */
     public function __construct(private readonly ClientRequest $client, bool $body)
     {
-        if (![$this->request, $this->server] = \array_pop(self::$pairs)) {
-            [$this->request, $this->server] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
-            // The pumps' client timeouts govern; the request's end only waits for the pump.
-            \stream_set_timeout($this->request, 86400 * 365);
-            \stream_set_blocking($this->server, false);
+        while (![$this->request, $this->server] = \array_pop(self::$pairs)) {
+            $pair = @\stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP);
+            if (false !== $pair) {
+                [$this->request, $this->server] = $pair;
+                // The pumps' client timeouts govern; the request's end only waits for the pump.
+                \stream_set_timeout($this->request, 86400 * 365);
+                \stream_set_blocking($this->server, false);
+                break;
+            }
+            /* Out of file descriptors (the pool is empty and a fresh pair fails): short of
+             * descriptors, not of connections -- say so, and wait for a request to end and
+             * hand its pair back. The alternative -- this request failing -- is how a flood
+             * past the open-file limit would answer 500s for no application reason. */
+            \Swerve\Swerve::logShort();
+            \phasync::sleep(0.05);
         }
         $this->sent = new \stdClass();
         // After this tick: the request is still running, so it waits for something. The pump is
