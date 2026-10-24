@@ -42,7 +42,7 @@ use Swerve\Cache;
  * promptly, and the SIGTERM is what stops the ext from running another one in a slot that just
  * did (see tests/worker_sigterm_graceful.phpt) — without it a drained lifecycle would simply
  * reconnect and start over. The old worker-parent is reaped once every slot is gone that way, or
- * SIGKILLed (by process group: it runs under `setsid`) after the grace period. A new generation's
+ * SIGKILLed after the grace period (its lifecycles die with it: the extension's PR_SET_PDEATHSIG). A new generation's
  * worker-parent that dies before any of its
  * slots is ready leaves the old one serving untouched, and is retried with backoff (the same
  * policy as a failed lifecycle start). Signals: SIGTERM, SIGINT or SIGQUIT drain every lifecycle
@@ -245,9 +245,11 @@ final class Cluster
     }
 
     /**
-     * proc_open the worker-parent of the current (or, for a reload, the next) generation, under
-     * `setsid` so the master can signal it and every lifecycle it forks as one process group
-     * without signalling itself.
+     * proc_open the worker-parent of the current (or, for a reload, the next) generation. It
+     * makes itself a process group of one in this session (the extension, before it forks),
+     * so signalling the group never reaches it by accident and signalling it never reaches the
+     * master. Its lifecycles join the master's group themselves (the extension's fork), and
+     * die with it (PR_SET_PDEATHSIG).
      */
     private function startWorkerParent(): void
     {
@@ -279,7 +281,7 @@ final class Cluster
         foreach ($writes as $stream) {
             $descriptors[$fd++] = $stream;
         }
-        $process = \proc_open(['setsid', ...$this->workerParentArgv], $descriptors, $pipes, null, $env);
+        $process = \proc_open($this->workerParentArgv, $descriptors, $pipes, null, $env);
         if (false === $process) {
             throw new \RuntimeException('Could not start the worker-parent process');
         }
@@ -436,7 +438,7 @@ final class Cluster
     private function logDied(int $pid, int $slot, string $up, string $how, ?string $killReason, bool $fatal = false): void
     {
         $killed = null !== $killReason ? ', killed: ' . $killReason : '';
-        $after  = $fatal ? ' after a PHP fatal error' : '';
+        $after  = $fatal ? ' (PHP fatal error)' : '';
         $this->logger->error("Worker {pid} (slot {slot}) died: {how}$after$killed, up {up}", [
             'pid' => $pid, 'slot' => $slot, 'how' => $how, 'up' => $up,
         ]);
@@ -806,7 +808,7 @@ final class Cluster
             return;
         }
         unset($this->drainedOnce[$generation]);
-        \posix_kill(-$info['pid'], \SIGKILL); // process group: setsid makes its pgid its own pid
+        \posix_kill($info['pid'], \SIGKILL); // its lifecycles die with it (PR_SET_PDEATHSIG)
     }
 
     /**
@@ -988,9 +990,9 @@ final class Cluster
             }
         }
         if ($this->connections || $this->workerParents) {
-            $this->logger->warning('Grace expired: killing the worker-parent process group(s)');
+            $this->logger->warning('Grace expired: killing the worker-parent(s)');
             foreach ($this->workerParents as $info) {
-                \posix_kill(-$info['pid'], \SIGKILL); // setsid: its pgid is its own pid, covering every lifecycle it forked
+                \posix_kill($info['pid'], \SIGKILL); // its lifecycles die with it (PR_SET_PDEATHSIG)
             }
             $until = self::now() + self::KILL_WAIT;
             while ($this->workerParents && self::now() < $until) {

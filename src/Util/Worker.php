@@ -82,6 +82,9 @@ final class Worker
     private readonly float $startedAt;
     /** Bytes for the master that the connection did not take yet, see send(). */
     private string $out = '';
+    /** Told the master it is ready: no longer loading the application. */
+    private bool $isReady = false;
+
     /** Seconds without a tick after which SIGALRM checks whether the master connection is alive; 0 = never. */
     private readonly int $stallCheck;
 
@@ -147,9 +150,9 @@ final class Worker
         phasync::onSignal(\SIGALRM, function () {
             if ($this->masterGone()) {
                 if ($this->ticking) {
-                    $this->logger->critical('Master connection died while the event loop was stuck for {s} s; exiting', ['s' => \round(\microtime(true) - $this->lastTick, 1)]);
+                    $this->logger->critical('Master process died while the event loop was stuck for {s} s; exiting', ['s' => \round(\microtime(true) - $this->lastTick, 1)]);
                 } else {
-                    $this->logger->critical('Master connection died while the application was loading; exiting');
+                    $this->logger->critical('Master process died while the application was loading; exiting');
                 }
                 \posix_kill(\getmypid(), \SIGKILL); // stuck: nothing else is sure to end it
             }
@@ -183,6 +186,12 @@ final class Worker
     public static function current(): self
     {
         return self::$current;
+    }
+
+    /** The drain reason for a dead master. Never served a request: its load is what the death cut short. */
+    private function masterDiedWhy(): string
+    {
+        return $this->requests > 0 ? 'Master process died' : 'Master process died while the application was loading';
     }
 
     /**
@@ -332,6 +341,7 @@ final class Worker
     /** Tell the master this worker listens: it may now retire the worker this one replaces. */
     public function ready(): void
     {
+        $this->isReady = true;
         $this->send('R');
     }
 
@@ -497,9 +507,9 @@ final class Worker
             if ('' === $bytes && \feof($this->master)) {
                 if (!$this->draining) {
                     $this->stopReason = StopReason::Shutdown;
-                    $this->drain('the master connection ended');
+                    $this->drain($this->masterDiedWhy());
                 } elseif (null !== $this->lingerEnd) {
-                    $this->stopLingering('the master connection ended');
+                    $this->stopLingering($this->masterDiedWhy());
                 }
 
                 return;
@@ -593,7 +603,13 @@ final class Worker
     {
         while (!$this->draining || null !== $this->lingerEnd) {
             phasync::signal(\SIGTERM);
-            $this->draining ? $this->stopLingering('SIGTERM') : $this->drain('SIGTERM');
+            $why = 'SIGTERM';
+            if ($this->masterGone()) {
+                // Not the operator's, and not the master's: the worker-parent's, forwarded --
+                // the master died, and this SIGTERM is its death reaching the tree
+                $why = $this->masterDiedWhy();
+            }
+            $this->draining ? $this->stopLingering($why) : $this->drain($why);
         }
     }
 
