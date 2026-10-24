@@ -85,6 +85,10 @@ final class Worker
     /** Told the master it is ready: no longer loading the application. */
     private bool $isReady = false;
 
+    /** worker_handover() went through; the lot detaches this worker when the replacement asks its first. */
+    private bool $handoverPending = false;
+    private ?string $recycleWhy = null;
+
     /** Seconds without a tick after which SIGALRM checks whether the master connection is alive; 0 = never. */
     private readonly int $stallCheck;
 
@@ -416,16 +420,16 @@ final class Worker
         $this->recycleSent = true;
         $this->logger->notice('Recycling: {why}', ['why' => $why]);
         $this->send('C');
-        if (\function_exists('phasync\ext\worker_detach')) {
+        if (\function_exists('phasync\ext\worker_handover')) {
             $waitLogged = false;
             while (true) {
                 try {
-                    \phasync\ext\worker_detach();
+                    \phasync\ext\worker_handover();
                     break;
                 } catch (\RuntimeException $e) {
                     // The lot keeps only so many detached (lingering) lifecycles per slot: with
                     // the backlog full this recycle waits for one of them to end, serving on
-                    // meanwhile -- the replacement is forked when the detach goes through.
+                    // meanwhile -- the replacement is forked when the handover goes through.
                     if (!\str_contains($e->getMessage(), 'too many detached')) {
                         throw $e;
                     }
@@ -439,9 +443,29 @@ final class Worker
                     }
                 }
             }
+            /* Serve on: the lot detaches this worker -- worker_next() throws as it does for a
+             * detach -- only when the replacement asks its first, so a replacement that never
+             * readies never costs the slot its serving worker. Swerve::accept() calls
+             * handedOver() then, which drains as a recycle does. */
+            $this->handoverPending = true;
+            $this->recycleWhy     = $why;
+
+            return;
+        }
+        if (\function_exists('phasync\ext\worker_detach')) {
+            \phasync\ext\worker_detach();
         }
         $this->stopReason = StopReason::Recycle;
         $this->drain($why, true);
+    }
+
+    /** @internal Swerve::accept()'s worker_next() threw the detachment of a handover: drain as recycled. */
+    public function handedOver(): void
+    {
+        if ($this->handoverPending && !$this->draining) {
+            $this->stopReason = StopReason::Recycle;
+            $this->drain($this->recycleWhy ?? 'recycle', true);
+        }
     }
 
     /**

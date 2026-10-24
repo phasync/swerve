@@ -667,12 +667,13 @@ final class Swerve
                     try {
                         $conn = \phasync\ext\worker_next();
                     } catch (\Throwable $e) {
-                        // worker_detach()d (a recycle, or the master's 'U'): no connection ever
-                        // comes to this lifecycle again, so this coroutine's work is over --
-                        // quietly. (The ext throws a plain \Error; 'detached' is its word.)
+                        // worker_detach()d (a recycle's handover arrived, or the master's 'U'):
+                        // no connection ever comes to this lifecycle again, so this coroutine's
+                        // work is over. (The ext throws a plain \Error; 'detached' is its word.)
                         if (!\str_contains($e->getMessage(), 'detach')) {
                             throw $e;
                         }
+                        Worker::current()->handedOver(); // a handover's: drain as the recycle it is
 
                         return;
                     }

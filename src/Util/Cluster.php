@@ -853,10 +853,21 @@ final class Cluster
 
             return;
         }
-        if ($this->failures[$w->slot] >= self::CRASH_LOOP) {
-            $this->logger->critical('Slot {slot} is crash-looping: {n} failed starts in a row (last: {how}); next start in {delay} s', $ctx + ['n' => $this->failures[$w->slot], 'how' => $how ?? ($this->lastHow[$w->slot] ?? 'unknown')]);
+        $recycling = false;
+        foreach ($this->connections as $other) {
+            if ($other !== $w && $other->slot === $w->slot && $other->generation === $this->generation && $other->recycle) {
+                $recycling = true;
+                break;
+            }
+        }
+        if ($recycling && $this->failures[$w->slot] >= 5) {
+            // A recycle's replacement that never readies: no crash loop -- the slot's worker
+            // serves on (that is what the handover is for) -- but said loudly once
+            $this->logger->critical('Recycle of slot {slot} failed: the replacement never readied ({n} failed starts in a row); retrying in {delay} s; the old worker serves on', $ctx + ['n' => $this->failures[$w->slot]]);
+        } elseif ($this->failures[$w->slot] >= self::CRASH_LOOP) {
+            $this->logger->critical('Slot {slot} is crash-looping: {n} failed starts in a row (last: {how}); retrying in {delay} s', $ctx + ['n' => $this->failures[$w->slot], 'how' => $how ?? ($this->lastHow[$w->slot] ?? 'unknown')]);
         } else {
-            $this->logger->warning('Restarting slot {slot} in {delay} s', $ctx);
+            $this->logger->warning('Restarting slot {slot} in {delay} s (retrying in {delay} s)', $ctx);
         }
     }
 
@@ -904,7 +915,7 @@ final class Cluster
             } elseif (LifecycleConnection::DRAINING === $w->state && $now - $w->drainingSince > $this->grace + ($w->lingering ? $this->linger : 0)) {
                 $this->kill($w, $w->lingering ? 'linger time and grace expired' : 'grace expired', 'warning');
             }
-            if (LifecycleConnection::SERVING === $w->state && ($this->failures[$w->slot] ?? 0) > 0 && $now - $w->readyAt >= self::STABLE_AFTER
+            if (LifecycleConnection::SERVING === $w->state && !$w->recycle && ($this->failures[$w->slot] ?? 0) > 0 && $now - $w->readyAt >= self::STABLE_AFTER
                 && $w->generation === $this->generation) {
                 $this->failures[$w->slot] = 0;
                 $this->logger->notice('Slot {slot} recovered', ['slot' => $w->slot]);
