@@ -521,10 +521,15 @@ test('a callback that only sends (a subscription forwarded) gets every publish, 
         expect(ws_live($addr, 'news', 8, 2))->toBe(8);
         // One connection, so both publishes are from the same worker: publish() never waits for
         // the master, even its first call, so two publishes from different workers are not
-        // promised any order against each other (see Swerve::publish()'s docblock)
+        // promised any order against each other (see Swerve::publish()'s docblock). Pipelined,
+        // because a keep-alive connection is handed back between requests and its next request may
+        // be served by another worker; a burst already read arrives as one.
         $publisher = native_connect($addr);
         foreach (['first', 'second'] as $m) {
-            fwrite($publisher, "GET /publish?topic=news&m=$m HTTP/1.1\r\nHost: t\r\n\r\n");
+            $request = ($request ?? '') . "GET /publish?topic=news&m=$m HTTP/1.1\r\nHost: t\r\n\r\n";
+        }
+        fwrite($publisher, $request);
+        foreach (['first', 'second'] as $m) {
             $head = native_read_head($publisher);
             expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
         }
@@ -586,10 +591,12 @@ test('a subscription loop forwards messages and ends the socket when told to', f
             $clients[] = ws_connect($addr, '/websocket-feed');
         }
         usleep(300_000); // every callback subscribed
-        // One connection for all three: see the note in the test above
+        // One connection, pipelined, for all three: see the note in the test above
         $publisher = native_connect($addr);
         foreach (['/publish?topic=feed&m=one', '/publish-json?topic=feed&m=two', '/publish-end?topic=feed'] as $path) {
             fwrite($publisher, "GET $path HTTP/1.1\r\nHost: t\r\n\r\n");
+        }
+        foreach (['one', 'two', 'end'] as $m) {
             $head = native_read_head($publisher);
             expect(fread($publisher, (int) $head['headers']['content-length']))->toBe('published');
         }

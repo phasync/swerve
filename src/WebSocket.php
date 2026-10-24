@@ -78,6 +78,12 @@ final class WebSocket implements \IteratorAggregate
     /** Seconds the close frame waits for a client that doesn't read. */
     public const CLOSE_TIMEOUT = 5.0;
 
+    /** How long a send waits once the worker is draining: see put(). */
+    private const STOP_TIMEOUT = 0.5;
+
+    /** How long a ping waits for its turn: see keepAlive(). */
+    private const PING_WRITE_TIMEOUT = 0.25;
+
     /**
      * Seconds between the pings the server sends to every open connection (a process-wide setting).
      */
@@ -746,6 +752,11 @@ final class WebSocket implements \IteratorAggregate
     /** Write whole frames; a client that is gone, or that doesn't read, is given up. */
     private function put(string $bytes, float $timeout): void
     {
+        if (Swerve::draining() && $timeout > self::STOP_TIMEOUT) {
+            // The worker is ending its connections: a client that reads nothing must not hold this
+            // one (and the drain with it) for a full WRITE_TIMEOUT of shielded writing
+            $timeout = self::STOP_TIMEOUT;
+        }
         try {
             // A frame once begun is finished: a cancellation waits for it, never leaves half a frame
             phasync::shielded(fn () => $this->connection->write($bytes, $timeout));
@@ -762,6 +773,32 @@ final class WebSocket implements \IteratorAggregate
      * for all of them, which ends when none is open. A ping doesn't wait for a client that reads
      * slowly: that one's own sends time out and give it up.
      */
+    /**
+     * The worker is ending, and will not wait: give every open WebSocket a moment to say
+     * goodbye, then close what is still open. A send to a client that reads nothing waits out a
+     * full WRITE_TIMEOUT with the frame half written (shielded, so a cancellation does not leave
+     * a frame in pieces), and the drain would end with that client instead of with the worker.
+     */
+    public static function giveUpAfter(float $seconds): void
+    {
+        if (!self::$open) {
+            return;
+        }
+        phasync::service(static function () use ($seconds): void {
+            try {
+                phasync::sleep($seconds);
+            } catch (ShutdownException) {
+                // The worker is ending: that is exactly what this coroutine is for
+            }
+            foreach (self::$open as $id => $reference) {
+                if (null !== ($ws = $reference->get()) && !$ws->dead) {
+                    $ws->dead = true;
+                    $ws->connection->close(); // wakes the write it may be stalled on, with an error
+                }
+            }
+        });
+    }
+
     private static function keepAlive(): void
     {
         if (self::$pinging) {
@@ -783,13 +820,21 @@ final class WebSocket implements \IteratorAggregate
                                 continue;
                             }
                             try {
-                                $ws->connection->write("\x89\x00", 0.0); // a ping with no payload
+                                // A ping with no payload. Briefly patient: what it writes is two
+                                // bytes handed to whoever pumps them out, and a wait of none at all
+                                // is a write that silently does not happen when the pump is busy
+                                // with the frame before this one.
+                                $ws->connection->write("\x89\x00", self::PING_WRITE_TIMEOUT);
                             } catch (IOException|TimeoutException) {
                                 // gone, or not reading: the connection finds out by itself
                             }
                         }
                     }
                 }
+            } catch (ShutdownException) {
+                // The worker stops: the pings stop with it, and the connections they served end in
+                // the drain. Nothing awaits a service, so an exception leaving this coroutine would
+                // be a fatal error in the log of a worker that merely stopped.
             } finally {
                 self::$pinging = false;
             }

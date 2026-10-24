@@ -141,7 +141,7 @@ test('HTTP/1.0 has no chunks: the stream is delimited by the close', function (a
     ws_clean($log);
 })->with('modes');
 
-test('HEAD gets the head of the stream and no body, send() throws IOException, and the connection serves the next request', function (array $mode) {
+test('HEAD gets the head of the stream, its callback is not run, and the connection serves the next request', function (array $mode) {
     [$process, $addr, $log] = ws_start($mode);
     try {
         $conn = native_connect($addr);
@@ -150,7 +150,9 @@ test('HEAD gets the head of the stream and no body, send() throws IOException, a
         expect($head['status'])->toBe(200);
         expect($head['headers']['content-type'])->toBe('text/event-stream');
         expect(native_read_response($conn)['body'])->toBe('Hello');
-        expect(json_decode((string) probe($addr, '/ws-closes')))->toBe([[0, 'IOException']]);
+        // The callback is not run for a HEAD (tests/Fixtures/realtime.php's /sse-head), so there is
+        // nothing sent, nothing that failed, and nothing of any WebSocket's to report
+        expect(json_decode((string) probe($addr, '/ws-closes')))->toBe([]);
     } finally {
         native_stop($process);
     }

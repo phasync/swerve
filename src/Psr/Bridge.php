@@ -112,6 +112,9 @@ final class Bridge
     private static function send(ClientRequest $client, ResponseInterface $response): void
     {
         if ($response instanceof EventStreamResponse) {
+            // A HEAD gets the head and no body: the callback is not run, so an endpoint's work is
+            // not done for a client that asked for no answer to read. (ServerSentEvents itself
+            // handles a HEAD too, for those who build it directly.)
             $sse = new ServerSentEvents($client, $response->getHeaders());
             if ('HEAD' !== $client->getMethod()) {
                 ($response->callback)($sse);
@@ -136,18 +139,25 @@ final class Bridge
             $headers['Content-Length'] = (string) $size;
         }
         $client->sendResponseHeaders($response->getStatusCode(), $headers);
-        if ('HEAD' !== $client->getMethod()) {
-            if ($body->isSeekable()) {
-                $body->rewind(); // a response is built by writing to its body, which leaves it at the end
-            }
-            while (!$body->eof()) {
-                $chunk = $body->read(self::CHUNK);
-                if ('' !== $chunk) {
-                    $client->write($chunk);
+        try {
+            if ('HEAD' !== $client->getMethod()) {
+                if ($body->isSeekable()) {
+                    $body->rewind(); // a response is built by writing to its body, which leaves it at the end
+                }
+                while (!$body->eof()) {
+                    $chunk = $body->read(self::CHUNK);
+                    if ('' !== $chunk) {
+                        $client->write($chunk);
+                    }
                 }
             }
+            $client->end();
+        } finally {
+            // However the response ended -- whole, or with its client gone mid-stream, which fails
+            // the write -- the application's producer of the body is told so: one blocked on an
+            // append nobody will ever read again would outlive the connection, and the request
+            $body->close();
         }
-        $client->end();
     }
 
     /**

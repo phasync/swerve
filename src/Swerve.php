@@ -804,7 +804,12 @@ final class Swerve
             self::log()->info('{u} upgraded connection' . ($upgraded > 1 ? 's' : '') . ' open', ['u' => $upgraded]);
         }
         if (!$linger) {
-            return; // Worker::stop() cancels whatever is left
+            // Worker::stop() cancels whatever is left -- but a WebSocket's send to a client that
+            // reads nothing is shielded until its own timeout, so give the goodbyes a moment and
+            // close the sockets after it, or the drain waits for that client
+            \Swerve\WebSocket::giveUpAfter(0.5);
+
+            return;
         }
         // service(), not go(): a drain runs inside the request that triggered it (a recycle's
         // max-requests request), and a go() here would join that request's nested run, which
