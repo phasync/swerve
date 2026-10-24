@@ -350,6 +350,9 @@ foreach ([\STDOUT, \STDERR] as $out) {
     $workerParentEnv = \getenv() + [
         'SWERVE_ARGS'     => (string) \getenv('SWERVE_ARGS'),
         'SWERVE_APP_FILE' => $appFile,
+        // The lifecycle's log lines carry their slot, right-aligned to the width the master's
+        // own lines leave blank; it cannot derive the width from --workers=auto.
+        'SWERVE_WORKERS'  => $workerCount,
     ];
 
     /*

@@ -72,8 +72,9 @@ if ($delay > 0) {
 [$ownInbox, $peers] = Inboxes::adoptFromFds($inbox, (int) \getenv('SWERVE_INBOX_FD_BASE'), (int) \getenv('SWERVE_INBOX_COUNT'));
 System::pinToNumaNode($slot);
 
-// The column after the time: the slot number, right-aligned as the master's logger left it blank for
-$source = \str_repeat(' ', \strlen((string) \max(0, $slot)));
+// The column after the time: this lifecycle's slot, right-aligned to the width the master's
+// logger leaves blank (the master's is the widest slot's).
+$source = \str_pad((string) $slot, \strlen((string) (\max(1, (int) \getenv('SWERVE_WORKERS')) - 1)), ' ', \STR_PAD_LEFT);
 $logLevel = $args->verbosity >= 2 ? LogLevel::DEBUG : ($args->verbosity == 1 ? LogLevel::INFO : LogLevel::NOTICE);
 if ($args->log) {
     $logger = new Logger(\fopen($args->log, 'a'), $source, $logLevel, $args->log, !$args->noAccessLog);
