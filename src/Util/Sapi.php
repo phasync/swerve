@@ -31,6 +31,9 @@ final class Sapi
     /** At most this many idle pairs are kept. */
     private const PAIRS_KEPT = 64;
 
+    /** Requests in flight (their Sapi constructed, not ended yet). */
+    private static int $live = 0;
+
     /** @var resource the request's end of the response pair */
     private $request;
 
@@ -82,6 +85,7 @@ final class Sapi
             \Swerve\Swerve::logShort();
             \phasync::sleep(0.05);
         }
+        ++self::$live;
         $this->sent = new \stdClass();
         // After this tick: the request is still running, so it waits for something. The pump is
         // a coroutine of the request's frame and scope, as phasync::go() here would make it.
@@ -122,7 +126,12 @@ final class Sapi
                 \fclose($this->bodyRequest);
                 \fclose($this->bodyServer);
             }
-            if ($this->broken || \count(self::$pairs) >= self::PAIRS_KEPT) {
+            --self::$live;
+            // Kept for the next request, but a worker with nothing else in flight keeps a single
+            // pair: the cache is for concurrency, it is not a hoard of descriptors (a worker that
+            // served a burst would otherwise hold two per concurrent request for good).
+            if ($this->broken || \count(self::$pairs) >= self::PAIRS_KEPT
+                || (0 === self::$live && \count(self::$pairs) > 0)) {
                 \fclose($this->request);
                 \fclose($this->server);
             } else {

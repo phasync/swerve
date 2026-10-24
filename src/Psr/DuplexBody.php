@@ -17,7 +17,7 @@ use Psr\Http\Message\StreamInterface;
  *
  * @internal built by {@see \Swerve\UpgradeResponse}
  */
-final class DuplexBody implements StreamInterface
+final class DuplexBody implements TunnelBody
 {
     private bool $started                   = false;
     private bool $ended                     = false;
@@ -26,11 +26,19 @@ final class DuplexBody implements StreamInterface
     private int $position                   = 0;
     private ?ReadChannelInterface $outbound = null;
 
+    /** @var \Closure|null the bridge's: closes the connection itself */
+    private ?\Closure $closeConnection = null;
+
     /** @param \Closure(\phasync\Net\Duplex): void $handler */
     public function __construct(
         private readonly StreamInterface $inbound,
         private readonly \Closure $handler,
     ) {
+    }
+
+    public function onHandlerClose(\Closure $close): void
+    {
+        $this->closeConnection = $close;
     }
 
     public function __toString(): string
@@ -114,11 +122,15 @@ final class DuplexBody implements StreamInterface
             \phasync::channel($outbound, $write);
             $outbound->activate(); // the bridge (the creator) waits on it alone until the handler, started here, writes
             $this->outbound = $outbound;
-            $connection     = new WebSocketDuplex($this->inbound, $write);
+            $connection     = new WebSocketDuplex($this->inbound, $write, fn () => $this->closeConnection && ($this->closeConnection)());
             $handler        = $this->handler;
             \phasync::go(static function () use ($connection, $handler, $write): void {
                 try {
                     $handler($connection);
+                } catch (\phasync\IOException) {
+                    // The tunnel's own IO: its client hung up. That is how a tunnel ends (the
+                    // same reason WebSocket's read loop stops); a raw duplex has no frames to
+                    // say it with, so a write failing is all there is -- not a failure.
                 } finally {
                     $write->close();
                 }

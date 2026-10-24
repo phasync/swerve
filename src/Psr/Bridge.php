@@ -123,7 +123,9 @@ final class Bridge
             $client->sendResponseHeaders(101, $response->getHeaders());
             $client->flush();
             self::pumpUpgrade($client, $response->getBody());
-            $client->end();
+            if (!$client->isClosed()) {
+                $client->end(); // the handler may have closed the connection, in which case there is nothing left to end
+            }
 
             return;
         }
@@ -180,6 +182,14 @@ final class Bridge
         $fiber = \Fiber::getCurrent();
         self::$upgrading ??= new \WeakMap();
         self::$upgrading[$fiber] = true;
+        if ($body instanceof TunnelBody) {
+            // A handler that closes its connection means now: a response write stalled on a client
+            // that stopped reading would otherwise hold the connection, and this coroutine, until
+            // the client gives up (a WebSocket gives itself up, see WebSocket::put()'s timeout)
+            $body->onHandlerClose(static function () use ($client): void {
+                $client->close();
+            });
+        }
         $pump                    = static function () use ($client, $body) {
             do {
                 $chunk = $body->read(self::CHUNK);

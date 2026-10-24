@@ -19,7 +19,7 @@ use Swerve\WebSocket;
  *
  * @internal built by {@see WebSocketResponse}
  */
-final class WebSocketBody implements StreamInterface
+final class WebSocketBody implements TunnelBody
 {
     private bool $started                   = false;
     private bool $ended                     = false;
@@ -28,6 +28,9 @@ final class WebSocketBody implements StreamInterface
     private int $position                   = 0;
     private ?ReadChannelInterface $outbound = null;
 
+    /** @var \Closure|null the bridge's: closes the connection itself */
+    private ?\Closure $closeConnection = null;
+
     /** @param \Closure(WebSocket): void $handler */
     public function __construct(
         private readonly StreamInterface $inbound,
@@ -35,6 +38,11 @@ final class WebSocketBody implements StreamInterface
         private readonly ?string $subprotocol,
         private readonly int $maxMessage,
     ) {
+    }
+
+    public function onHandlerClose(\Closure $close): void
+    {
+        $this->closeConnection = $close;
     }
 
     public function __toString(): string
@@ -119,7 +127,7 @@ final class WebSocketBody implements StreamInterface
             \phasync::channel($outbound, $write);
             $outbound->activate(); // the bridge (the creator) waits on it alone until the handler, started here, writes
             $this->outbound  = $outbound;
-            $connection      = new WebSocketDuplex($this->inbound, $write);
+            $connection      = new WebSocketDuplex($this->inbound, $write, fn () => $this->closeConnection && ($this->closeConnection)());
             $handler         = $this->handler;
             $subprotocol     = $this->subprotocol;
             $maxMessage      = $this->maxMessage;

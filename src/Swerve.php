@@ -753,7 +753,11 @@ final class Swerve
                 self::$requestFibers[\Fiber::getCurrent()] = true;
                 $id = $worker->requestStarted(static fn () => $request->getMethod() . ' ' . $request->getTarget());
                 try {
-                    self::dispatch($request, $webRoot, $kind, $resolved);
+                    // A nested run() of its own: a phasync::finally() the application registers runs
+                    // as this coroutine's run() returns -- in this coroutine, the request's own,
+                    // with the whole response sent -- rather than, at the coroutine's termination,
+                    // in a coroutine of its own
+                    phasync::run(static fn () => self::dispatch($request, $webRoot, $kind, $resolved));
                 } finally {
                     $worker->requestDone($id);
                 }

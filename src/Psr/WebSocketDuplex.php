@@ -17,9 +17,11 @@ use Psr\Http\Message\StreamInterface;
  */
 final class WebSocketDuplex implements Duplex
 {
+    /** @param ?\Closure(): void $closeConnection closes the connection itself, for close() */
     public function __construct(
         private readonly StreamInterface $inbound,
         private readonly WriteChannelInterface $outbound,
+        private readonly ?\Closure $closeConnection = null,
     ) {
     }
 
@@ -61,6 +63,9 @@ final class WebSocketDuplex implements Duplex
     public function close(): void
     {
         $this->outbound->close();
+        if (null !== $this->closeConnection) {
+            ($this->closeConnection)(); // end() lets what is written out go first; close() does not
+        }
     }
 
     public function isClosed(): bool
