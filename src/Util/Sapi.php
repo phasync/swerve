@@ -337,7 +337,17 @@ final class Sapi
         try {
             while ('' !== $data = $this->client->read(65536)) {
                 while ('' !== $data) {
-                    $n = @\fwrite($this->bodyServer, $data);
+                    // The request ends whenever the script says it has, and that can be while this
+                    // pump still holds bytes: the pair is gone, so the body ends here. fwrite() on
+                    // a closed stream is a TypeError, which no @ and no IOException catch would stop.
+                    if (!\is_resource($this->bodyServer)) {
+                        return;
+                    }
+                    try {
+                        $n = @\fwrite($this->bodyServer, $data);
+                    } catch (\TypeError) {
+                        return;
+                    }
                     if (false === $n || 0 === $n) {
                         return; // the request has ended
                     }
