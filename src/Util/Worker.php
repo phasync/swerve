@@ -283,6 +283,9 @@ final class Worker
      * accepting and finish ($drain(true): but keep the upgraded connections). The worker exits once every server returned. A server that fails,
      * or returns without being drained, ends the worker, so that the master starts another.
      */
+    /** How long a run waits for the responses it served to reach the wire before it ends: see serve(). */
+    private const SEND_WAIT = 30.0;
+
     public function serve(Closure $run, Closure $drain): void
     {
         $this->drains[] = $drain;
@@ -309,6 +312,22 @@ final class Worker
                 // application decides whether it serves connections, and the master has no interest
                 // in that either (see Cluster::ended()).
                 $this->logger->debug('The application returned; this lifecycle ends here');
+                // A response belongs to the request it answers, and that request is not finished
+                // because the application's loop is. accept() hands out a connection; the bytes of
+                // every response on it are still on their way out when this script falls off its end,
+                // and a run that cancels them now loses the tail of any body larger than one write --
+                // the client gets a head and part of a body, the access line says 200, and nothing
+                // anywhere says so. So: every byte of every response this run served is on the wire
+                // before anything is cancelled. The same pump carries a request that ended in die()
+                // (the extension finalizes it rather than dropping it), which is why this waits for
+                // requests rather than for the application: an exit()ed request has its head and body
+                // written by the time its Sapi is no longer in flight, exactly as a fall-off does.
+                for ($waited = 0.0; \Swerve\Util\Sapi::inFlight() > 0 && $waited < self::SEND_WAIT; $waited += 0.01) {
+                    phasync::sleep(0.01);
+                }
+                if ($left = \Swerve\Util\Sapi::inFlight()) {
+                    $this->logger->warning('Ending this run left {n} request(s) still sending; their clients will see a response cut short', ['n' => $left]);
+                }
                 if ($left = phasync::shutdown(0.5, new ShutdownException('The application returned'))) {
                     // Only an application that accepted connections can leave this many behind, and
                     // even then it is worth the line: something of its own is still parked.

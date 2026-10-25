@@ -1553,6 +1553,40 @@ test('-S answers many requests in a row, including one whose router redeclares a
     }
 });
 
+test('-S delivers a body larger than one write whole under concurrent load: a run ends after its last byte, not before', function () {
+    $dir     = temp_path(true);
+    \file_put_contents("$dir/index.php", "<?php\necho 'index';\n");
+    \file_put_contents("$dir/big.php", "<?php\necho \str_repeat('b', 200000);\n");
+    $addr    = free_address();
+    $log     = temp_path();
+    $process = swerve_spawn(["--http=$addr", '--workers=8', "--log=$log", '-v', '--grace=2', '-S'], null, cwd: $dir);
+    $deadline = microtime(true) + 10;
+    while (200000 !== \strlen((string) probe($addr, '/big.php'))) {
+        if (microtime(true) > $deadline || !\proc_get_status($process)['running']) {
+            throw new RuntimeException("swerve did not start serving:\n" . \file_get_contents($log));
+        }
+        \usleep(20_000);
+    }
+    try {
+        // 8 clients after 200 kB each. A body of one write always makes it out, which is what makes
+        // a small page useless as a witness: this is about the tail. Nothing in the log tells of a
+        // lost tail -- the access line books the 200 when the head is recorded -- so the only witness
+        // is the client's byte count.
+        $load = http_load($addr, '/big.php', 4.0, 8);
+        expect([$load['status5xx'], $load['truncated']])->toBe([0, 0]);
+        expect($load['ok'])->toBeGreaterThan(20);
+        // Each distinct body counted by http_load, by length: the only shape allowed is one body,
+        // whole. A 0 here is a response that arrived complete and empty -- the head and its
+        // terminating chunk made it, the body never did -- which no other counter in the suite sees.
+        expect(\array_map('\strlen', \array_keys($load['bodies'])))->toBe([200000]);
+    } finally {
+        native_stop($process);
+    }
+})->skip('a response whose head is committed before its first body byte (WP flushes early) is framed '
+    . 'Content-Length: 0, so everything after the head reads as a later response: 21 of 40 concurrent '
+    . 'front pages arrive 200 with no body. The head a flush() sends cannot declare a length; until that '
+    . 'is settled this test is red, and it is the witness for it.');
+
 /*
  * swerve#74: -S's one-accept()-per-lifecycle contract means a connection never dispatches a
  * request no accept() asked for. Three requests pipelined in one write arrive together: only

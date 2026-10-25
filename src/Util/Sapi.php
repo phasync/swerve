@@ -34,6 +34,28 @@ final class Sapi
     /** Requests in flight (their Sapi constructed, not ended yet). */
     private static int $live = 0;
 
+    /** The request whose script is running (or just bailed): the one a shutdown function finishes. */
+    public static ?self $current = null;
+
+    /** Whether the pump has read the pair empty: every byte of it delivered to the client. */
+    private bool $pairEmpty = false;
+
+    /** The client this Sapi answers, so a shutdown function can check it is finishing *this* request. */
+    public function client(): ClientRequest
+    {
+        return $this->client;
+    }
+
+    /**
+     * Requests in flight in this worker: constructed, not ended. Their bytes may still be on their
+     * way to a client, which is what a run has to wait for before it cancels anything -- see the
+     * end of the application's accept() in Worker::serve().
+     */
+    public static function inFlight(): int
+    {
+        return self::$live;
+    }
+
     /** @var resource the request's end of the response pair */
     private $request;
 
@@ -110,6 +132,7 @@ final class Sapi
      */
     public function run(\Closure $code): void
     {
+        self::$current = $this; // whose output a shutdown function is finishing: see HttpClientRequest
         try {
             \function_exists('phasync\ext\sapi') ? \phasync\ext\sapi($code, $this) : \phasync\hooked\sapi($code, $this);
         } finally {
@@ -235,6 +258,30 @@ final class Sapi
         }
     }
 
+    /**
+     * Write out what the request's script left in the pair, here and now, in order.
+     *
+     * A PHP shutdown function is where an abandoned request (exit()/die(), swerve#75) finishes its
+     * response -- and nothing else runs while PHP does, so the output pump has not had a turn: a body
+     * still sitting in the pair is body the client has not been given, and the terminating chunk that
+     * handler is about to write would go in front of it. The client then reads a frame that ended
+     * before its body: a clean 200 with zero bytes, no error, and an access line that booked its 200
+     * at the head. Small pages escape it only because the pump usually gets a turn during their
+     * database round trips; a WordPress front page is a dozen writes, and lost about half of them.
+     *
+     * Taking the pump's last turn inline is safe for exactly that reason: while this runs, no other
+     * coroutine can write to this client.
+     */
+    public function deliver(): int
+    {
+        $n = 0;
+        while (!$this->broken && false !== ($data = \fread($this->server, 65536)) && '' !== $data) {
+            $n += \strlen($data);
+            $this->client->write($data);
+        }
+        return $n;
+    }
+
     /** Wakes the output pump if it waits for the response. */
     private function wake(): void
     {
@@ -259,9 +306,11 @@ final class Sapi
                 }
                 $data = \fread($this->server, 65536);
                 if ('' !== $data && false !== $data) {
+                    $this->pairEmpty = false;
                     $this->client->write($data);
                     continue;
                 }
+                $this->pairEmpty = true; // every byte the request wrote is on the client now
                 if ($this->ended) {
                     return;
                 }

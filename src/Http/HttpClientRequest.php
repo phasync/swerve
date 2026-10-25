@@ -8,6 +8,7 @@ use phasync\ShutdownException;
 use phasync\TimeoutException;
 use Swerve\ClientRequest;
 use Swerve\HeadersSentException;
+use Swerve\Util\Sapi;
 
 /**
  * One HTTP exchange on an {@see HttpConnection}: the request body to read, and the response
@@ -420,6 +421,14 @@ final class HttpClientRequest implements ClientRequest
                 // that never began. A request that recorded nothing is still not synthesized --
                 // a bare 200 with no body would be a lie, and the client of a request its worker
                 // exit()ed in before answering sees the connection close.
+                // Its own body first, in order: nothing else runs while PHP does, so the bytes this
+                // request wrote are still in the pair, unwritten to the client, unless something
+                // carried them -- see Sapi::deliver(). Closing the frame before them is a response
+                // that ends with no body: a clean 200, zero bytes, no error, and a log line that
+                // booked its 200 at the head.
+                if (null !== ($sapi = Sapi::$current) && $sapi->client() === $this) {
+                    $sapi->deliver();
+                }
                 try {
                     $this->end();
                 } catch (\Throwable $e) {
