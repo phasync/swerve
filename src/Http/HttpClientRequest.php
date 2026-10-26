@@ -161,6 +161,13 @@ final class HttpClientRequest implements ClientRequest
         ($this->onHandOff)?->__invoke();
     }
 
+    /** @internal the connection went on to another process: ended here without closing it for the client */
+    public function moved(): void
+    {
+        $this->gone  = new IOException('The connection moved on to another process');
+        $this->ended = true; // ending it here would shut it down for the other process too
+    }
+
     /** The exchange is over: back to the pool if reusable() said nothing references it. */
     public function recycle(): void
     {

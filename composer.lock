@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "433ab06cabe58ec437d13658a7488e9a",
+    "content-hash": "a03dad3bfa42edd88ffb3f9038cfff25",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -183,6 +183,64 @@
                 "source": "https://github.com/phasync/phasync/tree/2.0.0"
             },
             "time": "2026-10-19T14:52:01+00:00"
+        },
+        {
+            "name": "phasync/serializor",
+            "version": "v2.1.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/phasync/serializor.git",
+                "reference": "9a2a068747af34fe010123387583187953cef204"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/phasync/serializor/zipball/9a2a068747af34fe010123387583187953cef204",
+                "reference": "9a2a068747af34fe010123387583187953cef204",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.1"
+            },
+            "replace": {
+                "frodeborli/serializor": "self.version"
+            },
+            "require-dev": {
+                "laravel/serializable-closure": "^2.0",
+                "maantje/charts": "^0.8.1",
+                "opis/closure": "^4.4",
+                "pestphp/pest": "^1.18"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "Serializor.php"
+                ],
+                "psr-4": {
+                    "Serializor\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frode Børli",
+                    "email": "frode@ennerd.com"
+                }
+            ],
+            "description": "PHP Serializor will serialize almost anything in PHP, including closures and anonymous classes.",
+            "keywords": [
+                "SerializableClosure",
+                "opis closure",
+                "serialization",
+                "serialize"
+            ],
+            "support": {
+                "issues": "https://github.com/phasync/serializor/issues",
+                "source": "https://github.com/phasync/serializor/tree/v2.1.1"
+            },
+            "time": "2026-10-23T07:24:15+00:00"
         },
         {
             "name": "psr/http-factory",

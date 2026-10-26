@@ -5,6 +5,7 @@ namespace Swerve;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Serializor\Codec;
 use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\Http\SapiRequest;
@@ -490,6 +491,12 @@ final class Swerve
      * From the call on, the request has no connection: connection_aborted() is true, header()
      * has no effect, and output throws.
      *
+     * A swerve.php that has called accept() only once may end with this request (WordPress's
+     * serves one request per lifecycle), and its connections with it. A WebSocket opened there
+     * moves on to swerve's WebSocket worker: its `101` is sent here, and the closure, serialized
+     * with phasync/serializor along with what it captures, runs in that process, which has the
+     * application's autoloader and nothing else of it.
+     *
      * ```php
      * while (Swerve::accept(null, function () {
      *     if ('/chat' === $_SERVER['REQUEST_URI']) {
@@ -561,10 +568,21 @@ final class Swerve
             $client->handedOff();
         }
         match ((new \ReflectionFunction($upgrade))->getParameters()[0]->getType()->getName()) {
-            WebSocket::class        => WebSocket::from($client, $upgrade),
+            // A lifecycle that has called accept() only once may be the kind that ends after each
+            // request (WordPress's): the WebSocket moves on to swerve's WebSocket worker
+            WebSocket::class        => LotClient::get()->shortLived() ? self::moveWebSocket($client, $upgrade) : WebSocket::from($client, $upgrade),
             ServerSentEvents::class => $upgrade(new ServerSentEvents($client)),
             default                 => $upgrade($client),
         };
+    }
+
+    /** Answer the handshake here, and move the connection and $upgrade to the WebSocket worker. */
+    private static function moveWebSocket(HttpClientRequest $client, \Closure $upgrade): void
+    {
+        if (null !== $handshake = WebSocket::answer($client)) {
+            $moving = [$upgrade, $handshake->subprotocol]; // serialize() takes a reference
+            LotClient::get()->moveWebSocket($client, (new Codec())->serialize($moving));
+        }
     }
 
     /**

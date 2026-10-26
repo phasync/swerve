@@ -180,12 +180,28 @@ final class WebSocket implements \IteratorAggregate
      */
     public static function from(ClientRequest $request, callable $callback, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): void
     {
-        $handshake = self::handshakeOf($request, $subprotocols, $origins);
-        if ($handshake->accepted()) {
-            self::upgrade($request, $handshake->headers, $callback, $maxMessage);
-        } else {
-            self::refuse($request, $handshake);
+        if (null !== $handshake = self::answer($request, $subprotocols, $origins)) {
+            self::run($request, $callback, $handshake->subprotocol, $maxMessage);
         }
+    }
+
+    /**
+     * Answer the handshake as from() does: the accepted handshake once its `101` is sent, or
+     * null once the request was refused.
+     *
+     * @internal swerve moves the connection on from here
+     */
+    public static function answer(ClientRequest $request, array $subprotocols = [], ?array $origins = null): ?WebSocketHandshake
+    {
+        $handshake = self::handshakeOf($request, $subprotocols, $origins);
+        if (!$handshake->accepted()) {
+            self::refuse($request, $handshake);
+
+            return null;
+        }
+        $request->sendResponseHeaders(101, $handshake->headers);
+
+        return $handshake;
     }
 
     /**

@@ -28,11 +28,18 @@ use Swerve\Util\ObjectPoolTrait;
  * - worker 'R' + connection: back, kept alive, with its next request waiting.
  * - worker 'B' + connection: back, kept alive and idle: the lifecycle ended before its next request.
  *
+ * And to the WebSocket worker, over the socket on file descriptor 4 (see {@see WebSocketWorker}):
+ *
+ * - worker 'W' + a serialized [closure, subprotocol] + connection: an open WebSocket, its `101` sent.
+ *
  * @internal
  */
 final class LotClient
 {
     private const FD = 3;
+
+    /** The socket to the WebSocket worker. */
+    private const WEBSOCKETS_FD = 4;
 
     /** Requests in a row this worker serves on a connection; then it goes back to the master. */
     private const KEEP_LIMIT = 1_000_000;
@@ -64,6 +71,9 @@ final class LotClient
 
     /** @var array<int, resource> kept alive, waiting for their next request, by resource id */
     private array $idle = [];
+
+    /** accept() calls in this lifecycle. */
+    private int $accepts = 0;
 
     /** accept() calls waiting for a connection. */
     private int $accepting = 0;
@@ -105,10 +115,49 @@ final class LotClient
      */
     public function accept(\Closure $handler, ?StaticFiles $files): Accepted
     {
+        ++$this->accepts;
         $request = new Accepted($handler, $files);
         $this->assign($request);
 
         return $request;
+    }
+
+    /**
+     * accept() was called once so far: the lifecycle may be one that ends after each request
+     * (WordPress's), which a connection can't outlive.
+     */
+    public function shortLived(): bool
+    {
+        return 1 === $this->accepts;
+    }
+
+    /**
+     * Move $client's connection, its `101` sent, to the WebSocket worker, with $closure (a
+     * serialized [closure, subprotocol]); the request ends here, without closing it.
+     */
+    public function moveWebSocket(HttpClientRequest $client, string $closure): void
+    {
+        foreach ($this->connections as $id => [$http]) {
+            if ($http->current() === $client) {
+                break;
+            }
+        }
+        // The client waits for the 101 before it writes (RFC 6455, 4.1): bytes read already broke
+        // that, and can't go along: the connection closes
+        if ($http->bufferEmpty()) {
+            $stream = @\fopen('php://fd/' . self::WEBSOCKETS_FD, 'r+');
+            if (false === $stream) {
+                throw new \LogicException('No WebSocket worker to move the connection to: run the application with `swerve`');
+            }
+            try {
+                self::send(\socket_import_stream($stream), "W$closure", $this->busy[$id]);
+            } catch (\RuntimeException $e) {
+                throw new \RuntimeException('Moving a WebSocket (' . \strlen($closure) . ' bytes serialized) to the WebSocket worker failed; a closure that captures less moves', 0, $e);
+            } finally {
+                \fclose($stream);
+            }
+        }
+        $client->moved();
     }
 
     /** Give $request a connection with a request waiting: one served here, else one from the master. */
@@ -377,16 +426,18 @@ final class LotClient
     }
 
     /**
-     * The next packet: [letter, the connection with it or null]; null once the other side is gone.
+     * The next packet: [its bytes (a letter, unless $size is larger), the connection with it or
+     * null]; null once the other side is gone.
      *
      * @param resource $channel the stream $socket was imported from, to wait on
+     * @param int      $size    the largest packet: a larger one is cut short
      *
      * @return array{0: string, 1: ?\Socket}|null
      */
-    public static function receive($channel, \Socket $socket): ?array
+    public static function receive($channel, \Socket $socket, int $size = 1): ?array
     {
         while (true) {
-            $message = ['buffer_size' => 1, 'controllen' => \socket_cmsg_space(\SOL_SOCKET, \SCM_RIGHTS, 1)];
+            $message = ['buffer_size' => $size, 'controllen' => \socket_cmsg_space(\SOL_SOCKET, \SCM_RIGHTS, 1)];
             $n       = @\socket_recvmsg($socket, $message, \MSG_DONTWAIT);
             if (0 === $n) {
                 return null;

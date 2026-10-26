@@ -242,3 +242,18 @@ it('serves the next request while an upgraded connection goes on, also when swer
     ws_send($ws, 0x1, 'still here');
     expect(ws_read($ws))->toBe([0x1, 'echo still here']);
 });
+
+it('moves a WebSocket out of a lifecycle that serves one request, with what its closure captured', function () {
+    [, $addr] = accept_start('short-lived.php', 1);
+    $ws       = ws_connect($addr, '/ws');
+    ws_send($ws, 0x1, 'hi');
+    [$type, $reply] = ws_read($ws);
+    $worker         = accept_request(native_connect($addr), '/')['body'];
+    expect($type)->toBe(0x1)
+        ->and($reply)->toStartWith('echo hi from ')
+        ->and(substr($reply, 13))->not->toBe($worker);
+    // The worker's lifecycles go on; the WebSocket stays open
+    accept_request(native_connect($addr), '/');
+    ws_send($ws, 0x1, 'again');
+    expect(ws_read($ws)[1])->toStartWith('echo again from ');
+});
