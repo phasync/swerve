@@ -2,14 +2,19 @@
 
 namespace Swerve\Psr;
 
+use phasync\Psr\EmptyStream;
+use phasync\Psr\ResourceStream;
 use phasync\Psr\ServerRequest;
+use phasync\Psr\UploadedFile;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\ClientRequest;
 
 /**
- * Serves an exchange with a closure taking a PSR-7 ServerRequestInterface and returning a
- * ResponseInterface. The request body is streamed from the client as the application reads it.
+ * Serves an exchange under sapi() with a closure taking a PSR-7 ServerRequestInterface and
+ * returning a ResponseInterface, as a PSR-7 application runs under php-fpm: the request is made
+ * from the superglobals, its body is php://input, and the response goes out through header() and
+ * echo.
  *
  * @internal
  */
@@ -25,75 +30,75 @@ final class Psr7
         if (!$response instanceof ResponseInterface) {
             throw new \TypeError('A PSR-7 handler must return a ' . ResponseInterface::class . ', got ' . \get_debug_type($response));
         }
-        self::send($client, $response);
+        self::send($response);
     }
 
     private static function request(ClientRequest $client): ServerRequestInterface
     {
-        $method  = $client->getMethod();
-        $target  = $client->getTarget();
         $headers = $client->getRequestHeaders();
-        $now     = \microtime(true);
-        $server  = [
-            'REQUEST_METHOD'     => $method,
-            'REQUEST_URI'        => $target,
-            'QUERY_STRING'       => \parse_url($target, \PHP_URL_QUERY) ?: '',
-            'SERVER_PROTOCOL'    => 'HTTP/' . $client->getProtocolVersion(),
-            'REQUEST_TIME'       => (int) $now,
-            'REQUEST_TIME_FLOAT' => $now,
-        ];
-        if ('https' === $client->getScheme()) {
-            $server['HTTPS'] = 'on';
-        }
-        if (\preg_match('/^\[?(.+?)\]?:(\d+)$/', $client->peer(), $peer)) {
-            $server['REMOTE_ADDR'] = $peer[1];
-            $server['REMOTE_PORT'] = (int) $peer[2];
-        }
-        if (\preg_match('/^\[?(.+?)\]?:(\d+)$/', $client->local(), $local)) {
-            $server['SERVER_ADDR'] = $local[1];
-            $server['SERVER_PORT'] = (int) $local[2];
-        }
-        // A request has a body when it says so; its length is known unless it is chunked
-        $size    = isset($headers['transfer-encoding']) ? null : (int) ($headers['content-length'][0] ?? 0);
-        $body    = new RequestBody($client, $size);
-        $form    = isset($headers['content-type']) ? FormBody::for($method, $headers['content-type'][0], $body) : null;
-        $cookies = isset($headers['cookie']) ? ServerRequest::cookies(\implode('; ', $headers['cookie'])) : [];
+        $form    = (bool) \preg_match('#^(application/x-www-form-urlencoded|multipart/form-data)\b#i', $headers['content-type'][0] ?? '');
 
         return new ServerRequest(
-            $method,
-            $target,
-            $form ? $form->input(...) : $body,
+            $client->getMethod(),
+            $client->getTarget(),
+            static fn () => new ResourceStream(\fopen('php://input', 'rb')),
             $headers,
-            null,
-            $server,
-            $cookies,
-            $form ? $form->files(...) : [],
-            $form ? $form->fields(...) : null,
+            $_GET,
+            $_SERVER,
+            $_COOKIE,
+            self::files($_FILES),
+            $form ? $_POST : null,
             [],
             $client->getProtocolVersion(),
         );
     }
 
-    private static function send(ClientRequest $client, ResponseInterface $response): void
+    /** $_FILES as a tree of UploadedFile, nested as the field names nest. */
+    private static function files(array $files): array
     {
-        $body    = $response->getBody();
-        $headers = $response->getHeaders();
-        $size    = $body->getSize();
+        $tree = [];
+        foreach ($files as $name => $file) {
+            $tree[$name] = self::file($file['tmp_name'], $file['name'], $file['type'], $file['size'], $file['error']);
+        }
+
+        return $tree;
+    }
+
+    private static function file(mixed $path, mixed $name, mixed $type, mixed $size, mixed $error): UploadedFile|array
+    {
+        if (\is_array($error)) {
+            $tree = [];
+            foreach ($error as $key => $code) {
+                $tree[$key] = self::file($path[$key], $name[$key], $type[$key], $size[$key], $code);
+            }
+
+            return $tree;
+        }
+
+        return new UploadedFile(\UPLOAD_ERR_OK === $error ? $path : EmptyStream::create(), $name, $type, $size, $error);
+    }
+
+    private static function send(ResponseInterface $response): void
+    {
+        \http_response_code($response->getStatusCode());
+        foreach ($response->getHeaders() as $name => $values) {
+            foreach ($values as $value) {
+                \header("$name: $value", false);
+            }
+        }
+        $body = $response->getBody();
+        $size = $body->getSize();
         if (null !== $size && $size > 0 && !$response->hasHeader('Content-Length')) {
-            $headers['Content-Length'] = (string) $size;
+            \header("Content-Length: $size");
         }
-        $client->sendResponseHeaders($response->getStatusCode(), $headers);
-        if ('HEAD' !== $client->getMethod()) {
-            if ($body->isSeekable()) {
-                $body->rewind(); // a response is built by writing to its body, which leaves it at the end
-            }
-            while (!$body->eof()) {
-                $chunk = $body->read(self::CHUNK);
-                if ('' !== $chunk) {
-                    $client->write($chunk);
-                }
-            }
+        if ('HEAD' === $_SERVER['REQUEST_METHOD']) {
+            return;
         }
-        $client->end();
+        if ($body->isSeekable()) {
+            $body->rewind(); // a response is built by writing to its body, which leaves it at the end
+        }
+        while (!$body->eof()) {
+            echo $body->read(self::CHUNK);
+        }
     }
 }

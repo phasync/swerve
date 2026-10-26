@@ -223,6 +223,7 @@ final class HttpConnection
                 // state (a locale) as the event loop moves between requests. And a frame of its own
                 // (a nested run(), which costs no coroutine): it runs in this connection's coroutine.
                 $keepAlive = (new \Scope())->run(fn (HttpClientRequest $request) => phasync::run($this->runRequest(...), $request), $request);
+                $request->recycle();
                 unset($request);
                 // With the next request already buffered (pipelined), and the response written
                 // without waiting, nothing would suspend this coroutine: a client sending many
@@ -689,7 +690,7 @@ final class HttpConnection
             $headers['host'] = [$host];
         }
 
-        return new HttpClientRequest($this, $method, $target, $version, $headers, null !== $te ? null : ($length ?? 0), $continue, $keepAlive);
+        return HttpClientRequest::create($this, $method, $target, $version, $headers, null !== $te ? null : ($length ?? 0), $continue, $keepAlive);
     }
 
     /**

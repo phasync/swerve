@@ -10,6 +10,7 @@ use phasync\TimeoutException;
 use Swerve\Accepted;
 use Swerve\Http\HttpConnection;
 use Swerve\Swerve;
+use Swerve\Util\ObjectPoolTrait;
 
 /**
  * A worker's side of the master's {@see Lot}, over the SEQPACKET socket the master passed as
@@ -31,7 +32,7 @@ final class LotClient
     private const FD = 3;
 
     /** Requests in a row this worker serves on a connection; then it goes back to the master. */
-    private const KEEP_LIMIT = 20;
+    private const KEEP_LIMIT = 1_000_000;
 
     /** Seconds a kept-alive connection may wait for its next request (as in Node). */
     private const KEEP_ALIVE_TIMEOUT = 5.0;
@@ -169,7 +170,7 @@ final class LotClient
 
                 return;
             }
-            $this->ready[] = $offer = new Offer($stream);
+            $this->ready[] = $offer = Offer::take($stream);
             phasync::raiseFlag($this);
             try {
                 phasync::awaitFlag($offer);
@@ -177,6 +178,7 @@ final class LotClient
                 return; // the lifecycle ends: shutdown() hands it back
             }
             $request = $offer->request;
+            $offer->returnToPool();
         }
     }
 
@@ -289,10 +291,31 @@ final class LotClient
  */
 final class Offer
 {
+    use ObjectPoolTrait;
+
     public ?Accepted $request = null;
 
-    /** @param resource $stream */
-    public function __construct(public readonly mixed $stream)
+    /** @var resource */
+    public mixed $stream;
+
+    private function __construct()
     {
+    }
+
+    /** @param resource $stream */
+    public static function take($stream): self
+    {
+        $offer         = self::popInstance() ?? new self();
+        $offer->stream = $stream;
+
+        return $offer;
+    }
+
+    /** accept() took it. */
+    public function returnToPool(): void
+    {
+        $this->request = null;
+        unset($this->stream);
+        $this->pushInstance();
     }
 }

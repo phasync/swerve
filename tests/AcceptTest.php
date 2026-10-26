@@ -106,6 +106,15 @@ it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', fun
         ->and($response['body'])->toBe('psr7 /psr body');
 });
 
+it('runs a PSR-7 closure under sapi(): PHP_SAPI, header(), and a form as getParsedBody() and $_POST', function () {
+    [, $addr] = accept_start('psr7sapi.php', 1);
+    $conn     = native_connect($addr);
+    fwrite($conn, "POST / HTTP/1.1\r\nHost: test\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\na=1&b=2");
+    $response = native_read_response($conn);
+    expect($response['headers']['x-from-header'])->toBe('yes')
+        ->and($response['body'])->toBe('swerve {"a":"1","b":"2"} {"a":"1","b":"2"}');
+});
+
 it('replaces a worker that was killed', function () {
     [, $addr] = accept_start('hello.php', 1);
     $pid      = (int) substr(probe($addr, '/'), strlen('Hello from '));

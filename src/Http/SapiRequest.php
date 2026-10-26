@@ -5,6 +5,7 @@ namespace Swerve\Http;
 use phasync\IOException;
 use phasync\TimeoutException;
 use Swerve\ClientRequest;
+use Swerve\Util\ObjectPoolTrait;
 
 /**
  * The `$sapi` object of `phasync\ext\sapi()` for one request: wraps swerve's
@@ -17,16 +18,40 @@ use Swerve\ClientRequest;
  */
 final class SapiRequest
 {
-    /** The client went away: later writes are refused, as a SAPI's are. */
-    private bool $gone = false;
+    use ObjectPoolTrait;
 
-    public function __construct(private readonly ClientRequest $client)
+    private ClientRequest $client;
+
+    /** The client went away: later writes are refused, as a SAPI's are. */
+    private bool $gone;
+
+    private function __construct()
     {
     }
 
-    public function run(\Closure $code): mixed
+    /** Run $code as a request of $client under sapi(). */
+    public static function run(ClientRequest $client, \Closure $code): mixed
     {
-        return \phasync\ext\sapi($code, $this);
+        $sapi         = self::popInstance() ?? new self();
+        $sapi->client = $client;
+        $sapi->gone   = false;
+        try {
+            $result = \phasync\ext\sapi($code, $sapi);
+        } finally {
+            $sapi->returnToPool();
+        }
+        // The code under sapi() never had $client, and SapiRequest let go of it
+        if ($client instanceof HttpClientRequest) {
+            $client->reusable();
+        }
+
+        return $result;
+    }
+
+    public function returnToPool(): void
+    {
+        unset($this->client);
+        $this->pushInstance();
     }
 
     public function name(): string

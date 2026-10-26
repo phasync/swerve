@@ -477,7 +477,9 @@ final class Swerve
      * @param string|\Closure $handler a script's path: run as a fresh main script, its variables
      *                                 globals, echo and header() the response; a closure without
      *                                 parameters: likewise; a closure taking a
-     *                                 ServerRequestInterface: returns a ResponseInterface
+     *                                 ServerRequestInterface: returns a ResponseInterface, also
+     *                                 under sapi(), its request made from the superglobals and
+     *                                 php://input as under php-fpm
      *
      * @return ?\Fiber the coroutine serving the request; null once the worker stops
      *
@@ -505,30 +507,39 @@ final class Swerve
                 throw new \ValueError("Swerve::accept(): the script $handler does not exist");
             }
 
-            return static function (ClientRequest $client) use ($script): void {
-                $_SERVER = self::serverVariables($client, $script);
-                (new SapiRequest($client))->run(static function () use ($client, $script): void {
-                    self::requestVariables($client);
-                    \chdir(\dirname($script));
-                    \phasync\ext\include_global($script);
-                });
-            };
+            return self::sapi($script, static function () use ($script): void {
+                \chdir(\dirname($script));
+                \phasync\ext\include_global($script);
+            });
         }
         $params = (new \ReflectionFunction($handler))->getParameters();
         if ([] === $params) {
-            return static function (ClientRequest $client) use ($handler): void {
-                $_SERVER = self::serverVariables($client, $_SERVER['SCRIPT_FILENAME'] ?? '');
-                (new SapiRequest($client))->run(static function () use ($client, $handler): void {
-                    self::requestVariables($client);
-                    $handler();
-                });
-            };
+            return self::sapi($_SERVER['SCRIPT_FILENAME'] ?? '', $handler);
         }
         $type = $params[0]->getType();
         if ($type instanceof \ReflectionNamedType && \is_a($type->getName(), ServerRequestInterface::class, true)) {
-            return static fn (ClientRequest $client) => Psr7::serve($client, $handler);
+            return self::sapi($_SERVER['SCRIPT_FILENAME'] ?? '', static fn (ClientRequest $client) => Psr7::serve($client, $handler));
         }
         throw new \TypeError('Swerve::accept(): a handler closure takes no parameters, or a ' . ServerRequestInterface::class . ' first');
+    }
+
+    /**
+     * Serve with $code under sapi(), with the superglobals PHP gives a script: $_SERVER for
+     * $script, then $_GET, $_COOKIE, $_POST, $_FILES and $_REQUEST.
+     *
+     * @param \Closure(ClientRequest): void $code
+     *
+     * @return \Closure(ClientRequest): void
+     */
+    private static function sapi(string $script, \Closure $code): \Closure
+    {
+        return static function (ClientRequest $client) use ($script, $code): void {
+            $_SERVER = self::serverVariables($client, $script);
+            SapiRequest::run($client, static function () use ($client, $code): void {
+                self::requestVariables($client);
+                $code($client);
+            });
+        };
     }
 
     /** @return array<string, mixed> $_SERVER for a request: the worker's own, and the request's */

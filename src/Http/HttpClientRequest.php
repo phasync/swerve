@@ -7,6 +7,7 @@ use phasync\IOException;
 use phasync\ShutdownException;
 use phasync\TimeoutException;
 use Swerve\ClientRequest;
+use Swerve\Util\ObjectPoolTrait;
 use Swerve\HeadersSentException;
 
 /**
@@ -22,6 +23,8 @@ use Swerve\HeadersSentException;
  */
 final class HttpClientRequest implements ClientRequest
 {
+    use ObjectPoolTrait;
+
     /** How the response body is framed; -1 until the head is complete, see begin(). */
     private const NOBODY  = 0; // 204, 205, 304: no body at all
     private const DISCARD = 1; // HEAD: the body is accepted and dropped
@@ -47,51 +50,117 @@ final class HttpClientRequest implements ClientRequest
         507 => 'Insufficient Storage', 508 => 'Loop Detected', 510 => 'Not Extended', 511 => 'Network Authentication Required',
     ];
 
+    // The request
+    private HttpConnection $connection;
+    private string $method;
+    private string $target;
+    private string $version;
+    /** @var array<string, list<string>> */
+    private array $headers;
+    private ?int $bodyLength;
+    private bool $continue;
+    private bool $keepAlive;
+
     // The request body: bytes of the current chunk (or of the body) not yet read, and where in it we are
     private int $remaining;
-    private bool $chunkEnd = false;
+    private bool $chunkEnd;
     private bool $done;
-    private int $position  = 0;
-    private ?HttpError $error = null;
+    private int $position;
+    private ?HttpError $error;
 
     // The response
-    private bool $committed = false;
-    private int $status     = 0;
-    private string $head    = '';     // the status line and the handler's headers, before the framing
-    private ?int $declared  = null;   // the handler's content-length
-    private string $options = '';     // the handler's connection options, each after ", "
-    private int $framing    = -1;
-    private int $left       = 0;      // LENGTH: bytes still to write
-    private string $out     = '';     // the complete head, until it is written
-    private bool $wire      = false;  // the final head went out: an error can no longer be answered
-    private bool $ended     = false;
-    private bool $finished  = false;  // run() is over
-    private bool $raw       = false;  // after 101
-    private ?\Throwable $gone = null; // the client failed or stalled, or close() was called
+    private bool $committed;
+    private int $status;
+    private string $head;     // the status line and the handler's headers, before the framing
+    private ?int $declared;   // the handler's content-length
+    private string $options;  // the handler's connection options, each after ", "
+    private int $framing;
+    private int $left;        // LENGTH: bytes still to write
+    private string $out;      // the complete head, until it is written
+    private bool $wire;       // the final head went out: an error can no longer be answered
+    private bool $ended;
+    private bool $finished;   // run() is over
+    private bool $raw;        // after 101
+    private ?\Throwable $gone; // the client failed or stalled, or close() was called
 
     private string $client;
-    private bool $https = false;
+    private bool $https;
+
+    /** Whoever had this exchange keeps no reference after it, see reusable(). */
+    private bool $reusable;
+
+    private function __construct()
+    {
+    }
 
     /**
+     * A request read from $connection: a pooled instance, set up as new. The connection returns
+     * it to the pool once the exchange is over.
+     *
      * @param array<string, list<string>> $headers
      * @param ?int                        $bodyLength the request body's Content-Length; null: chunked
      */
-    public function __construct(
-        private readonly HttpConnection $connection,
-        private readonly string $method,
-        private readonly string $target,
-        private readonly string $version,
-        private array $headers,
-        private readonly ?int $bodyLength,
-        private bool $continue,
-        private bool $keepAlive,
-    ) {
-        $this->remaining = $bodyLength ?? 0;
-        $this->done      = 0 === $bodyLength;
-        $this->client    = $connection->remoteAddr;
+    public static function create(HttpConnection $connection, string $method, string $target, string $version, array $headers, ?int $bodyLength, bool $continue, bool $keepAlive): self
+    {
+        $r             = self::popInstance() ?? new self();
+        $r->connection = $connection;
+        $r->method     = $method;
+        $r->target     = $target;
+        $r->version    = $version;
+        $r->headers    = $headers;
+        $r->bodyLength = $bodyLength;
+        $r->continue   = $continue;
+        $r->keepAlive  = $keepAlive;
+        $r->remaining  = $bodyLength ?? 0;
+        $r->chunkEnd   = false;
+        $r->done       = 0 === $bodyLength;
+        $r->position   = 0;
+        $r->error      = null;
+        $r->committed  = false;
+        $r->status     = 0;
+        $r->head       = '';
+        $r->declared   = null;
+        $r->options    = '';
+        $r->framing    = -1;
+        $r->left       = 0;
+        $r->out        = '';
+        $r->wire       = false;
+        $r->ended      = false;
+        $r->finished   = false;
+        $r->raw        = false;
+        $r->gone       = null;
+        $r->client     = $connection->remoteAddr;
+        $r->https      = false;
+        $r->reusable   = false;
         if ($connection->proxied) {
-            $this->forwarded();
+            $r->forwarded();
         }
+
+        return $r;
+    }
+
+    /**
+     * The handler that had this exchange keeps no reference to it once it returns (sapi(), say):
+     * the connection may reuse the object after the exchange. Without this it never does.
+     */
+    public function reusable(): void
+    {
+        $this->reusable = true;
+    }
+
+    /** The exchange is over: back to the pool if reusable() said nothing references it. */
+    public function recycle(): void
+    {
+        if ($this->reusable) {
+            $this->returnToPool();
+        }
+    }
+
+    public function returnToPool(): void
+    {
+        unset($this->connection, $this->headers, $this->error, $this->gone);
+        $this->head = $this->out = '';
+        $this->pushInstance();
     }
 
     /**
