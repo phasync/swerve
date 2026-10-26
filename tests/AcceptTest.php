@@ -52,11 +52,14 @@ it('serves a closure from a while (accept()) loop in every worker', function () 
 it('keeps a connection alive across requests, each handed to whichever worker is free', function () {
     [, $addr] = accept_start('hello.php', 2);
     $conn     = native_connect($addr);
+    $start    = microtime(true);
     for ($i = 0; $i < 20; ++$i) {
         $response = accept_request($conn, '/');
         expect($response['status'])->toBe(200)
             ->and($response['body'])->toMatch('/^Hello from \d+\n$/');
     }
+    // Each takes about a millisecond; Nagle without TCP_NODELAY made each 40 ms
+    expect(microtime(true) - $start)->toBeLessThan(0.4);
     fclose($conn);
 });
 

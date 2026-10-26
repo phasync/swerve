@@ -37,6 +37,12 @@ final class Lot
         $this->ready  = new \SplQueue();
         $this->asking = new \SplQueue();
         \stream_set_blocking($listener, false);
+        // A response leaves in more than one write: without TCP_NODELAY, Nagle holds the last
+        // one until the client's delayed ACK (40 ms) on every kept-alive request. Linux gives
+        // the listener's to every connection it accepts.
+        if (!\socket_set_option(\socket_import_stream($listener), \SOL_TCP, \TCP_NODELAY, 1)) {
+            throw new \RuntimeException('Setting TCP_NODELAY on the listener failed');
+        }
     }
 
     /** Accept connections until the listener closes. */
