@@ -362,7 +362,7 @@ final class Swerve
             $files = self::$staticFiles[$staticPath] ??= new StaticFiles($staticPath);
         }
 
-        return LotClient::get()->accept(self::handler($handler), $files ?? null);
+        return LotClient::get()->accept(self::handler($handler, $files?->root), $files ?? null);
     }
 
     /**
@@ -399,8 +399,12 @@ final class Swerve
      * @param \Closure(WebSocket|ServerSentEvents|ClientRequest): void $upgrade a static closure: it
      *                                                                may run in another worker, with copies of what it captures
      *
-     * @throws \TypeError     for a closure that is not static, or takes something else
-     * @throws \LogicException outside a request, a second time, or once output or headers went out
+     * @throws \TypeError        for a closure that is not static, or takes something else
+     * @throws UpgradeException  when the request can't be upgraded so: a WebSocket closure for a
+     *                           request that is no valid WebSocket handshake
+     * @throws \LogicException   outside a request, a second time, once output began (also into
+     *                           an output buffer), or for a closure that has to move and can't
+     *                           be serialized with what it captures
      */
     public static function upgrade(\Closure $upgrade): void
     {
@@ -413,32 +417,86 @@ final class Swerve
         if (!$type instanceof \ReflectionNamedType || !\in_array($type->getName(), [WebSocket::class, ServerSentEvents::class, ClientRequest::class], true)) {
             throw new \TypeError('Swerve::upgrade() takes a closure whose parameter is a ' . WebSocket::class . ', a ' . ServerSentEvents::class . ' or a ' . ClientRequest::class);
         }
+        $client = SapiRequest::client();
+        if (WebSocket::class === $type->getName()) {
+            $handshake = WebSocket::handshake($client->getMethod(), $client->getProtocolVersion(), $client->getRequestHeaders(), !$client->eof());
+            if (!$handshake->accepted()) {
+                throw new UpgradeException("Not a WebSocket handshake: $handshake->body", $handshake->status, $handshake->headers, $handshake->body);
+            }
+            if (LotClient::get()->shortLived()) {
+                // It moves to the WebSocket worker as the request ends: serialized now, so a
+                // closure that can't go fails here
+                try {
+                    $closure = (new Codec())->serialize($upgrade);
+                } catch (\Throwable $e) {
+                    throw new \LogicException('Swerve::upgrade(): the closure moves to the WebSocket worker, and what it captures can\'t be serialized: ' . $e->getMessage(), 0, $e);
+                }
+                if (\strlen($closure) > LotClient::MAX_MOVE) {
+                    throw new \LogicException('Swerve::upgrade(): the closure moves to the WebSocket worker, and serialized with what it captures it is ' . \strlen($closure) . ' bytes, more than ' . LotClient::MAX_MOVE);
+                }
+                $upgrade = static fn (ClientRequest $client) => self::moveWebSocket($client, $closure);
+            }
+        }
         SapiRequest::upgrade($upgrade);
     }
 
-    /** @return \Closure(ClientRequest): void */
-    private static function handler(string|\Closure $handler): \Closure
+    /**
+     * @param string|null $root the static directory, real path: a script handler runs the PHP
+     *                          files below it that a request names, as php-fpm behind nginx does
+     *
+     * @return \Closure(ClientRequest): void
+     */
+    private static function handler(string|\Closure $handler, ?string $root): \Closure
     {
         if (\is_string($handler)) {
             $script = \realpath($handler);
             if (false === $script || !\is_file($script)) {
                 throw new \ValueError("Swerve::accept(): the script $handler does not exist");
             }
+            $root ??= \dirname($script);
+            $name   = \str_starts_with($script, "$root/") ? \substr($script, \strlen($root)) : '/' . \basename($script);
 
-            return self::sapi($script, static function () use ($script): void {
-                \chdir(\dirname($script));
-                \phasync\ext\include_global($script);
+            return self::sapi($root, static fn (ClientRequest $client) => self::route($client, $root) ?? [$script, $name, null], static function (ClientRequest $client, string $file): void {
+                \chdir(\dirname($file));
+                \phasync\ext\include_global($file);
             });
         }
+        $script = $_SERVER['SCRIPT_FILENAME'] ?? '';
+        $route  = static fn () => [$script, '/' . \basename($script), null];
         $params = (new \ReflectionFunction($handler))->getParameters();
         if ([] === $params) {
-            return self::sapi($_SERVER['SCRIPT_FILENAME'] ?? '', $handler);
+            return self::sapi(\dirname($script), $route, static fn () => $handler());
         }
         $type = $params[0]->getType();
         if ($type instanceof \ReflectionNamedType && \is_a($type->getName(), ServerRequestInterface::class, true)) {
-            return self::sapi($_SERVER['SCRIPT_FILENAME'] ?? '', static fn (ClientRequest $client) => Psr7::serve($client, $handler));
+            return self::sapi(\dirname($script), $route, static fn (ClientRequest $client) => Psr7::serve($client, $handler));
         }
         throw new \TypeError('Swerve::accept(): a handler closure takes no parameters, or a ' . ServerRequestInterface::class . ' first');
+    }
+
+    /**
+     * The PHP file below $root that the request names, as [file, SCRIPT_NAME, PATH_INFO]:
+     * `/a/b.php/more` runs a/b.php, `/a/` runs a/index.php; null for any other request. Never a
+     * path with a dot-segment (`/.git/x.php`), nor one that leaves $root.
+     *
+     * @return array{0: string, 1: string, 2: ?string}|null
+     */
+    private static function route(ClientRequest $client, string $root): ?array
+    {
+        $path = \rawurldecode((string) \parse_url($client->getTarget(), \PHP_URL_PATH));
+        if (\str_contains($path, '/.') || \str_contains($path, "\0")) {
+            return null;
+        }
+        if (\preg_match('#^(/.*?\.php)(/.*)?$#i', $path, $m)) {
+            [$name, $info] = [$m[1], $m[2] ?? null];
+        } elseif (\str_ends_with($path, '/')) {
+            [$name, $info] = [$path . 'index.php', null];
+        } else {
+            return null;
+        }
+        $file = \realpath($root . $name);
+
+        return false !== $file && \str_starts_with($file, "$root/") && \is_file($file) ? [$file, $name, $info] : null;
     }
 
     /**
@@ -451,38 +509,37 @@ final class Swerve
             $client->handedOff();
         }
         match ((new \ReflectionFunction($upgrade))->getParameters()[0]->getType()->getName()) {
-            // A lifecycle that has called accept() only once may be the kind that ends after each
-            // request (WordPress's): the WebSocket moves on to swerve's WebSocket worker
-            WebSocket::class        => LotClient::get()->shortLived() ? self::moveWebSocket($client, $upgrade) : WebSocket::from($client, $upgrade),
+            WebSocket::class        => WebSocket::from($client, $upgrade),
             ServerSentEvents::class => $upgrade(new ServerSentEvents($client)),
             default                 => $upgrade($client),
         };
     }
 
-    /** Answer the handshake here, and move the connection and $upgrade to the WebSocket worker. */
-    private static function moveWebSocket(HttpClientRequest $client, \Closure $upgrade): void
+    /** Answer the handshake here, and move the connection and $closure (serialized) to the WebSocket worker. */
+    private static function moveWebSocket(HttpClientRequest $client, string $closure): void
     {
-        if (null !== $handshake = WebSocket::answer($client)) {
-            $moving = [$upgrade, $handshake->subprotocol]; // serialize() takes a reference
-            LotClient::get()->moveWebSocket($client, (new Codec())->serialize($moving));
+        if (null !== WebSocket::answer($client)) {
+            LotClient::get()->moveWebSocket($client, $closure);
         }
     }
 
     /**
-     * Serve with $code under sapi(), with the superglobals PHP gives a script: $_SERVER for
-     * $script, then $_GET, $_COOKIE, $_POST, $_FILES and $_REQUEST.
+     * Serve with $code under sapi(), with the superglobals PHP gives a script: $_SERVER for the
+     * script $route names, then $_GET, $_COOKIE, $_POST, $_FILES and $_REQUEST.
      *
-     * @param \Closure(ClientRequest): void $code
+     * @param \Closure(ClientRequest): array{0: string, 1: string, 2: ?string} $route the script: [file, SCRIPT_NAME, PATH_INFO]
+     * @param \Closure(ClientRequest, string): void                         $code  given the script file
      *
      * @return \Closure(ClientRequest): void
      */
-    private static function sapi(string $script, \Closure $code): \Closure
+    private static function sapi(string $root, \Closure $route, \Closure $code): \Closure
     {
-        return static function (ClientRequest $client) use ($script, $code): void {
-            $_SERVER = self::serverVariables($client, $script);
-            $upgrade = SapiRequest::run($client, static function () use ($client, $code): void {
+        return static function (ClientRequest $client) use ($root, $route, $code): void {
+            [$file, $name, $info] = $route($client);
+            $_SERVER              = self::serverVariables($client, $root, $file, $name, $info);
+            $upgrade              = SapiRequest::run($client, static function () use ($client, $code, $file): void {
                 self::requestVariables($client);
-                $code($client);
+                $code($client, $file);
             });
             if (null !== $upgrade) {
                 self::upgraded($client, $upgrade);
@@ -491,7 +548,7 @@ final class Swerve
     }
 
     /** @return array<string, mixed> $_SERVER for a request: the worker's own, and the request's */
-    private static function serverVariables(ClientRequest $client, string $script): array
+    private static function serverVariables(ClientRequest $client, string $root, string $script, string $name, ?string $info): array
     {
         static $worker = null;
         $worker ??= $_SERVER;
@@ -503,12 +560,16 @@ final class Swerve
             'QUERY_STRING'       => (string) \parse_url($target, \PHP_URL_QUERY),
             'SERVER_PROTOCOL'    => 'HTTP/' . $client->getProtocolVersion(),
             'SCRIPT_FILENAME'    => $script,
-            'SCRIPT_NAME'        => '/' . \basename($script),
-            'PHP_SELF'           => '/' . \basename($script),
-            'DOCUMENT_ROOT'      => '' === $script ? '' : \dirname($script),
+            'SCRIPT_NAME'        => $name,
+            'PHP_SELF'           => $name . $info,
+            'DOCUMENT_ROOT'      => $root,
             'REQUEST_TIME'       => (int) $now,
             'REQUEST_TIME_FLOAT' => $now,
         ] + $worker;
+        if (null !== $info) {
+            $server['PATH_INFO']       = $info;
+            $server['PATH_TRANSLATED'] = $root . $info;
+        }
         if ('https' === $client->getScheme()) {
             $server['HTTPS'] = 'on';
         }

@@ -52,7 +52,8 @@ final class StaticFiles
     /** The compressed copies looked for beside a file, by content coding, in order of preference. */
     private const ENCODINGS = ['br' => '.br', 'zstd' => '.zst', 'gzip' => '.gz'];
 
-    private readonly string $root;
+    /** The directory's real path. */
+    public readonly string $root;
 
     /**
      * Serve the files below `$directory`.

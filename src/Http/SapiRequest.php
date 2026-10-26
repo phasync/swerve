@@ -78,6 +78,18 @@ final class SapiRequest
     }
 
     /**
+     * The exchange of the request running in this scope.
+     *
+     * @throws \LogicException outside a request
+     */
+    public static function client(): ClientRequest
+    {
+        $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
+
+        return $sapi?->client ?? throw new \LogicException('Swerve::upgrade() is called inside a request that Swerve::accept() serves');
+    }
+
+    /**
      * Take the connection off the request running in this scope, for $upgrade once the request
      * ended (see {@see \Swerve\Swerve::upgrade()}).
      *
@@ -94,6 +106,10 @@ final class SapiRequest
         }
         if (\headers_sent($file, $line)) {
             throw new \LogicException("Swerve::upgrade() is called before the response begins; output began at $file:$line");
+        }
+        // Output still in a buffer would go out after the connection left
+        if (0 !== \array_sum(\array_column(\ob_get_status(true), 'buffer_used'))) {
+            throw new \LogicException('Swerve::upgrade() is called before the response begins; there is output in an output buffer');
         }
         $sapi->upgraded = true;
         $sapi->upgrade  = $upgrade;

@@ -38,13 +38,13 @@ final class WebSocketWorker
             if ('W' !== $bytes[0] || null === $conn) {
                 throw new \UnexpectedValueException("A worker sent '$bytes[0]' to the WebSocket worker");
             }
-            [$closure, $subprotocol] = $codec->unserialize(\substr($bytes, 1));
-            $stream                  = \socket_export_stream($conn);
+            $closure = $codec->unserialize(\substr($bytes, 1));
+            $stream  = \socket_export_stream($conn);
             \stream_set_blocking($stream, false);
-            phasync::go(static function () use ($stream, $closure, $subprotocol): void {
+            phasync::go(static function () use ($stream, $closure): void {
                 $connection = new StreamDuplex($stream);
                 try {
-                    WebSocket::run($connection, $closure, $subprotocol);
+                    WebSocket::run($connection, $closure);
                 } catch (\Throwable $e) {
                     Swerve::log()->error('A WebSocket failed: {exception}', ['exception' => $e]);
                 } finally {

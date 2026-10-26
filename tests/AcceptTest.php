@@ -276,3 +276,32 @@ it('stops a request whose client is gone at its next output, and only that reque
         ->and(accept_request(native_connect($addr), '/')['body'])->toBe($worker);
     @unlink($marker);
 });
+
+it('refuses Swerve::upgrade() at the call when the request can\'t be upgraded so', function () {
+    [, $addr] = accept_start('upgrade.php', 1);
+    $uncaught = accept_request(native_connect($addr), '/ws-uncaught');
+    expect($uncaught['status'])->toBe(426)
+        ->and($uncaught['body'])->not->toContain('not reached')
+        ->and(accept_request(native_connect($addr), '/ws-caught')['body'])->toBe('refused 426')
+        ->and(accept_request(native_connect($addr), '/buffered')['body'])->toBe('refused, output buffered')
+        ->and(accept_request(native_connect($addr), '/')['body'])->toBe('hello');
+});
+
+it('refuses at the call a WebSocket closure that must move and captures what can\'t be serialized', function () {
+    [, $addr] = accept_start('short-lived.php', 1);
+    $handshake = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n";
+    expect(accept_request(native_connect($addr), '/ws-resource', $handshake)['body'])->toStartWith('refused: Swerve::upgrade(): the closure moves');
+})->skip('needs phasync/serializor to refuse a resource (it serializes it as 0)');
+
+it('runs the PHP file a request names below the static directory, index.php for a directory, and the script for the rest', function () {
+    [, $addr] = accept_start('routed.php', 1);
+    $get = static fn (string $path) => accept_request(native_connect($addr), $path)['body'];
+    expect($get('/wp-login.php?x=1'))->toBe('wp-login.php /wp-login.php /wp-login.php - routed routed')
+        ->and($get('/wp-admin/'))->toBe('index.php /wp-admin/index.php /wp-admin/index.php - routed wp-admin')
+        ->and($get('/wp-admin/admin-ajax.php/extra/path'))->toBe('admin-ajax.php /wp-admin/admin-ajax.php /wp-admin/admin-ajax.php/extra/path /extra/path routed wp-admin')
+        ->and($get('/2026/10/a-post/'))->toBe('index.php /index.php /index.php - routed routed')
+        ->and($get('/missing.php'))->toBe('index.php /index.php /index.php - routed routed')
+        ->and($get('/.git/hook.php'))->toBe('index.php /index.php /index.php - routed routed')
+        ->and($get('/wp-admin/../wp-login.php'))->toBe('index.php /index.php /index.php - routed routed')
+        ->and($get('/style.css'))->toBe("style\n");
+});

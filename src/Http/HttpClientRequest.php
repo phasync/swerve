@@ -7,6 +7,7 @@ use phasync\IOException;
 use phasync\ShutdownException;
 use phasync\TimeoutException;
 use Swerve\ClientRequest;
+use Swerve\UpgradeException;
 use Swerve\Util\ObjectPoolTrait;
 use Swerve\HeadersSentException;
 
@@ -484,6 +485,16 @@ final class HttpClientRequest implements ClientRequest
             $status = $e->getCode();
             if (!$this->wire && null === $this->gone) {
                 $c->refuse($status, $e->getMessage());
+            }
+        } catch (UpgradeException $e) {
+            // The client's request was no upgrade: answered as the upgrade would have refused it
+            $status = $this->wire ? $this->status : $e->getCode();
+            if (!$this->wire && null === $this->gone) {
+                $this->committed = false; // sapi()'s head for the request it ended, not sent yet
+                $this->sendResponseHeaders($e->getCode(), $e->headers);
+                $this->write($e->body);
+                $this->end();
+                $keepAlive = $this->conclude();
             }
         } catch (ShutdownException) {
             // The worker stops: not a failure. A response not begun is answered 503, in full

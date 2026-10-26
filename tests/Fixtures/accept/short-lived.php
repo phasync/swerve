@@ -14,5 +14,16 @@ phasync::await(Swerve::accept(null, function () {
 
         return;
     }
+    if ('/ws-resource' === $_SERVER['REQUEST_URI']) {
+        $file = fopen(__FILE__, 'r');
+        try {
+            Swerve::upgrade(static function (WebSocket $ws) use ($file): void {
+            });
+        } catch (LogicException $e) {
+            echo 'refused: ', $e->getMessage();
+        }
+
+        return;
+    }
     echo getmypid();
 }));

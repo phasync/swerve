@@ -2,6 +2,7 @@
 use Swerve\ClientRequest;
 use Swerve\ServerSentEvents;
 use Swerve\Swerve;
+use Swerve\UpgradeException;
 use Swerve\WebSocket;
 
 /** What the request saw after upgrade(), for the closure to tell the client (it runs after the request). */
@@ -51,6 +52,33 @@ while (Swerve::accept(null, function () {
                     $ws->send("echo $message");
                 }
             });
+
+            return;
+        case '/ws-uncaught':
+            Swerve::upgrade(static function (WebSocket $ws): void {
+            });
+            echo 'not reached';
+
+            return;
+        case '/ws-caught':
+            try {
+                Swerve::upgrade(static function (WebSocket $ws): void {
+                });
+            } catch (UpgradeException $e) {
+                echo 'refused ' . $e->getCode();
+            }
+
+            return;
+        case '/buffered':
+            ob_start();
+            echo 'x';
+            try {
+                Swerve::upgrade(static function (ClientRequest $client): void {
+                });
+            } catch (LogicException) {
+                ob_end_clean();
+                echo 'refused, output buffered';
+            }
 
             return;
         default:

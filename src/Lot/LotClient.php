@@ -13,6 +13,7 @@ use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
+use Swerve\UpgradeException;
 use Swerve\Util\ObjectPoolTrait;
 
 /**
@@ -30,7 +31,7 @@ use Swerve\Util\ObjectPoolTrait;
  *
  * And to the WebSocket worker, over the socket on file descriptor 4 (see {@see WebSocketWorker}):
  *
- * - worker 'W' + a serialized [closure, subprotocol] + connection: an open WebSocket, its `101` sent.
+ * - worker 'W' + the serialized closure + connection: an open WebSocket, its `101` sent.
  *
  * @internal
  */
@@ -40,6 +41,9 @@ final class LotClient
 
     /** The socket to the WebSocket worker. */
     private const WEBSOCKETS_FD = 4;
+
+    /** The largest serialized closure that moves to the WebSocket worker: one packet. */
+    public const MAX_MOVE = 131072;
 
     /** Requests in a row this worker serves on a connection; then it goes back to the master. */
     private const KEEP_LIMIT = 1_000_000;
@@ -132,8 +136,8 @@ final class LotClient
     }
 
     /**
-     * Move $client's connection, its `101` sent, to the WebSocket worker, with $closure (a
-     * serialized [closure, subprotocol]); the request ends here, without closing it.
+     * Move $client's connection, its `101` sent, to the WebSocket worker, with $closure
+     * (serialized); the request ends here, without closing it.
      */
     public function moveWebSocket(HttpClientRequest $client, string $closure): void
     {
@@ -152,7 +156,7 @@ final class LotClient
             try {
                 self::send(\socket_import_stream($stream), "W$closure", $this->busy[$id]);
             } catch (\RuntimeException $e) {
-                throw new \RuntimeException('Moving a WebSocket (' . \strlen($closure) . ' bytes serialized) to the WebSocket worker failed; a closure that captures less moves', 0, $e);
+                throw new \RuntimeException('Moving a WebSocket to the WebSocket worker failed', 0, $e);
             } finally {
                 \fclose($stream);
             }
@@ -237,6 +241,8 @@ final class LotClient
                     }
                     try {
                         ($request->handler)($client);
+                    } catch (UpgradeException $e) {
+                        throw $e; // the client's fault, answered: not the application's
                     } catch (\Throwable $e) {
                         $request->fail($e); // for whoever awaits the request; the 500 and the log as always
                         throw $e;
