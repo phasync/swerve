@@ -301,7 +301,7 @@ it('runs the PHP file a request names below the static directory, index.php for 
         ->and($get('/wp-admin/admin-ajax.php/extra/path'))->toBe('admin-ajax.php /wp-admin/admin-ajax.php /wp-admin/admin-ajax.php/extra/path /extra/path routed wp-admin')
         ->and($get('/2026/10/a-post/'))->toBe('index.php /index.php /index.php - routed routed')
         ->and($get('/missing.php'))->toBe('index.php /index.php /index.php - routed routed')
-        ->and($get('/.git/hook.php'))->toBe('index.php /index.php /index.php - routed routed')
+        ->and($get('/.hidden/hook.php'))->toBe('index.php /index.php /index.php - routed routed')
         ->and($get('/wp-admin/../wp-login.php'))->toBe('index.php /index.php /index.php - routed routed')
         ->and($get('/style.css'))->toBe("style\n");
 });
