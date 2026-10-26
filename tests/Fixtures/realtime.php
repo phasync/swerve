@@ -6,7 +6,6 @@
  */
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\ServerSentEvents;
 use Swerve\Swerve;
 use Swerve\WebSocket;
@@ -21,7 +20,7 @@ function rt_send(ClientRequest $r, int $status, string $body): void
     $r->write($body);
 }
 
-return new RequestHandler((new class {
+$app = new class {
     /** WebSocket and SSE handlers still running, see /live. */
     private array $live = ['news' => 0, 'sse' => 0];
 
@@ -338,4 +337,11 @@ return new RequestHandler((new class {
                 rt_send($r, 404, 'Not found');
         }
     }
-})->handle(...));
+};
+
+while (Swerve::accept(null, function () use ($app) {
+    Swerve::upgrade(static function (ClientRequest $request) use ($app): void {
+        $app->handle($request);
+    });
+})) {
+}

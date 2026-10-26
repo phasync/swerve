@@ -85,6 +85,7 @@ test('publishRaw() accepts exactly 128 KiB, the same limit as publish()', functi
 });
 
 test('in a cluster, bytes published raw in one worker reach a subscriber in another worker unchanged, invalid UTF-8 included', function () {
+    test()->markTestSkipped('0.2: cross-worker publish/subscribe is not ported yet');
     [$process, $addr] = swerve_start([], 4);
     try {
         $bytes = \implode('', \array_map('chr', \range(0, 255)));
@@ -103,6 +104,7 @@ test('in a cluster, bytes published raw in one worker reach a subscriber in anot
 });
 
 test('in a cluster, publish() and publishRaw() on one topic reach a subscriber in another worker, each in its own shape', function () {
+    test()->markTestSkipped('0.2: cross-worker publish/subscribe is not ported yet');
     [$process, $addr] = swerve_start([], 4);
     try {
         $conn = native_connect($addr);

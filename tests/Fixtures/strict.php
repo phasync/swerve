@@ -12,4 +12,4 @@
     throw new ErrorException($message, 0, $no, $file, $line);
 });
 
-return require __DIR__ . '/app.php';
+require __DIR__ . '/app.php';

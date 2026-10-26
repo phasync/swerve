@@ -6,9 +6,13 @@
  */
 
 test('a package\'s integration file sets php.ini settings and runs code in every worker as it starts', function () {
+    $ext = getenv('PHASYNC_EXT_SO');
+    if (!$ext) {
+        throw new RuntimeException('swerve needs ext-phasync with run_next(): set PHASYNC_EXT_SO to a built extension');
+    }
     $addr    = free_address();
     $process = proc_open(
-        ['setsid', PHP_BINARY, __DIR__ . '/Fixtures/integration/launch.php', "--http=$addr", '--workers=2', '--grace=2', __DIR__ . '/Fixtures/app.php'],
+        ['setsid', PHP_BINARY, '-d', "extension=$ext", __DIR__ . '/Fixtures/integration/launch.php', "--http=$addr", '--workers=2', __DIR__ . '/Fixtures/app.php'],
         [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
     );

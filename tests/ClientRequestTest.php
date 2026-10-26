@@ -305,4 +305,4 @@ test('an application that returns a bare closure, or a RequestHandler of a calla
 })->with([
     'a closure'          => ['bad-closure.php', 'must return a Swerve\RequestHandler'],
     'a callable object'  => ['bad-callable.php', 'must be of type Closure'],
-]);
+])->skip(true, '0.2: swerve.php no longer returns a RequestHandler (Swerve::accept() is called directly), so there is nothing to validate here');

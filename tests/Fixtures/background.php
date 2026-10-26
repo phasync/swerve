@@ -5,7 +5,7 @@
  */
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 
 $ticks = 0;
 phasync::go(static function () use (&$ticks) {
@@ -15,7 +15,10 @@ phasync::go(static function () use (&$ticks) {
     }
 });
 
-return new RequestHandler(static function (ClientRequest $r) use (&$ticks) {
-    $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen((string) $ticks)]);
-    $r->write((string) $ticks);
-});
+while (Swerve::accept(null, function () use (&$ticks) {
+    Swerve::upgrade(static function (ClientRequest $r) use (&$ticks): void {
+        $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen((string) $ticks)]);
+        $r->write((string) $ticks);
+    });
+})) {
+}

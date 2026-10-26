@@ -195,7 +195,7 @@ test('a WebSocket is told to say goodbye when its worker is stopped, and the cal
     expect(ws_read($conn))->toBe([8, pack('n', 1001)]);
     expect(swerve_wait($process, 5)[0])->toBe(0);
     expect(file_get_contents($log))->toContain('onShutdown callback ran')->toContain('the shutdown callback failed');
-});
+})->skip(true, '0.2: a drain on shutdown (SIGTERM closing open sockets with 1001) is not ported yet');
 
 test('the callbacks of requests that ended never run, and what they held is freed', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);

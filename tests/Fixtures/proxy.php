@@ -6,16 +6,19 @@
  */
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 
-return new RequestHandler(static function (ClientRequest $r) {
-    $host = $r->getRequestHeaders()['host'][0];
-    $body = \json_encode([
-        'remote' => \trim(\substr($r->peer(), 0, \strrpos($r->peer(), ':')), '[]'),
-        'https'  => 'https' === $r->getScheme() ? 'on' : null,
-        'uri'    => $r->getScheme() . '://' . $host . $r->getTarget(),
-        'host'   => $host,
-    ]);
-    $r->sendResponseHeaders(200, ['Content-Type' => 'application/json', 'Content-Length' => (string) \strlen($body)]);
-    $r->write($body);
-});
+while (Swerve::accept(null, function () {
+    Swerve::upgrade(static function (ClientRequest $r): void {
+        $host = $r->getRequestHeaders()['host'][0];
+        $body = \json_encode([
+            'remote' => \trim(\substr($r->peer(), 0, \strrpos($r->peer(), ':')), '[]'),
+            'https'  => 'https' === $r->getScheme() ? 'on' : null,
+            'uri'    => $r->getScheme() . '://' . $host . $r->getTarget(),
+            'host'   => $host,
+        ]);
+        $r->sendResponseHeaders(200, ['Content-Type' => 'application/json', 'Content-Length' => (string) \strlen($body)]);
+        $r->write($body);
+    });
+})) {
+}

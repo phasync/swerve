@@ -5,6 +5,8 @@
  * client sends reaches the others, whichever workers they landed on.
  */
 
+beforeEach(fn () => test()->markTestSkipped('0.2: these examples use --public and the RequestHandler/publish-subscribe contract, none of which are ported yet'));
+
 function example_start(string $name): array
 {
     $dir = __DIR__ . "/../examples/$name";

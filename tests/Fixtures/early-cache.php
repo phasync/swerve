@@ -7,7 +7,6 @@
 
 use Swerve\ClientRequest;
 use Swerve\OrderedChannel;
-use Swerve\RequestHandler;
 use Swerve\Swerve;
 
 $report = new ArrayObject();
@@ -36,13 +35,16 @@ phasync::service(static function () use ($attempt) {
 });
 $attempt('load', static fn () => Swerve::cache()->get('early'));
 
-return new RequestHandler(static function (ClientRequest $r) use ($report) {
-    for ($waited = 0; \count($report) < 5 && $waited < 200; ++$waited) {
-        phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
-    }
-    $report = $report->getArrayCopy();
-    \ksort($report);
-    $body = \json_encode($report);
-    $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen($body)]);
-    $r->write($body);
-});
+while (Swerve::accept(null, function () use ($report) {
+    Swerve::upgrade(static function (ClientRequest $r) use ($report): void {
+        for ($waited = 0; \count($report) < 5 && $waited < 200; ++$waited) {
+            phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
+        }
+        $copy = $report->getArrayCopy();
+        \ksort($copy);
+        $body = \json_encode($copy);
+        $r->sendResponseHeaders(200, ['Content-Length' => (string) \strlen($body)]);
+        $r->write($body);
+    });
+})) {
+}

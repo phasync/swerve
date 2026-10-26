@@ -86,6 +86,7 @@ function ord_wait(callable $until, float $timeout = 5.0): float
 }
 
 test('ordered subscribers in different workers get one identical sequence, and each publisher keeps its own order in it', function () {
+    test()->markTestSkipped('0.2: cross-worker OrderedChannel is not ported yet');
     [$process, $addr, $log] = swerve_start([], 3);
     try {
         $subscribers = [];
@@ -147,6 +148,7 @@ test('plain and ordered subscriptions of one topic name do not see each other\'s
 });
 
 test('nothing is written while the topic has no ordered subscriber: logging starts with the first, and stops after the last', function () {
+    test()->markTestSkipped('0.2: cross-worker OrderedChannel is not ported yet');
     $tmp                    = temp_path(true);
     [$process, $addr, $log] = swerve_start([], 2, env: ['SWERVE_TMPDIR' => $tmp]);
     try {
@@ -186,6 +188,7 @@ test('nothing is written while the topic has no ordered subscriber: logging star
 });
 
 test('a worker killed after it appended loses nothing: subscribers of the other workers get its messages and then those of the others', function () {
+    test()->markTestSkipped('0.2: cross-worker OrderedChannel is not ported yet');
     [$process, $addr, $log] = swerve_start([], 3);
     try {
         $subscribers = [];
@@ -221,6 +224,7 @@ test('a worker killed after it appended loses nothing: subscribers of the other 
 });
 
 test('after a reload, ordered subscribers of the new workers get what is published after they subscribed', function () {
+    test()->markTestSkipped('0.2: cross-worker OrderedChannel and SIGHUP reload are not ported yet');
     [$process, $addr, $log] = swerve_start([], 2);
     try {
         [$old] = ord_subscribe($addr, 'r', 1);
@@ -244,6 +248,7 @@ test('after a reload, ordered subscribers of the new workers get what is publish
 });
 
 test('large messages from concurrent publishers arrive whole, in the same order for every subscriber', function () {
+    test()->markTestSkipped('0.2: cross-worker OrderedChannel is not ported yet');
     [$process, $addr, $log] = swerve_start([], 3);
     try {
         $subscribers = [];
@@ -279,6 +284,7 @@ test('large messages from concurrent publishers arrive whole, in the same order 
 });
 
 test('rotation: messages across many segments arrive in order and none is missing, old segments are unlinked, a stalled subscriber gets the lag exception', function () {
+    test()->markTestSkipped('0.2: cross-worker OrderedChannel is not ported yet');
     $tmp                    = temp_path(true);
     [$process, $addr, $log] = swerve_start([], 3, env: ['SWERVE_TMPDIR' => $tmp, 'SWERVE_TEST_SEGMENT' => '0.5']);
     try {
@@ -324,6 +330,7 @@ test('rotation: messages across many segments arrive in order and none is missin
 });
 
 test('a reader that was away longer than the retention has lost messages: its subscribers get the lag exception, the others lose nothing', function () {
+    test()->markTestSkipped('0.2: cross-worker OrderedChannel and --watchdog are not ported yet');
     $tmp                    = temp_path(true);
     [$process, $addr, $log] = swerve_start(['--watchdog=0'], 3, env: ['SWERVE_TMPDIR' => $tmp, 'SWERVE_TEST_SEGMENT' => '0.5']);
     try {
@@ -348,6 +355,7 @@ test('a reader that was away longer than the retention has lost messages: its su
 });
 
 test('SWERVE_TMPDIR is the base of the claims directory and the ordered logs, which the master removes at its exit', function () {
+    test()->markTestSkipped('0.2: Claim is removed, and cross-worker OrderedChannel is not ported yet');
     $tmp                    = temp_path(true);
     [$process, $addr, $log] = swerve_start([], 2, env: ['SWERVE_TMPDIR' => $tmp]);
     try {

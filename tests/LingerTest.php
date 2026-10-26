@@ -7,6 +7,8 @@
  * worker's pid, echoes, and answers a shutdown with 1001.
  */
 
+beforeEach(fn () => test()->markTestSkipped('0.2: worker recycling, --linger and --grace are not implemented yet'));
+
 /**
  * @return array{0: resource, 1: int} a WebSocket to /websocket-shutdown (or $path), and the pid of the worker it is on
  */

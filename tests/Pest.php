@@ -92,14 +92,15 @@ function temp_path(bool $dir = false): string
  */
 function swerve_spawn(array $args, ?string $fixture, array $php = [], array $env = [], array $out = [], ?string $cwd = null, array $wrap = [])
 {
-    if (in_array('--ext', $args, true) && !getenv('PHASYNC_EXT_SO') && [] === glob(__DIR__ . '/../vendor/phasync/phasync/ext/phasync-*.so')) {
-        // phasync's dev-main bundles no binaries (only its release tags do): otherwise every --ext
-        // test fails as "swerve did not start serving", with an empty log
-        throw new RuntimeException('--ext needs a phasync extension binary: set PHASYNC_EXT_SO to one');
+    $ext = getenv('PHASYNC_EXT_SO');
+    if (!$ext) {
+        // Swerve 0.2's master unconditionally needs run_next() from ext-phasync (no fallback):
+        // set PHASYNC_EXT_SO to a built extension, as AcceptTest's accept_start() does
+        throw new RuntimeException('swerve needs ext-phasync with run_next(): set PHASYNC_EXT_SO to a built extension');
     }
     $path    = null === $fixture ? [] : [str_contains($fixture, '/') ? $fixture : __DIR__ . "/Fixtures/$fixture"];
     $process = proc_open(
-        ['setsid', ...$wrap, PHP_BINARY, ...$php, __DIR__ . '/../bin/swerve.php', ...$args, ...$path],
+        ['setsid', ...$wrap, PHP_BINARY, '-d', "extension=$ext", ...$php, __DIR__ . '/../bin/swerve.php', ...$args, ...$path],
         $out + [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
         $cwd,
@@ -121,7 +122,7 @@ function free_address(): string
 
 /**
  * Start bin/swerve.php --http with two workers (or $workers) serving a fixture, on a free port,
- * and wait until it answers. --grace=2 unless $args has one, so stopping stays fast.
+ * and wait until it answers.
  *
  * @param string[] $args more command line arguments
  *
@@ -129,10 +130,7 @@ function free_address(): string
  */
 function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2, array $php = [], array $env = []): array
 {
-    $addr = free_address();
-    if (!preg_grep('/^--grace=/', $args)) {
-        $args[] = '--grace=2';
-    }
+    $addr     = free_address();
     $process  = swerve_spawn(["--http=$addr", "--workers=$workers", ...$args], $fixture, $php, $env);
     $deadline = microtime(true) + 10;
     while (null === http_get($addr, '/hello')) {
@@ -428,8 +426,8 @@ function native_serve_packets(Closure $handler, string|array $requests, bool $cl
  */
 
 /**
- * Start swerve with a log file at INFO level, --grace=3 and --watchdog=3 (unless $args sets
- * them), and wait until it answers /hello; with $wait false, don't wait. $wrap: see swerve_spawn().
+ * Start swerve with a log file, and wait until it answers /hello; with $wait false, don't wait.
+ * $wrap: see swerve_spawn().
  *
  * @return array{0: resource, 1: string, 2: string, 3: int} the process, its address, the log file, the master's pid
  */
@@ -437,12 +435,7 @@ function swerve_start(array $args = [], int $workers = 2, array $php = [], array
 {
     $addr ??= free_address();
     $log  = temp_path();
-    foreach (['--grace=3', '--watchdog=3'] as $default) {
-        if (!preg_grep('/^' . strstr($default, '=', true) . '=/', $args)) {
-            $args[] = $default;
-        }
-    }
-    $process = swerve_spawn(["--http=$addr", "--workers=$workers", "--log=$log", '-vv', ...$args], $fixture, $php, $env, wrap: $wrap);
+    $process = swerve_spawn(["--http=$addr", "--workers=$workers", "--log=$log", ...$args], $fixture, $php, $env, wrap: $wrap);
     $deadline = microtime(true) + 10;
     while ($wait && null === probe($addr, '/hello')) {
         if (microtime(true) > $deadline || !proc_get_status($process)['running']) {
@@ -752,12 +745,15 @@ function read_to_end($conn, float $timeout = 5): array
  * Helpers of the WebSocket and Server-Sent Events tests (tests/Fixtures/realtime.php): swerve without and with ext-phasync.
  */
 
-dataset('modes', ['plain' => [[]], 'ext' => [['--ext']]]);
+// 0.2: ext-phasync is mandatory (the master needs run_next()), so there is no more "plain"
+// (no-ext) mode to compare against; the dataset is kept, with its one remaining mode, so that
+// ->with('modes') callers don't need changing.
+dataset('modes', ['ext' => [[]]]);
 
 /**
  * Start swerve serving the realtime fixture in the mode of the dataset, and check that it is the mode.
  *
- * @param string[]              $mode [] or ['--ext']
+ * @param string[]              $mode always [] in 0.2
  * @param array<string, string> $env
  *
  * @return array{0: resource, 1: string, 2: string} the process, its address, the log file
@@ -765,7 +761,7 @@ dataset('modes', ['plain' => [[]], 'ext' => [['--ext']]]);
 function ws_start(array $mode, int $workers = 1, array $env = []): array
 {
     [$process, $addr, $log] = swerve_start($mode, $workers, env: $env, fixture: 'realtime.php');
-    expect(probe($addr, '/ext'))->toBe($mode || extension_loaded('phasync') ? '1' : '0'); // or loaded by php.ini
+    expect(probe($addr, '/ext'))->toBe('1'); // ext-phasync is always loaded in 0.2
 
     return [$process, $addr, $log];
 }

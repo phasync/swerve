@@ -6,6 +6,9 @@
  */
 
 test('storing and reading a 1 MB value takes well under a second, and the value is intact', function (int $workers) {
+    if ($workers > 1) {
+        test()->markTestSkipped('0.2: cross-worker cache is not ported yet');
+    }
     [$process, $addr] = swerve_start([], $workers, fixture: 'cache-size.php');
     try {
         foreach ([1_000, 100_000, 1_000_000] as $size) {

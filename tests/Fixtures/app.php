@@ -5,7 +5,6 @@
  */
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\StopReason;
 use Swerve\Swerve;
 use Swerve\WorkerStoppingException;
@@ -193,12 +192,9 @@ function fx_ws_echo(ClientRequest $r, bool $bye): void
     }
 }
 
-return new RequestHandler((new class($version) {
+$app = new class($version) {
     /** @var string[] what /leak keeps */
     private array $leaked = [];
-
-    /** @var \Swerve\Claim[] what /claim keeps, by name, so that a claim outlives its request */
-    private array $claims = [];
 
     /** /sse-beat producers still running. */
     private int $sseLive = 0;
@@ -378,115 +374,6 @@ return new RequestHandler((new class($version) {
                 return;
             case '/cache-clear':
                 fx_json($r, [\getmypid(), Swerve::cache()->clear()]);
-
-                return;
-            // Swerve::claim(): ?n= name, ?timeout= seconds to wait; answers [pid, acquired, elapsed].
-            // A handle that acquired is kept, so that it outlives its request; /drop lets it go
-            case '/claim':
-                $start    = \microtime(true);
-                $claim    = Swerve::claim($query['n']);
-                $acquired = null !== $claim->acquire((float) ($query['timeout'] ?? 0));
-                if ($acquired) {
-                    $this->claims[$query['n']] = $claim;
-                }
-                fx_json($r, [\getmypid(), $acquired, \microtime(true) - $start]);
-
-                return;
-            case '/available':
-                fx_json($r, [\getmypid(), Swerve::claim($query['n'])->available()]);
-
-                return;
-            case '/held':
-                fx_json($r, [\getmypid(), isset($this->claims[$query['n']]) && $this->claims[$query['n']]->held()]);
-
-                return;
-            case '/release':
-                $claim = $this->claims[$query['n']] ?? null;
-                $claim?->release();
-                unset($this->claims[$query['n']]);
-                fx_json($r, [\getmypid(), null !== $claim]);
-
-                return;
-            case '/drop':
-                unset($this->claims[$query['n']]); // the destructor releases
-                fx_json($r, [\getmypid(), true]);
-
-                return;
-            // A critical section guarded by claim ?n=, for the mutual exclusion tests: waits ?timeout=
-            // seconds, appends "enter <seq> <pid>", sleeps ?ms=, appends "leave <seq>" to
-            // $SWERVE_TEST_DIR/crit.log, one write each, and releases (?drop=1: by letting the handle go).
-            // Answers [pid, 'done' or 'timeout', seq].
-            case '/crit':
-                $section = static function () use ($query): string {
-                    $claim = Swerve::claim($query['n']);
-                    if (null === $claim->acquire((float) $query['timeout'])) {
-                        return 'timeout';
-                    }
-                    $log = \fopen(\getenv('SWERVE_TEST_DIR') . '/crit.log', 'a');
-                    \fwrite($log, "enter {$query['seq']} " . \getmypid() . "\n");
-                    phasync::sleep((float) $query['ms'] / 1000);
-                    \fwrite($log, "leave {$query['seq']}\n");
-                    \fclose($log);
-                    if (!isset($query['drop'])) {
-                        $claim->release();
-                    }
-
-                    return 'done';
-                };
-                fx_json($r, [\getmypid(), $section(), (int) $query['seq']]);
-
-                return;
-            // Acquires ?n=, then fails: the exception unwinds past the handle
-            case '/claim-throw':
-                $claim = Swerve::claim($query['n']);
-                $claim->acquire();
-                throw new RuntimeException('claim-boom');
-            // Acquires ?n= in a coroutine that is cancelled while it sleeps holding the claim
-            case '/claim-cancel':
-                $co = phasync::go(static function () use ($query) {
-                    $claim = Swerve::claim($query['n']);
-                    $claim->acquire();
-                    phasync::sleep(30);
-                });
-                phasync::sleep(0.1);
-                phasync::cancel($co);
-                try {
-                    phasync::await($co); // it unwinds, and its handle goes, before this answers
-                } catch (\Throwable) {
-                }
-                fx_json($r, [\getmypid(), true]);
-
-                return;
-            // Acquires ?n=, holds it ?ms= milliseconds inside this request, releases by the handle going
-            case '/claim-hold':
-                $claim = Swerve::claim($query['n']);
-                $got   = null !== $claim->acquire();
-                phasync::sleep((float) $query['ms'] / 1000);
-                fx_json($r, [\getmypid(), $got]);
-
-                return;
-            // The claims directory, to see that it is the master's and is removed
-            case '/claim-dir':
-                fx_json($r, [\getmypid(), \Swerve\Claim::directory()]);
-
-                return;
-            // The claim named by the request body, for names that do not fit a query: ?op= claim|available|release
-            case '/claim-raw':
-                $name = fx_body($r);
-                $pid  = \getmypid();
-                if ('available' === $query['op']) {
-                    fx_json($r, [$pid, Swerve::claim($name)->available()]);
-                } elseif ('release' === $query['op']) {
-                    $claim = $this->claims[$name] ?? null;
-                    $claim?->release();
-                    unset($this->claims[$name]);
-                    fx_json($r, [$pid, null !== $claim]);
-                } else {
-                    $claim = Swerve::claim($name);
-                    $got   = null !== $claim->acquire();
-                    $got && $this->claims[$name] = $claim;
-                    fx_json($r, [$pid, $got]);
-                }
 
                 return;
             // Many lookups at once from one request's coroutines: each gets its own answer
@@ -976,4 +863,11 @@ return new RequestHandler((new class($version) {
                 fx_send($r, 404, ['Content-Type' => 'text/plain'], 'Not found: ' . fx_uri($r));
         }
     }
-})->handle(...));
+};
+
+while (Swerve::accept(null, function () use ($app) {
+    Swerve::upgrade(static function (ClientRequest $request) use ($app): void {
+        $app->handle($request);
+    });
+})) {
+}

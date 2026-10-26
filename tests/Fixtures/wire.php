@@ -6,7 +6,7 @@
  */
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 
 function wire_send(ClientRequest $r, int $status, array $headers, string $body): void
 {
@@ -14,7 +14,7 @@ function wire_send(ClientRequest $r, int $status, array $headers, string $body):
     $r->write($body);
 }
 
-return new RequestHandler((new class {
+$app = new class {
     /** Producers of /chunked still running, see /live. */
     private int $live = 0;
 
@@ -117,4 +117,11 @@ return new RequestHandler((new class {
                 wire_send($r, 404, [], 'Not found');
         }
     }
-})->__invoke(...));
+};
+
+while (Swerve::accept(null, function () use ($app) {
+    Swerve::upgrade(static function (ClientRequest $request) use ($app): void {
+        $app($request);
+    });
+})) {
+}

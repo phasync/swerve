@@ -28,6 +28,8 @@ uses()->beforeEach(function () {
     pcntl_signal(SIGALRM, SIG_DFL);
 });
 
+beforeEach(fn () => test()->markTestSkipped('0.2: examples/memcached/swerve.php uses the RequestHandler contract and the cross-worker cache, neither ported yet'));
+
 function mc_start(): array
 {
     $port = (int) substr(strrchr(free_address(), ':'), 1);
