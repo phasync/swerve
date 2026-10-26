@@ -257,3 +257,22 @@ it('moves a WebSocket out of a lifecycle that serves one request, with what its 
     ws_send($ws, 0x1, 'again');
     expect(ws_read($ws)[1])->toStartWith('echo again from ');
 });
+
+it('stops a request whose client is gone at its next output, and only that request', function () {
+    [, $addr] = accept_start('abort.php', 1);
+    $id       = uniqid();
+    $marker   = sys_get_temp_dir() . "/swerve-abort-$id";
+    $worker   = accept_request(native_connect($addr), '/')['body'];
+    $stream   = native_connect($addr);
+    fwrite($stream, "GET /stream?id=$id HTTP/1.1\r\nHost: test\r\n\r\n");
+    fread($stream, 8192);
+    fclose($stream);
+    usleep(300000);
+    $stopped = (int) file_get_contents($marker);
+    usleep(200000);
+    expect((int) file_get_contents($marker))->toBe($stopped)
+        ->and($stopped)->toBeLessThan(1000)
+        ->and(file_exists("$marker-finally"))->toBeFalse()
+        ->and(accept_request(native_connect($addr), '/')['body'])->toBe($worker);
+    @unlink($marker);
+});
