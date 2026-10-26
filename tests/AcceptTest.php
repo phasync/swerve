@@ -136,3 +136,31 @@ it('gives a closure handler the request body through php://input and $_POST', fu
     fwrite($conn, "POST / HTTP/1.1\r\nHost: test\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\na=1&b=2");
     expect(native_read_response($conn)['body'])->toBe("7 {\"a\":\"1\",\"b\":\"2\"}\n");
 });
+
+it('serves static files without using up accept(), as long as the client has the next request written', function () {
+    [, $addr] = accept_start('static.php', 1);
+    $conn     = native_connect($addr);
+    $first    = accept_request($conn, '/');
+    expect($first['body'])->toMatch('/^php run \d+$/');
+    $run      = (int) substr($first['body'], 8);
+    // Three files and a PHP request in one write: all of them in the next run of static.php
+    fwrite($conn, str_repeat("GET /a.txt HTTP/1.1\r\nHost: test\r\n\r\n", 3) . "GET / HTTP/1.1\r\nHost: test\r\n\r\n");
+    for ($i = 0; $i < 3; ++$i) {
+        $file = native_read_response($conn);
+        expect($file['status'])->toBe(200)
+            ->and($file['headers']['content-type'])->toBe('text/plain; charset=utf-8')
+            ->and($file['body'])->toBe("hello file\n");
+    }
+    expect(native_read_response($conn)['body'])->toBe('php run ' . ($run + 1));
+});
+
+it('goes on with another connection when one goes idle after static files only', function () {
+    [, $addr] = accept_start('static.php', 1);
+    $conn     = native_connect($addr);
+    $run      = (int) substr(accept_request($conn, '/')['body'], 8);
+    expect(accept_request($conn, '/a.txt')['body'])->toBe("hello file\n");
+    $other = native_connect($addr);
+    expect(accept_request($other, '/a.txt')['body'])->toBe("hello file\n")
+        // the files used up no run of static.php: the next PHP request is in the next run
+        ->and(accept_request($conn, '/')['body'])->toBe('php run ' . ($run + 1));
+});

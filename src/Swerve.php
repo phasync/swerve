@@ -50,6 +50,9 @@ final class Swerve
     /** @var array<string, string> the php.ini settings packages registered with ini() */
     private static array $ini = [];
 
+    /** @var array<string, StaticFiles> accept()'s static files, by the directory it was given */
+    private static array $staticFiles = [];
+
     /** @var list<\Closure> the onWorkerStart() callbacks */
     private static array $workerStart = [];
 
@@ -473,7 +476,12 @@ final class Swerve
      * }
      * ```
      *
-     * @param ?string         $webRoot the document root; null: none
+     * Requests for a file under $staticPath are answered without the application, and don't use
+     * up the call: it goes on with the connection's next request as long as the client has
+     * written it, and with another connection when this one goes idle after files only. The
+     * first other request goes to $handler.
+     *
+     * @param ?string         $staticPath the directory of static files (as {@see StaticFiles}); null: none
      * @param string|\Closure $handler a script's path: run as a fresh main script, its variables
      *                                 globals, echo and header() the response; a closure without
      *                                 parameters: likewise; a closure taking a
@@ -485,7 +493,7 @@ final class Swerve
      *
      * @throws \LogicException when called inside a request
      */
-    public static function accept(?string $webRoot, string|\Closure $handler): Accepted
+    public static function accept(?string $staticPath, string|\Closure $handler): Accepted
     {
         if ('swerve' === \php_sapi_name()) {
             throw new \LogicException('Swerve::accept() is called by the worker\'s swerve.php, not inside a request');
@@ -495,7 +503,11 @@ final class Swerve
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
         }
 
-        return LotClient::get()->accept(self::handler($handler));
+        if (null !== $staticPath) {
+            $files = self::$staticFiles[$staticPath] ??= new StaticFiles($staticPath);
+        }
+
+        return LotClient::get()->accept(self::handler($handler), $files ?? null);
     }
 
     /** @return \Closure(ClientRequest): void */

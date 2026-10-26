@@ -8,7 +8,9 @@ use phasync\IOException;
 use phasync\Net\StreamDuplex;
 use phasync\TimeoutException;
 use Swerve\Accepted;
+use Swerve\ClientRequest;
 use Swerve\Http\HttpConnection;
+use Swerve\StaticFiles;
 use Swerve\Swerve;
 use Swerve\Util\ObjectPoolTrait;
 
@@ -93,9 +95,17 @@ final class LotClient
      *
      * @param \Closure(\Swerve\ClientRequest): void $handler
      */
-    public function accept(\Closure $handler): Accepted
+    public function accept(\Closure $handler, ?StaticFiles $files): Accepted
     {
-        $request = new Accepted($handler);
+        $request = new Accepted($handler, $files);
+        $this->assign($request);
+
+        return $request;
+    }
+
+    /** Give $request a connection with a request waiting: one served here, else one from the master. */
+    private function assign(Accepted $request): void
+    {
         ++$this->accepting;
         try {
             while (true) {
@@ -105,14 +115,14 @@ final class LotClient
                     $offer->request                       = $request;
                     phasync::raiseFlag($offer);
 
-                    return $request;
+                    return;
                 }
                 if ([] !== $this->stash) {
                     $stream                     = \array_shift($this->stash);
                     $this->busy[(int) $stream]  = $stream;
                     phasync::service($this->connection(...), $stream, $request);
 
-                    return $request;
+                    return;
                 }
                 // The reader first: a service runs at once, and one started after the 'N' could
                 // take the answer, and raise the flag, before this waits for it
@@ -129,9 +139,13 @@ final class LotClient
     }
 
     /**
-     * A connection's coroutine, for as long as the connection is in this worker: serves a
-     * request, waits for the next, and serves that too when an accept() waits for one; else the
-     * connection goes back to the master with its request waiting.
+     * A connection's coroutine, for as long as the connection is in this worker. It serves
+     * static files for as long as the client has its next request written, and the first other
+     * request with the accept()'s application; static files don't use up the accept(), which
+     * goes on with another connection when this one goes idle or closes after files only. After
+     * the application's response it waits for the next request, and serves that too when an
+     * accept() waits for one; else the connection goes back to the master with its request
+     * waiting.
      *
      * @param resource $stream
      */
@@ -140,13 +154,52 @@ final class LotClient
         $id     = (int) $stream;
         $http   = new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
         $served = 0;
+        $for    = null;
         while (true) {
-            $http->handler = $request->handler;
-            $idle          = $http->serve(one: true);
+            if ($for !== $request) {
+                // The application's handler, which notes that the request was not a file
+                $handler       = static function (ClientRequest $client) use ($request, &$application): void {
+                    $application = true;
+                    ($request->handler)($client);
+                };
+                $http->handler = null === $request->files ? $handler : $request->files->wrap($handler);
+                $for           = $request;
+            }
+            $application = false;
+            $open        = $http->serve(one: true);
             unset($this->busy[$id]);
+            if (!$application) {
+                // A static file doesn't use up the accept(): it goes on with this connection's next
+                // request if the client has written it, else with another connection
+                if ($open && ++$served < self::KEEP_LIMIT && $http->pending()) {
+                    $this->busy[$id] = $stream;
+
+                    continue;
+                }
+                if ($open) {
+                    $this->handBack($http, $stream);
+                }
+                $this->assign($request);
+
+                return;
+            }
             $request->done();
-            if (!$idle) {
+            if (!$open) {
                 return; // closed
+            }
+            if (!$http->bufferEmpty()) {
+                // The next request is read already (pipelined): only this worker can serve it
+                $this->ready[] = $offer = Offer::take($stream, true);
+                phasync::raiseFlag($this);
+                try {
+                    phasync::awaitFlag($offer);
+                } catch (CancelledException) {
+                    return; // the lifecycle ends: shutdown() closes it
+                }
+                $request = $offer->request;
+                $offer->returnToPool();
+
+                continue;
             }
             $this->idle[$id] = $stream;
             try {
@@ -165,12 +218,12 @@ final class LotClient
 
                 return;
             }
-            if (++$served >= self::KEEP_LIMIT || 0 === $this->accepting) {
+            if (($application && ++$served >= self::KEEP_LIMIT) || 0 === $this->accepting) {
                 $this->giveBack($stream, 'R');
 
                 return;
             }
-            $this->ready[] = $offer = Offer::take($stream);
+            $this->ready[] = $offer = Offer::take($stream, false);
             phasync::raiseFlag($this);
             try {
                 phasync::awaitFlag($offer);
@@ -210,7 +263,11 @@ final class LotClient
             $this->giveBack($conn, 'B');
         }
         foreach ($this->ready as $offer) {
-            $this->giveBack($offer->stream, 'R');
+            if ($offer->buffered) {
+                \fclose($offer->stream); // what was read here can't go with the socket
+            } else {
+                $this->giveBack($offer->stream, 'R');
+            }
         }
         foreach ($this->stash as $conn) {
             $this->giveBack($conn, 'R');
@@ -231,6 +288,21 @@ final class LotClient
     {
         self::send($this->socket, $type, $conn);
         \fclose($conn);
+    }
+
+    /**
+     * A kept-alive connection leaves this worker: back to the master, 'R' with its next request
+     * waiting or 'B' idle; closed when its next request is read already, as that can't go along.
+     *
+     * @param resource $conn
+     */
+    private function handBack(HttpConnection $http, $conn): void
+    {
+        if (!$http->bufferEmpty()) {
+            \fclose($conn);
+        } else {
+            $this->giveBack($conn, $http->io->pending() ? 'R' : 'B');
+        }
     }
 
     /** @return array{0: string, 1: ?\Socket} */
@@ -298,15 +370,19 @@ final class Offer
     /** @var resource */
     public mixed $stream;
 
+    /** Its next request is read already: it can't go back to the master. */
+    public bool $buffered;
+
     private function __construct()
     {
     }
 
     /** @param resource $stream */
-    public static function take($stream): self
+    public static function take($stream, bool $buffered): self
     {
-        $offer         = self::popInstance() ?? new self();
-        $offer->stream = $stream;
+        $offer           = self::popInstance() ?? new self();
+        $offer->stream   = $stream;
+        $offer->buffered = $buffered;
 
         return $offer;
     }

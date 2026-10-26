@@ -202,8 +202,8 @@ final class HttpConnection
 
     /**
      * Serve the connection's requests until it closes. With $one, serve a single request: then
-     * true when the connection is kept alive with nothing more received, to be handed back
-     * (left open); otherwise it is closed, as when a pipelined request is already buffered.
+     * true when the connection is kept alive (left open, see pending() for its next request);
+     * otherwise it is closed.
      */
     public function serve(bool $one = false): bool
     {
@@ -233,7 +233,7 @@ final class HttpConnection
                 }
             } while ($keepAlive && !$this->draining && !$one);
             // Only what this worker has read is lost by a handover: the kernel's bytes go with the socket
-            $idle = $one && $keepAlive && !$this->draining && $this->bufferEmpty();
+            $idle = $one && $keepAlive && !$this->draining;
             if ($keepAlive && !$idle) {
                 // Drained after the response said keep-alive: close as if it had said close
                 $this->linger = true;
@@ -334,6 +334,12 @@ final class HttpConnection
     }
 
     /** No request bytes are buffered. */
+    /** The client's next request has arrived: read already (pipelined), or waiting in the kernel. */
+    public function pending(): bool
+    {
+        return !$this->bufferEmpty() || $this->io->pending();
+    }
+
     public function bufferEmpty(): bool
     {
         return \strlen($this->buffer) === $this->offset;
