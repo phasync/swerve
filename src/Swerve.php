@@ -2,8 +2,14 @@
 
 namespace Swerve;
 
+use phasync\Net\StreamDuplex;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Swerve\Http\HttpConnection;
+use Swerve\Http\SapiRequest;
+use Swerve\Lot\LotClient;
+use Swerve\Psr\Psr7;
 use Swerve\Util\Shutdown;
 use Swerve\Util\Topics;
 
@@ -32,6 +38,9 @@ use Swerve\Util\Topics;
  */
 final class Swerve
 {
+    /** accept() was called in this lifecycle (its shutdown function is registered). */
+    private static bool $accepting = false;
+
     private function __construct()
     {
     }
@@ -441,6 +450,152 @@ final class Swerve
         foreach (self::$workerStart as $callback) {
             $callback();
         }
+    }
+
+    /**
+     * Serve the next request: wait until the master hands this worker a connection with a
+     * request waiting, and return the coroutine that serves it. The coroutine ends once the
+     * response is sent; the connection then goes back to the master, which hands its next
+     * request to whichever worker asks first.
+     *
+     * The application's swerve.php decides how many requests a worker serves at once:
+     *
+     * ```php
+     * // one request per run of swerve.php, which starts over clean for the next (as under php-fpm)
+     * phasync::await(Swerve::accept('wordpress/', 'wordpress/index.php'));
+     *
+     * // every request as it comes, concurrently
+     * while (Swerve::accept('public/', $app->handle(...))) {
+     * }
+     *
+     * // one at a time, keeping the application between requests
+     * while ($request = Swerve::accept('public/', $app->handle(...))) {
+     *     phasync::await($request);
+     * }
+     * ```
+     *
+     * @param ?string         $webRoot the document root; null: none
+     * @param string|\Closure $handler a script's path: run as a fresh main script, its variables
+     *                                 globals, echo and header() the response; a closure without
+     *                                 parameters: likewise; a closure taking a
+     *                                 ServerRequestInterface: returns a ResponseInterface
+     *
+     * @return ?\Fiber the coroutine serving the request; null once the worker stops
+     *
+     * @throws \LogicException when called inside a request
+     */
+    public static function accept(?string $webRoot, string|\Closure $handler): ?\Fiber
+    {
+        if ('swerve' === \php_sapi_name()) {
+            throw new \LogicException('Swerve::accept() is called by the worker\'s swerve.php, not inside a request');
+        }
+        if (!self::$accepting) {
+            self::$accepting = true;
+            \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
+        }
+        $serve  = self::handler($handler);
+        $lot    = LotClient::get();
+        $stream = $lot->next();
+        $conn   = new HttpConnection(new StreamDuplex($stream), $serve, self::log(), null);
+
+        return \phasync::go(static function () use ($conn, $lot, $stream): void {
+            if ($conn->serve(one: true)) {
+                $lot->giveBack($stream);
+            }
+        });
+    }
+
+    /** @return \Closure(ClientRequest): void */
+    private static function handler(string|\Closure $handler): \Closure
+    {
+        if (\is_string($handler)) {
+            $script = \realpath($handler);
+            if (false === $script || !\is_file($script)) {
+                throw new \ValueError("Swerve::accept(): the script $handler does not exist");
+            }
+
+            return static function (ClientRequest $client) use ($script): void {
+                $_SERVER = self::serverVariables($client, $script);
+                (new SapiRequest($client))->run(static function () use ($client, $script): void {
+                    self::requestVariables($client);
+                    \chdir(\dirname($script));
+                    \phasync\ext\include_global($script);
+                });
+            };
+        }
+        $params = (new \ReflectionFunction($handler))->getParameters();
+        if ([] === $params) {
+            return static function (ClientRequest $client) use ($handler): void {
+                $_SERVER = self::serverVariables($client, $_SERVER['SCRIPT_FILENAME'] ?? '');
+                (new SapiRequest($client))->run(static function () use ($client, $handler): void {
+                    self::requestVariables($client);
+                    $handler();
+                });
+            };
+        }
+        $type = $params[0]->getType();
+        if ($type instanceof \ReflectionNamedType && \is_a($type->getName(), ServerRequestInterface::class, true)) {
+            return static fn (ClientRequest $client) => Psr7::serve($client, $handler);
+        }
+        throw new \TypeError('Swerve::accept(): a handler closure takes no parameters, or a ' . ServerRequestInterface::class . ' first');
+    }
+
+    /** @return array<string, mixed> $_SERVER for a request: the worker's own, and the request's */
+    private static function serverVariables(ClientRequest $client, string $script): array
+    {
+        static $worker = null;
+        $worker ??= $_SERVER;
+        $target   = $client->getTarget();
+        $now      = \microtime(true);
+        $server   = [
+            'REQUEST_METHOD'     => $client->getMethod(),
+            'REQUEST_URI'        => $target,
+            'QUERY_STRING'       => (string) \parse_url($target, \PHP_URL_QUERY),
+            'SERVER_PROTOCOL'    => 'HTTP/' . $client->getProtocolVersion(),
+            'SCRIPT_FILENAME'    => $script,
+            'SCRIPT_NAME'        => '/' . \basename($script),
+            'PHP_SELF'           => '/' . \basename($script),
+            'DOCUMENT_ROOT'      => '' === $script ? '' : \dirname($script),
+            'REQUEST_TIME'       => (int) $now,
+            'REQUEST_TIME_FLOAT' => $now,
+        ] + $worker;
+        if ('https' === $client->getScheme()) {
+            $server['HTTPS'] = 'on';
+        }
+        if (\preg_match('/^\[?(.+?)\]?:(\d+)$/', $client->peer(), $m)) {
+            [, $server['REMOTE_ADDR'], $server['REMOTE_PORT']] = $m;
+        }
+        if (\preg_match('/^\[?(.+?)\]?:(\d+)$/', $client->local(), $m)) {
+            [, $server['SERVER_ADDR'], $server['SERVER_PORT']] = $m;
+        }
+        foreach ($client->getRequestHeaders() as $name => $values) {
+            $key = \strtoupper(\str_replace('-', '_', $name));
+            $server[\in_array($key, ['CONTENT_TYPE', 'CONTENT_LENGTH'], true) ? $key : "HTTP_$key"] = \implode(', ', $values);
+        }
+        $server['SERVER_NAME'] = \explode(':', $server['HTTP_HOST'] ?? 'localhost')[0];
+
+        return $server;
+    }
+
+    /** $_GET, $_COOKIE, $_POST, $_FILES and $_REQUEST, inside the request's Scope and sapi(). */
+    private static function requestVariables(ClientRequest $client): void
+    {
+        \parse_str((string) \parse_url($client->getTarget(), \PHP_URL_QUERY), $_GET);
+        $_COOKIE = [];
+        foreach ($client->getRequestHeaders()['cookie'] ?? [] as $header) {
+            foreach (\explode(';', $header) as $pair) {
+                [$name, $value] = \explode('=', \trim($pair), 2) + [1 => ''];
+                if ('' !== $name) {
+                    $_COOKIE[\urldecode($name)] ??= \urldecode($value);
+                }
+            }
+        }
+        $_POST  = $_FILES = [];
+        $type   = $client->getRequestHeaders()['content-type'][0] ?? '';
+        if (\preg_match('#^(application/x-www-form-urlencoded|multipart/form-data)\b#i', $type)) {
+            [$_POST, $_FILES] = \request_parse_body();
+        }
+        $_REQUEST = $_GET + $_POST;
     }
 
     /**

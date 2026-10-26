@@ -200,8 +200,14 @@ final class HttpConnection
         return self::$date;
     }
 
-    public function serve(): void
+    /**
+     * Serve the connection's requests until it closes. With $one, serve a single request: then
+     * true when the connection is kept alive with nothing more received, to be handed back
+     * (left open); otherwise it is closed, as when a pipelined request is already buffered.
+     */
+    public function serve(bool $one = false): bool
     {
+        $idle = false;
         try {
             $first     = true;
             $pipelined = 0;
@@ -227,8 +233,9 @@ final class HttpConnection
                 if ($keepAlive && \strlen($this->buffer) !== $this->offset && 0 === ++$pipelined % self::BURST) {
                     phasync::sleep();
                 }
-            } while ($keepAlive && !$this->draining);
-            if ($keepAlive) {
+            } while ($keepAlive && !$this->draining && !$one);
+            $idle = $one && $keepAlive && !$this->draining && $this->nothingReceived();
+            if ($keepAlive && !$idle) {
                 // Drained after the response said keep-alive: close as if it had said close
                 $this->linger = true;
             }
@@ -240,24 +247,28 @@ final class HttpConnection
             $this->logger->error('A connection failed: {exception}', ['exception' => $e]);
         } finally {
             // swerve's own ending of the connection: shielded, so it completes while the worker stops
-            phasync::shielded(function () {
-                if ($this->linger && !self::$exiting) {
-                    $this->io->end();
-                    $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
-                    $this->reclaimable = self::ANSWERED;
-                    try {
-                        while ('' !== $this->io->read(self::READ_SIZE, \max(0.0, $deadline - \microtime(true))) && \microtime(true) < $deadline) {
+            if (!$idle) {
+                phasync::shielded(function () {
+                    if ($this->linger && !self::$exiting) {
+                        $this->io->end();
+                        $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
+                        $this->reclaimable = self::ANSWERED;
+                        try {
+                            while ('' !== $this->io->read(self::READ_SIZE, \max(0.0, $deadline - \microtime(true))) && \microtime(true) < $deadline) {
+                            }
+                        } catch (IOException|TimeoutException) {
                         }
-                    } catch (IOException|TimeoutException) {
                     }
-                }
-                $this->reclaimable = 0;
-                // While PHP shuts down nothing can be raised or woken: the descriptor goes with the process
-                if (!self::$exiting) {
-                    $this->io->close();
-                }
-            });
+                    $this->reclaimable = 0;
+                    // While PHP shuts down nothing can be raised or woken: the descriptor goes with the process
+                    if (!self::$exiting) {
+                        $this->io->close();
+                    }
+                });
+            }
         }
+
+        return $idle;
     }
 
     /**
