@@ -163,6 +163,9 @@ final class HttpConnection
     /** Request-body reads in a row that got all they asked for, see readBody(). */
     private int $fullReads = 0;
 
+    /** See current(). */
+    private ?HttpClientRequest $current = null;
+
     /** The client's IP address, '' for a unix socket. */
     public readonly string $remoteAddr;
 
@@ -222,7 +225,9 @@ final class HttpConnection
                 // WeakMap keyed by Scope::getCurrent(), and phasync::onScopeChange() hooks swap process
                 // state (a locale) as the event loop moves between requests. And a frame of its own
                 // (a nested run(), which costs no coroutine): it runs in this connection's coroutine.
-                $keepAlive = (new \Scope())->run(fn (HttpClientRequest $request) => phasync::run($this->runRequest(...), $request), $request);
+                $this->current = $request;
+                $keepAlive     = (new \Scope())->run(fn (HttpClientRequest $request) => phasync::run($this->runRequest(...), $request), $request);
+                $this->current = null;
                 $request->recycle();
                 unset($request);
                 // With the next request already buffered (pipelined), and the response written
@@ -334,6 +339,12 @@ final class HttpConnection
     }
 
     /** No request bytes are buffered. */
+    /** The request being served, until its handler returns: still set when exit() cut it short. */
+    public function current(): ?HttpClientRequest
+    {
+        return $this->current;
+    }
+
     /** The client's next request has arrived: read already (pipelined), or waiting in the kernel. */
     public function pending(): bool
     {

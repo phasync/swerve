@@ -55,6 +55,12 @@ final class LotClient
     /** @var array<int, resource> being served, by resource id */
     private array $busy = [];
 
+    /**
+     * @var array<int, array{HttpConnection, \Fiber}> each connection's HttpConnection and
+     *                                                coroutine, while it runs, by resource id
+     */
+    private array $connections = [];
+
     /** @var array<int, resource> kept alive, waiting for their next request, by resource id */
     private array $idle = [];
 
@@ -82,7 +88,8 @@ final class LotClient
         }
         $this->channel = $channel;
         $this->socket  = $socket;
-        \register_shutdown_function($this->shutdown(...));
+        // Registered from a shutdown function, so it runs after the application's
+        \register_shutdown_function(fn () => \register_shutdown_function($this->shutdown(...)));
         self::send($this->socket, 'H');
         while ('h' !== ([$type, $conn] = $this->receiveOrFail())[0]) {
             $this->stash[] = \socket_export_stream($conn);
@@ -151,8 +158,23 @@ final class LotClient
      */
     private function connection($stream, Accepted $request): void
     {
+        $id                     = (int) $stream;
+        $http                   = new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
+        $this->connections[$id] = [$http, \Fiber::getCurrent()];
+        try {
+            $this->serveConnection($stream, $http, $request);
+        } finally {
+            // Not when exit() ends the lifecycle (it runs no finally): shutdown() finds it then
+            unset($this->connections[$id]);
+        }
+    }
+
+    /**
+     * @param resource $stream
+     */
+    private function serveConnection($stream, HttpConnection $http, Accepted $request): void
+    {
         $id     = (int) $stream;
-        $http   = new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
         $served = 0;
         $for    = null;
         while (true) {
@@ -254,11 +276,32 @@ final class LotClient
     }
 
     /**
-     * The lifecycle ends: kept-alive and unserved connections go back to the master; one still
-     * being served (the request was cut short, by die() say) is closed.
+     * The lifecycle ends, after the application's shutdown functions: kept-alive and unserved
+     * connections go back to the master. A request that ended the lifecycle with exit() has its
+     * response finished, as under php-fpm, and its connection goes back too when it is clean.
+     * Others still being served (cut short) are closed.
      */
     private function shutdown(): void
     {
+        foreach ($this->busy as $id => $conn) {
+            [$http, $fiber] = $this->connections[$id] ?? [null, null];
+            $request        = $http?->current();
+            // exit() unwound the coroutine of the request it ended; the others are suspended
+            if (null === $request || !$fiber->isTerminated()) {
+                continue;
+            }
+            try {
+                $open = phasync::run($request->complete(...));
+            } catch (\Throwable) {
+                $open = false;
+            }
+            unset($this->busy[$id]);
+            if ($open) {
+                $this->handBack($http, $conn);
+            } else {
+                \fclose($conn);
+            }
+        }
         foreach ($this->idle as $conn) {
             $this->giveBack($conn, 'B');
         }

@@ -164,3 +164,24 @@ it('goes on with another connection when one goes idle after static files only',
         // the files used up no run of static.php: the next PHP request is in the next run
         ->and(accept_request($conn, '/')['body'])->toBe('php run ' . ($run + 1));
 });
+
+it('finishes the response of a request that ends with die(), and keeps the connection', function () {
+    [, $addr] = accept_start('die.php', 1);
+    $conn     = native_connect($addr);
+    $first    = accept_request($conn, '/');
+    expect($first['complete'])->toBeTrue()
+        ->and($first['body'])->toMatch("/^Hello, World run \\d+\n$/");
+    // The same connection, in the next run of die.php
+    $second = accept_request($conn, '/');
+    expect($second['complete'])->toBeTrue()
+        ->and($second['body'])->toMatch("/^Hello, World run \\d+\n$/")
+        ->and($second['body'])->not->toBe($first['body']);
+});
+
+it('sends the status and headers of a request that dies before any output', function () {
+    [, $addr] = accept_start('die.php', 1);
+    $response = accept_request(native_connect($addr), '/early');
+    expect($response['status'])->toBe(404)
+        ->and($response['headers']['x-app'])->toBe('early')
+        ->and($response['complete'])->toBeTrue();
+});

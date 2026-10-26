@@ -458,14 +458,8 @@ final class HttpClientRequest implements ClientRequest
         $status    = 500;
         try {
             ($c->handler)($this);
-            if (null !== $this->error) {
-                throw $this->error; // the handler swallowed a malformed body: answer it, and close
-            }
-            if (!$this->ended) {
-                $this->end();
-            }
+            $keepAlive = $this->complete();
             $status    = $this->status;
-            $keepAlive = $this->conclude();
         } catch (HttpError $e) {
             $status = $e->getCode();
             if (!$this->wire && null === $this->gone) {
@@ -491,6 +485,23 @@ final class HttpClientRequest implements ClientRequest
         }
 
         return $keepAlive;
+    }
+
+    /**
+     * After the handler, also one that never returned (exit() ended the lifecycle): end the
+     * response if the handler did not, and skip the request body's unread rest, or close.
+     * Returns whether the connection can serve another request.
+     */
+    public function complete(): bool
+    {
+        if (null !== $this->error) {
+            throw $this->error; // the handler swallowed a malformed body: answer it, and close
+        }
+        if (!$this->ended) {
+            $this->end();
+        }
+
+        return $this->conclude();
     }
 
     /** After the handler: whether the connection can serve another request. */
