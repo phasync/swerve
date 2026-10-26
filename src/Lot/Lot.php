@@ -55,8 +55,8 @@ final class Lot
             } catch (IOException) {
                 return;
             }
-            $conn = @\stream_socket_accept($this->listener, 0);
-            if (false !== $conn) {
+            // Every connection waiting, not one per wakeup
+            while (false !== $conn = @\stream_socket_accept($this->listener, 0)) {
                 \stream_set_blocking($conn, false);
                 phasync::go(fn () => $this->wait($conn, self::NEW_TIMEOUT));
             }

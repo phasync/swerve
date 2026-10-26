@@ -114,7 +114,9 @@ require $autoload;
             \unlink($path);
         }
     }
-    $listener = @\stream_socket_server($address, $errno, $error);
+    // A burst of connections waits in the kernel's queue, not for SYN retries: as long a queue as
+    // the kernel allows (somaxconn caps it)
+    $listener = @\stream_socket_server($address, $errno, $error, context: \stream_context_create(['socket' => ['backlog' => 65535]]));
     if (false !== $listener && isset($path)) {
         $socket = $path;
     }
