@@ -483,8 +483,9 @@ final class Swerve
     /**
      * Take over the connection of the request being served, to answer on it directly: a
      * WebSocket, a server-sent event stream, or any response written to the ClientRequest.
-     * To the request, it is then as if its client had left: connection_aborted() is true, and
-     * its output and header() calls go nowhere.
+     * The request has no connection from then on: connection_aborted() is true, header() has
+     * no effect, and output throws, which ends the request with that exception (and a swerve.php
+     * that awaits the request with it).
      *
      * ```php
      * while (Swerve::accept(null, function () {

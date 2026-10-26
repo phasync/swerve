@@ -195,7 +195,7 @@ it('lets a request take over its connection with Swerve::upgrade()', function ()
         ->and($raw['body'])->toBe('written to the ClientRequest')
         ->and($raw['complete'])->toBeTrue();
     // The connection goes on with the next request
-    expect(accept_request($conn, '/stray')['body'])->toBe('aborted')
+    expect(accept_request($conn, '/stray')['body'])->toBe('echo refused, aborted')
         ->and(accept_request($conn, '/late')['body'])->toBe('begun, upgrade refused');
 });
 
@@ -204,4 +204,17 @@ it('serves a WebSocket on an upgraded request', function () {
     $ws       = ws_connect($addr, '/ws');
     ws_send($ws, 0x1, 'hi');
     expect(ws_read($ws))->toBe([0x1, 'echo hi']);
+});
+
+it('gives what a handler threw to the swerve.php that awaits the request; the client gets a 500', function () {
+    [, $addr] = accept_start('throws.php', 1);
+    $response = accept_request(native_connect($addr), '/boom');
+    expect($response['status'])->toBe(500);
+    // swerve.php gets the exception after the response went out
+    for ($deadline = microtime(true) + 2; [] === ($caught = glob(sys_get_temp_dir() . '/swerve-throws-*')) && microtime(true) < $deadline;) {
+        usleep(10000);
+    }
+    expect($caught)->toHaveCount(1)
+        ->and(file_get_contents($caught[0]))->toBe('boom');
+    unlink($caught[0]);
 });

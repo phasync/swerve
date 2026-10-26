@@ -29,8 +29,8 @@ final class SapiRequest
     private bool $gone;
 
     /**
-     * upgrade() took the connection off the request: to the request it is as if its client left
-     * (output dropped, connection_aborted() true), and PHP's headers are not sent.
+     * upgrade() took the connection off the request: output throws, connection_aborted() is
+     * true, and PHP's headers are not sent.
      */
     private bool $upgraded;
 
@@ -98,7 +98,7 @@ final class SapiRequest
     public function write(string $data): bool
     {
         if ($this->upgraded) {
-            return false; // as for a client that left: output is dropped, connection_aborted() is true
+            throw new \LogicException('Output after Swerve::upgrade(): the connection left the request');
         }
         if (!$this->gone) {
             try {

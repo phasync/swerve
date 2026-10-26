@@ -182,7 +182,12 @@ final class LotClient
                 // The application's handler, which notes that the request was not a file
                 $handler       = static function (ClientRequest $client) use ($request, &$application): void {
                     $application = true;
-                    ($request->handler)($client);
+                    try {
+                        ($request->handler)($client);
+                    } catch (\Throwable $e) {
+                        $request->fail($e); // for whoever awaits the request; the 500 and the log as always
+                        throw $e;
+                    }
                 };
                 $http->handler = null === $request->files ? $handler : $request->files->wrap($handler);
                 $for           = $request;
