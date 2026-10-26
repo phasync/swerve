@@ -234,7 +234,8 @@ final class HttpConnection
                     phasync::sleep();
                 }
             } while ($keepAlive && !$this->draining && !$one);
-            $idle = $one && $keepAlive && !$this->draining && $this->nothingReceived();
+            // Only what this worker has read is lost by a handover: the kernel's bytes go with the socket
+            $idle = $one && $keepAlive && !$this->draining && $this->bufferEmpty();
             if ($keepAlive && !$idle) {
                 // Drained after the response said keep-alive: close as if it had said close
                 $this->linger = true;
