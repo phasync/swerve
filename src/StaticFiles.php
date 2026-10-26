@@ -5,7 +5,7 @@ namespace Swerve;
 /**
  * Serves the files of a directory, and passes every other request on to the application's handler.
  *
- * It is what `--public=<dir>` installs; wrap your own handler for the same behaviour.
+ * It is what {@see Swerve::accept()} uses for its `$staticPath`.
  *
  * A GET or HEAD request whose path names a file below the directory gets that file: streamed,
  * with its Content-Type (by extension), Content-Length, Last-Modified and ETag; `304 Not
@@ -19,10 +19,8 @@ namespace Swerve;
  * never sent), and a directory without index.html. Nothing is ever listed.
  *
  * ```php
- * $files = new Swerve\StaticFiles(__DIR__ . '/public');
- * return new Swerve\RequestHandler($files->wrap(function (Swerve\ClientRequest $request) {
- *     // what is not a file
- * }));
+ * // swerve.php: the files under public/, and index.php for the rest
+ * phasync::await(Swerve\Swerve::accept(__DIR__ . '/public', __DIR__ . '/public/index.php'));
  * ```
  *
  * @topic request-handlers

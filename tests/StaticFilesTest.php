@@ -114,48 +114,6 @@ test('a byte range is served as 206, past the end as 416; If-Range that does not
     'stale If-Range' => ['bytes=10-19', 200, null, [1000, 0, 1000], '"old"'],
 ]);
 
-test('with --public, swerve serves the files and the application the rest, HEAD included; a range streams from its start', function () {
-    $dir = static_dir();
-    [$process, $addr] = swerve_start(["--public=$dir"], 1);
-    try {
-        expect(probe($addr, '/app.js'))->toBe('console.log(1)');
-        expect(probe($addr, '/hello'))->toBe('Hello');
-
-        $conn = native_connect($addr);
-        fwrite($conn, "GET /data.bin HTTP/1.1\r\nHost: t\r\nRange: bytes=500-503\r\n\r\n");
-        $response = native_read_response($conn);
-        expect([$response['status'], bin2hex($response['body'])])->toBe([206, bin2hex(chr(500 % 256) . chr(501 % 256) . chr(502 % 256) . chr(503 % 256))]);
-
-        fwrite($conn, "HEAD /app.js HTTP/1.1\r\nHost: t\r\n\r\n");
-        $response = native_read_response($conn, head: true);
-        expect([$response['status'], $response['headers']['content-length'], $response['body']])->toBe([200, '14', '']);
-    } finally {
-        native_stop($process);
-    }
-});
-
-test('a relative --public is the directory where swerve started, also when the application changes directory as it loads', function () {
-    $dir = static_dir();
-    $cwd = getcwd();
-    chdir(dirname($dir));
-    try {
-        [$process, $addr] = swerve_start(['--public=' . basename($dir)], 1, fixture: 'chdir-app.php');
-    } finally {
-        chdir($cwd);
-    }
-    try {
-        expect(probe($addr, '/app.js'))->toBe('console.log(1)');
-    } finally {
-        native_stop($process);
-    }
-});
-
-test('--public needs a directory', function () {
-    $swerve = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/swerve.php');
-    exec("$swerve --public=/no/such/dir 2>&1", $out, $code);
-    expect([$code, $out[0]])->toBe([2, 'swerve: Illegal value for option: --public: /no/such/dir is not a directory']);
-});
-
 test('a PHP file in the public directory is passed to the application, never sent as source', function () {
     $dir = static_dir();
     foreach (['index.php', 'config.PHP', 'page.phtml', 'tool.phar', 'lib.inc', 'old.php5'] as $name) {
