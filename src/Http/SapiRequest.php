@@ -20,10 +20,16 @@ final class SapiRequest
 {
     use ObjectPoolTrait;
 
+    /** @var \WeakMap<\Scope, self> the request of each scope, for upgrade() */
+    private static \WeakMap $requests;
+
     private ClientRequest $client;
 
     /** The client went away: later writes are refused, as a SAPI's are. */
     private bool $gone;
+
+    /** upgrade() gave the application the connection: PHP's output and headers have no place on it. */
+    private bool $upgraded;
 
     private function __construct()
     {
@@ -32,16 +38,21 @@ final class SapiRequest
     /** Run $code as a request of $client under sapi(). */
     public static function run(ClientRequest $client, \Closure $code): mixed
     {
-        $sapi         = self::popInstance() ?? new self();
-        $sapi->client = $client;
-        $sapi->gone   = false;
+        $sapi           = self::popInstance() ?? new self();
+        $sapi->client   = $client;
+        $sapi->gone     = $sapi->upgraded = false;
+        $scope          = \Scope::getCurrent();
+        self::$requests ??= new \WeakMap();
+        self::$requests[$scope] = $sapi;
         try {
             $result = \phasync\ext\sapi($code, $sapi);
         } finally {
+            unset(self::$requests[$scope]);
+            $upgraded = $sapi->upgraded;
             $sapi->returnToPool();
         }
-        // The code under sapi() never had $client, and SapiRequest let go of it
-        if ($client instanceof HttpClientRequest) {
+        // Unless upgrade() gave it out, the code under sapi() never had $client, and SapiRequest let go of it
+        if (!$upgraded && $client instanceof HttpClientRequest) {
             $client->reusable();
         }
 
@@ -54,6 +65,28 @@ final class SapiRequest
         $this->pushInstance();
     }
 
+    /**
+     * The connection of the request running in this scope, for the application to answer on
+     * itself (see {@see \Swerve\Swerve::upgrade()}).
+     *
+     * @throws \LogicException outside a request, or once the response has begun
+     */
+    public static function upgrade(): ClientRequest
+    {
+        $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
+        if (null === $sapi) {
+            throw new \LogicException('Swerve::upgrade() is called inside a request that Swerve::accept() serves');
+        }
+        if (!$sapi->upgraded) {
+            if (\headers_sent($file, $line)) {
+                throw new \LogicException("Swerve::upgrade() is called before the response begins; output began at $file:$line");
+            }
+            $sapi->upgraded = true;
+        }
+
+        return $sapi->client;
+    }
+
     public function name(): string
     {
         return 'swerve';
@@ -61,6 +94,9 @@ final class SapiRequest
 
     public function write(string $data): bool
     {
+        if ($this->upgraded) {
+            throw new \LogicException('Output after Swerve::upgrade(): the connection is the application\'s, write to its ClientRequest');
+        }
         if (!$this->gone) {
             try {
                 $this->client->write($data);
@@ -87,6 +123,9 @@ final class SapiRequest
      */
     public function send_headers(int $status, ?string $statusLine, array $headers): void
     {
+        if ($this->upgraded) {
+            return; // PHP's own headers, at the request's end: the application answers itself
+        }
         $map = [];
         foreach ($headers as $line) {
             [$name, $value]                   = \explode(':', $line, 2) + [1 => ''];
@@ -97,6 +136,9 @@ final class SapiRequest
 
     public function flush(): void
     {
+        if ($this->upgraded) {
+            return;
+        }
         $this->client->flush();
     }
 

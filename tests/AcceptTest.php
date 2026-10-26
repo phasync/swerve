@@ -185,3 +185,23 @@ it('sends the status and headers of a request that dies before any output', func
         ->and($response['headers']['x-app'])->toBe('early')
         ->and($response['complete'])->toBeTrue();
 });
+
+it('lets a request take over its connection with Swerve::upgrade()', function () {
+    [, $addr] = accept_start('upgrade.php', 1);
+    $conn     = native_connect($addr);
+    $raw      = accept_request($conn, '/raw');
+    expect($raw['headers']['x-raw'])->toBe('yes')
+        ->and($raw['headers'])->not->toHaveKey('x-ignored')
+        ->and($raw['body'])->toBe('written to the ClientRequest')
+        ->and($raw['complete'])->toBeTrue();
+    // The connection goes on with the next request
+    expect(accept_request($conn, '/stray')['body'])->toBe('echo refused')
+        ->and(accept_request($conn, '/late')['body'])->toBe('begun, upgrade refused');
+});
+
+it('serves a WebSocket on an upgraded request', function () {
+    [, $addr] = accept_start('upgrade.php', 1);
+    $ws       = ws_connect($addr, '/ws');
+    ws_send($ws, 0x1, 'hi');
+    expect(ws_read($ws))->toBe([0x1, 'echo hi']);
+});

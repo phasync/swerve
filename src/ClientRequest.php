@@ -5,9 +5,9 @@ namespace Swerve;
 use phasync\Net\Duplex;
 
 /**
- * One HTTP exchange with a client: the request to read, and the response to write. The
- * application's {@see RequestHandler} is called once for each, and may keep it for as long as
- * it likes (an event stream, a long download) by simply not returning.
+ * One HTTP exchange with a client: the request to read, and the response to write. A request
+ * gets it from {@see Swerve::upgrade()}, to answer on the connection itself, and may keep it for
+ * as long as it likes (an event stream, a long download) by simply not returning.
  *
  * As a {@see Duplex}, read() is the request body ('' only once it ended) and write() the
  * response body; the module does the HTTP framing. The final response head is held until the
@@ -21,21 +21,23 @@ use phasync\Net\Duplex;
  * is the same as none; any other value throws.
  *
  * ```php
- * return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
+ * while (Swerve::accept(null, function () {
+ *     $request = Swerve::upgrade();
  *     $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream']);
  *     foreach ([1, 2, 3] as $n) {
  *         $request->write("data: $n\n\n");
  *         $request->flush();
  *         phasync::sleep(1);
  *     }
- * });
+ * })) {
+ * }
  * ```
  *
  * A handler that throws before the head is committed makes a 500 (logged); after, the connection
  * is aborted. After a `101`, the ClientRequest is the raw connection, and read() returns first
  * what the client sent behind its Upgrade request.
  *
- * @see RequestHandler
+ * @see Swerve::upgrade()
  *
  * @topic request-handlers
  *

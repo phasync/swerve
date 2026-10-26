@@ -480,6 +480,35 @@ final class Swerve
         return LotClient::get()->accept(self::handler($handler), $files ?? null);
     }
 
+    /**
+     * Take over the connection of the request being served, to answer on it directly: a
+     * WebSocket, a server-sent event stream, or any response written to the ClientRequest.
+     * From then on PHP's output and headers have no place on it: echo throws, and header()
+     * has no effect.
+     *
+     * ```php
+     * while (Swerve::accept(null, function () {
+     *     if ('/chat' === $_SERVER['REQUEST_URI']) {
+     *         Swerve\WebSocket::from(Swerve::upgrade(), function (Swerve\WebSocket $ws) {
+     *             foreach ($ws as $message) {
+     *                 $ws->send($message);
+     *             }
+     *         });
+     *
+     *         return;
+     *     }
+     *     echo "Hello, World\n";
+     * })) {
+     * }
+     * ```
+     *
+     * @throws \LogicException outside a request, or once output or headers have gone out
+     */
+    public static function upgrade(): ClientRequest
+    {
+        return SapiRequest::upgrade();
+    }
+
     /** @return \Closure(ClientRequest): void */
     private static function handler(string|\Closure $handler): \Closure
     {

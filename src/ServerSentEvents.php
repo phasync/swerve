@@ -13,12 +13,13 @@ use phasync\IOException;
  * written as one chunk. The stream ends when the handler returns.
  *
  * ```php
- * return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
- *     $sse = new Swerve\ServerSentEvents($request);
+ * while (Swerve::accept(null, function () {
+ *     $sse = new Swerve\ServerSentEvents(Swerve::upgrade());
  *     foreach (Swerve::subscribe('news', $sse->lastEventId()) as $message) {
  *         $sse->send($message);
  *     }
- * });
+ * })) {
+ * }
  * ```
  *
  * A client that leaves makes the next `send()` or `comment()` throw `phasync\IOException`. Let it
