@@ -170,7 +170,7 @@ final class HttpConnection
     public readonly bool $proxied;
 
     /**
-     * @param \Closure(\Swerve\ClientRequest): void $handler     the application's
+     * @param \Closure(\Swerve\ClientRequest): void $handler     the application's; may be replaced between requests
      * @param ?Logger                               $access      the access log, if on
      * @param int                                   $maxBodySize a larger request body gets 413, by its Content-Length before
      *                                                           the application runs, or when a chunk would exceed it
@@ -178,7 +178,7 @@ final class HttpConnection
      */
     public function __construct(
         public readonly Duplex $io,
-        public readonly \Closure $handler,
+        public \Closure $handler,
         public readonly LoggerInterface $logger,
         public readonly ?Logger $access,
         public readonly int $maxBodySize = self::MAX_BODY,
@@ -220,9 +220,9 @@ final class HttpConnection
                 $first = false;
                 // Each request is a Scope of its own, its identity: state kept per request hangs on a
                 // WeakMap keyed by Scope::getCurrent(), and phasync::onScopeChange() hooks swap process
-                // state (a locale) as the event loop moves between requests. It runs in this
-                // connection's coroutine, with no coroutine or event loop of its own.
-                $keepAlive = (new \Scope())->run($this->runRequest(...), $request);
+                // state (a locale) as the event loop moves between requests. And a frame of its own
+                // (a nested run(), which costs no coroutine): it runs in this connection's coroutine.
+                $keepAlive = (new \Scope())->run(fn (HttpClientRequest $request) => phasync::run($this->runRequest(...), $request), $request);
                 unset($request);
                 // With the next request already buffered (pipelined), and the response written
                 // without waiting, nothing would suspend this coroutine: a client sending many

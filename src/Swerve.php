@@ -2,7 +2,6 @@
 
 namespace Swerve;
 
-use phasync\Net\StreamDuplex;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -484,7 +483,7 @@ final class Swerve
      *
      * @throws \LogicException when called inside a request
      */
-    public static function accept(?string $webRoot, string|\Closure $handler): ?\Fiber
+    public static function accept(?string $webRoot, string|\Closure $handler): Accepted
     {
         if ('swerve' === \php_sapi_name()) {
             throw new \LogicException('Swerve::accept() is called by the worker\'s swerve.php, not inside a request');
@@ -493,18 +492,8 @@ final class Swerve
             self::$accepting = true;
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
         }
-        $serve             = self::handler($handler);
-        $lot               = LotClient::get();
-        [$stream, $served] = $lot->next();
-        $conn              = new HttpConnection(new StreamDuplex($stream), $serve, self::log(), null);
 
-        return \phasync::go(static function () use ($conn, $lot, $stream, $served): void {
-            if ($conn->serve(one: true)) {
-                $lot->idle($stream, $served + 1);
-            } else {
-                $lot->closed($stream);
-            }
-        });
+        return LotClient::get()->accept(self::handler($handler));
     }
 
     /** @return \Closure(ClientRequest): void */

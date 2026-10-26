@@ -10,7 +10,8 @@ use Psr\Log\LoggerInterface;
 /**
  * The master's side of the connections: accepts every client, waits for a request to arrive
  * on it (phasync::readable(); nothing is read), and hands it to the worker that asked first.
- * A worker hands a kept-alive connection back after its response, and it waits here again.
+ * A worker hands a kept-alive connection back once its next request arrived, straight into
+ * the line, or idle when the worker's lifecycle ended first, to wait here again.
  *
  * Messages with the workers are packets on a SEQPACKET socket pair, one letter each, a
  * connection riding along as SCM_RIGHTS: see {@see LotClient}.
@@ -75,6 +76,7 @@ final class Lot
                 [$type, $conn] = $msg;
                 match ($type) {
                     'N'     => $this->asked($socket),
+                    'R'     => $this->ready(\socket_export_stream($conn)),
                     'B'     => phasync::go(fn () => $this->wait(\socket_export_stream($conn), self::KEPT_ALIVE_TIMEOUT)),
                     'H'     => $this->hello($socket),
                     default => throw new \UnexpectedValueException("A worker sent '$type'"),
@@ -105,6 +107,16 @@ final class Lot
 
             return;
         }
+        $this->ready($conn);
+    }
+
+    /**
+     * $conn has a request waiting: to the worker that asked first, or in line.
+     *
+     * @param resource $conn
+     */
+    private function ready($conn): void
+    {
         if ($this->asking->isEmpty()) {
             $this->ready->enqueue($conn);
         } else {
