@@ -22,6 +22,9 @@ final class LotClient
 {
     private const FD = 3;
 
+    /** Requests in a row this worker serves on an idle connection; then it goes back to the master. */
+    private const KEEP_LIMIT = 20;
+
     private static ?self $instance = null;
 
     /** @var resource */
@@ -29,8 +32,20 @@ final class LotClient
 
     private \Socket $socket;
 
-    /** @var list<resource> connections sent to the previous lifecycle, never taken */
+    /** @var list<resource> received, not yet served: sent to the previous lifecycle, or answering an ask after accept() reused an idle one */
     private array $stash = [];
+
+    /** @var array<int, resource> being served, by resource id */
+    private array $busy = [];
+
+    /** @var list<array{0: resource, 1: int}> idle after a kept-alive response, and the requests served on each in a row */
+    private array $idle = [];
+
+    /** An 'N' is unanswered. */
+    private bool $asking = false;
+
+    /** The accept() waiting for the master, woken when a connection turns idle. */
+    private ?\Fiber $waiter = null;
 
     /** This lifecycle's client: one per lifecycle, since run_next() resets the statics. */
     public static function get(): self
@@ -47,6 +62,7 @@ final class LotClient
         }
         $this->channel = $channel;
         $this->socket  = $socket;
+        \register_shutdown_function($this->shutdown(...));
         self::send($this->socket, 'H');
         while ('h' !== ([$type, $conn] = $this->receiveOrFail())[0]) {
             $this->stash[] = \socket_export_stream($conn);
@@ -54,22 +70,114 @@ final class LotClient
     }
 
     /**
-     * A connection with a request waiting, as soon as the master has one.
+     * The next connection with a request waiting, and the requests this worker served on it in
+     * a row. An idle connection whose next request has arrived is reused; the other idle ones go
+     * back to the master. Waits for the master asynchronously, and looks at the idle connections
+     * again each time one turns idle meanwhile.
      *
-     * @return resource
+     * @return array{0: resource, 1: int}
      */
-    public function next()
+    public function next(): array
     {
-        if ([] !== $this->stash) {
-            return \array_shift($this->stash);
-        }
-        self::send($this->socket, 'N');
-        [$type, $conn] = $this->receiveOrFail();
-        if ('C' !== $type || null === $conn) {
-            throw new \UnexpectedValueException("The master answered '$type' to a worker's ask");
-        }
+        while (true) {
+            while ([] !== $this->idle) {
+                [$conn, $served] = \array_shift($this->idle);
+                if ($served < self::KEEP_LIMIT && self::readableNow($conn)) {
+                    if ('' === \stream_socket_recvfrom($conn, 1, \STREAM_PEEK)) {
+                        \fclose($conn); // readable because the client closed it
+                        continue;
+                    }
 
-        return \socket_export_stream($conn);
+                    return $this->serving($conn, $served);
+                }
+                $this->giveBack($conn);
+            }
+            if ([] !== $this->stash) {
+                return $this->serving(\array_shift($this->stash), 0);
+            }
+            if (!$this->asking) {
+                self::send($this->socket, 'N');
+                $this->asking = true;
+            }
+            $this->waiter = phasync::getFiber();
+            try {
+                [$type, $conn] = $this->receiveOrFail();
+            } catch (IdleWake) {
+                continue;
+            } finally {
+                $this->waiter = null;
+            }
+            if ('C' !== $type || null === $conn) {
+                throw new \UnexpectedValueException("The master answered '$type' to a worker's ask");
+            }
+            $this->asking = false;
+
+            return $this->serving(\socket_export_stream($conn), 0);
+        }
+    }
+
+    /**
+     * A response was sent and the connection is kept alive: idle, for the next accept().
+     *
+     * @param resource $conn
+     * @param int      $served requests this worker served on it in a row
+     */
+    public function idle($conn, int $served): void
+    {
+        unset($this->busy[(int) $conn]);
+        $this->idle[] = [$conn, $served];
+        if (null !== $this->waiter) {
+            try {
+                phasync::throw($this->waiter, new IdleWake());
+            } catch (\LogicException) {
+                // woken already
+            }
+        }
+    }
+
+    /**
+     * The connection was closed while served (Connection: close, an error).
+     *
+     * @param resource $conn
+     */
+    public function closed($conn): void
+    {
+        unset($this->busy[(int) $conn]);
+    }
+
+    /** @param resource $conn */
+    private function serving($conn, int $served): array
+    {
+        $this->busy[(int) $conn] = $conn;
+
+        return [$conn, $served];
+    }
+
+    /**
+     * The lifecycle ends: idle and unserved connections go back to the master; one still being
+     * served (the request was cut short, by die() say) is closed.
+     */
+    private function shutdown(): void
+    {
+        foreach ($this->idle as [$conn]) {
+            $this->giveBack($conn);
+        }
+        foreach ($this->stash as $conn) {
+            $this->giveBack($conn);
+        }
+        foreach ($this->busy as $conn) {
+            \fclose($conn);
+        }
+        $this->idle = $this->stash = $this->busy = [];
+    }
+
+    /** @param resource $conn */
+    private static function readableNow($conn): bool
+    {
+        $read = [$conn];
+        $none = null;
+
+        return 1 === \stream_select($read, $none, $none, 0);
     }
 
     /**
@@ -132,4 +240,13 @@ final class LotClient
             phasync::readable($channel);
         }
     }
+}
+
+/**
+ * Wakes the accept() waiting for the master: a connection turned idle.
+ *
+ * @internal
+ */
+final class IdleWake extends \Exception
+{
 }

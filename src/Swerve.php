@@ -493,14 +493,16 @@ final class Swerve
             self::$accepting = true;
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
         }
-        $serve  = self::handler($handler);
-        $lot    = LotClient::get();
-        $stream = $lot->next();
-        $conn   = new HttpConnection(new StreamDuplex($stream), $serve, self::log(), null);
+        $serve             = self::handler($handler);
+        $lot               = LotClient::get();
+        [$stream, $served] = $lot->next();
+        $conn              = new HttpConnection(new StreamDuplex($stream), $serve, self::log(), null);
 
-        return \phasync::go(static function () use ($conn, $lot, $stream): void {
+        return \phasync::go(static function () use ($conn, $lot, $stream, $served): void {
             if ($conn->serve(one: true)) {
-                $lot->giveBack($stream);
+                $lot->idle($stream, $served + 1);
+            } else {
+                $lot->closed($stream);
             }
         });
     }
