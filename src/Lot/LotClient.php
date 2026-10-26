@@ -9,6 +9,7 @@ use phasync\Net\StreamDuplex;
 use phasync\TimeoutException;
 use Swerve\Accepted;
 use Swerve\ClientRequest;
+use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
@@ -182,6 +183,9 @@ final class LotClient
                 // The application's handler, which notes that the request was not a file
                 $handler       = static function (ClientRequest $client) use ($request, &$application): void {
                     $application = true;
+                    if ($client instanceof HttpClientRequest) {
+                        $client->onHandOff = $request->done(...);
+                    }
                     try {
                         ($request->handler)($client);
                     } catch (\Throwable $e) {

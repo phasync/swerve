@@ -6,8 +6,8 @@ use phasync\Net\Duplex;
 
 /**
  * One HTTP exchange with a client: the request to read, and the response to write. A request
- * gets it from {@see Swerve::upgrade()}, to answer on the connection itself, and may keep it for
- * as long as it likes (an event stream, a long download) by simply not returning.
+ * hands it to a closure with {@see Swerve::upgrade()}, to answer on the connection itself, which
+ * may keep it for as long as it likes (an event stream, a long download) by simply not returning.
  *
  * As a {@see Duplex}, read() is the request body ('' only once it ended) and write() the
  * response body; the module does the HTTP framing. The final response head is held until the
@@ -22,13 +22,14 @@ use phasync\Net\Duplex;
  *
  * ```php
  * while (Swerve::accept(null, function () {
- *     $request = Swerve::upgrade();
- *     $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream']);
- *     foreach ([1, 2, 3] as $n) {
- *         $request->write("data: $n\n\n");
- *         $request->flush();
- *         phasync::sleep(1);
- *     }
+ *     Swerve::upgrade(static function (Swerve\ClientRequest $request): void {
+ *         $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream']);
+ *         foreach ([1, 2, 3] as $n) {
+ *             $request->write("data: $n\n\n");
+ *             $request->flush();
+ *             phasync::sleep(1);
+ *         }
+ *     });
  * })) {
  * }
  * ```

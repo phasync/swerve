@@ -14,10 +14,11 @@ use phasync\IOException;
  *
  * ```php
  * while (Swerve::accept(null, function () {
- *     $sse = new Swerve\ServerSentEvents(Swerve::upgrade());
- *     foreach (Swerve::subscribe('news', $sse->lastEventId()) as $message) {
- *         $sse->send($message);
- *     }
+ *     Swerve::upgrade(static function (Swerve\ServerSentEvents $sse): void {
+ *         foreach (Swerve::subscribe('news', $sse->lastEventId()) as $message) {
+ *             $sse->send($message);
+ *         }
+ *     });
  * })) {
  * }
  * ```

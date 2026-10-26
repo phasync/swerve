@@ -15,7 +15,7 @@ use phasync\Util\Event;
  *
  * ```php
  * while (Swerve::accept(null, function () {
- *     Swerve\WebSocket::from(Swerve::upgrade(), function (Swerve\WebSocket $ws) {
+ *     Swerve::upgrade(static function (Swerve\WebSocket $ws): void {
  *         $ws->onMessage->listen(function (string $data) {      // inbound: events
  *             Swerve::publish('chat', $data);
  *         });

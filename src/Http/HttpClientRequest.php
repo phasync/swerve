@@ -132,6 +132,7 @@ final class HttpClientRequest implements ClientRequest
         $r->client     = $connection->remoteAddr;
         $r->https      = false;
         $r->reusable   = false;
+        $r->onHandOff  = null;
         if ($connection->proxied) {
             $r->forwarded();
         }
@@ -146,6 +147,18 @@ final class HttpClientRequest implements ClientRequest
     public function reusable(): void
     {
         $this->reusable = true;
+    }
+
+    /**
+     * Told when the request ended and its connection went on to Swerve::upgrade()'s closure:
+     * whoever waits for the request need not wait for the connection.
+     */
+    public ?\Closure $onHandOff = null;
+
+    /** @internal the request ended, its connection goes on to upgrade()'s closure */
+    public function handedOff(): void
+    {
+        ($this->onHandOff)?->__invoke();
     }
 
     /** The exchange is over: back to the pool if reusable() said nothing references it. */

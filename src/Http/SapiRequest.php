@@ -34,60 +34,69 @@ final class SapiRequest
      */
     private bool $upgraded;
 
+    /** upgrade()'s closure, for the connection once the request ended. */
+    private ?\Closure $upgrade;
+
     private function __construct()
     {
     }
 
-    /** Run $code as a request of $client under sapi(). */
-    public static function run(ClientRequest $client, \Closure $code): mixed
+    /**
+     * Run $code as a request of $client under sapi().
+     *
+     * @return ?\Closure upgrade()'s closure, to run on the connection now that the request ended
+     */
+    public static function run(ClientRequest $client, \Closure $code): ?\Closure
     {
         $sapi           = self::popInstance() ?? new self();
         $sapi->client   = $client;
         $sapi->gone     = $sapi->upgraded = false;
+        $sapi->upgrade  = null;
         $scope          = \Scope::getCurrent();
         self::$requests ??= new \WeakMap();
         self::$requests[$scope] = $sapi;
         try {
-            $result = \phasync\ext\sapi($code, $sapi);
+            \phasync\ext\sapi($code, $sapi);
         } finally {
             unset(self::$requests[$scope]);
-            $upgraded = $sapi->upgraded;
+            $upgrade = $sapi->upgrade;
             $sapi->returnToPool();
         }
-        // Unless upgrade() gave it out, the code under sapi() never had $client, and SapiRequest let go of it
-        if (!$upgraded && $client instanceof HttpClientRequest) {
+        // Unless upgrade() hands it on, the code under sapi() never had $client, and SapiRequest let go of it
+        if (null === $upgrade && $client instanceof HttpClientRequest) {
             $client->reusable();
         }
 
-        return $result;
+        return $upgrade;
     }
 
     public function returnToPool(): void
     {
         unset($this->client);
+        $this->upgrade = null;
         $this->pushInstance();
     }
 
     /**
-     * The connection of the request running in this scope, for the application to answer on
-     * itself (see {@see \Swerve\Swerve::upgrade()}).
+     * Take the connection off the request running in this scope, for $upgrade once the request
+     * ended (see {@see \Swerve\Swerve::upgrade()}).
      *
-     * @throws \LogicException outside a request, or once the response has begun
+     * @throws \LogicException outside a request, a second time, or once the response has begun
      */
-    public static function upgrade(): ClientRequest
+    public static function upgrade(\Closure $upgrade): void
     {
         $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
         if (null === $sapi) {
             throw new \LogicException('Swerve::upgrade() is called inside a request that Swerve::accept() serves');
         }
-        if (!$sapi->upgraded) {
-            if (\headers_sent($file, $line)) {
-                throw new \LogicException("Swerve::upgrade() is called before the response begins; output began at $file:$line");
-            }
-            $sapi->upgraded = true;
+        if ($sapi->upgraded) {
+            throw new \LogicException('Swerve::upgrade() was called already for this request');
         }
-
-        return $sapi->client;
+        if (\headers_sent($file, $line)) {
+            throw new \LogicException("Swerve::upgrade() is called before the response begins; output began at $file:$line");
+        }
+        $sapi->upgraded = true;
+        $sapi->upgrade  = $upgrade;
     }
 
     public function name(): string

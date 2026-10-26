@@ -186,17 +186,19 @@ it('sends the status and headers of a request that dies before any output', func
         ->and($response['complete'])->toBeTrue();
 });
 
-it('lets a request take over its connection with Swerve::upgrade()', function () {
+it('gives the connection to Swerve::upgrade()\'s closure once the request ended', function () {
     [, $addr] = accept_start('upgrade.php', 1);
     $conn     = native_connect($addr);
     $raw      = accept_request($conn, '/raw');
     expect($raw['headers']['x-raw'])->toBe('yes')
         ->and($raw['headers'])->not->toHaveKey('x-ignored')
-        ->and($raw['body'])->toBe('written to the ClientRequest')
+        ->and($raw['body'])->toBe('written to the ClientRequest: echo refused, aborted')
         ->and($raw['complete'])->toBeTrue();
     // The connection goes on with the next request
-    expect(accept_request($conn, '/stray')['body'])->toBe('echo refused, aborted')
-        ->and(accept_request($conn, '/late')['body'])->toBe('begun, upgrade refused');
+    expect(accept_request($conn, '/late')['body'])->toBe('begun, upgrade refused');
+    $sse = accept_request($conn, '/sse');
+    expect($sse['headers']['content-type'])->toStartWith('text/event-stream')
+        ->and($sse['body'])->toBe("data: one\n\ndata: two\n\n");
 });
 
 it('serves a WebSocket on an upgraded request', function () {
@@ -231,4 +233,12 @@ it('gives what a handler threw to the swerve.php that awaits the request; the cl
     expect($caught)->toHaveCount(1)
         ->and(file_get_contents($caught[0]))->toBe('boom');
     unlink($caught[0]);
+});
+
+it('serves the next request while an upgraded connection goes on, also when swerve.php awaits each request', function () {
+    [, $addr] = accept_start('upgrade-await.php', 1);
+    $ws       = ws_connect($addr, '/ws');
+    expect(accept_request(native_connect($addr), '/')['body'])->toBe('hello');
+    ws_send($ws, 0x1, 'still here');
+    expect(ws_read($ws))->toBe([0x1, 'echo still here']);
 });

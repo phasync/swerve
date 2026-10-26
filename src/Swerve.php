@@ -5,6 +5,7 @@ namespace Swerve;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\Http\SapiRequest;
 use Swerve\Lot\LotClient;
@@ -481,16 +482,18 @@ final class Swerve
     }
 
     /**
-     * Take over the connection of the request being served, to answer on it directly: a
-     * WebSocket, a server-sent event stream, or any response written to the ClientRequest.
-     * The request has no connection from then on: connection_aborted() is true, header() has
-     * no effect, and output throws, which ends the request with that exception (and a swerve.php
-     * that awaits the request with it).
+     * Take the connection off the request being served, for $upgrade: a WebSocket, a stream of
+     * server-sent events, or any response written to the ClientRequest. The type of $upgrade's
+     * parameter says which. The request goes on to its end, and $upgrade runs on the connection
+     * once it ended, as long as it likes, while the worker serves other requests.
+     *
+     * From the call on, the request has no connection: connection_aborted() is true, header()
+     * has no effect, and output throws.
      *
      * ```php
      * while (Swerve::accept(null, function () {
      *     if ('/chat' === $_SERVER['REQUEST_URI']) {
-     *         Swerve\WebSocket::from(Swerve::upgrade(), function (Swerve\WebSocket $ws) {
+     *         Swerve::upgrade(static function (Swerve\WebSocket $ws): void {
      *             foreach ($ws as $message) {
      *                 $ws->send($message);
      *             }
@@ -503,11 +506,24 @@ final class Swerve
      * }
      * ```
      *
-     * @throws \LogicException outside a request, or once output or headers have gone out
+     * @param \Closure(WebSocket|ServerSentEvents|ClientRequest): void $upgrade a static closure: it
+     *                                                                may run in another worker, with copies of what it captures
+     *
+     * @throws \TypeError     for a closure that is not static, or takes something else
+     * @throws \LogicException outside a request, a second time, or once output or headers went out
      */
-    public static function upgrade(): ClientRequest
+    public static function upgrade(\Closure $upgrade): void
     {
-        return SapiRequest::upgrade();
+        $function = new \ReflectionFunction($upgrade);
+        if (null !== $function->getClosureThis()) {
+            throw new \TypeError('Swerve::upgrade() takes a static closure: it may run in another worker');
+        }
+        $type = $function->getParameters()[0] ?? null;
+        $type = $type?->getType();
+        if (!$type instanceof \ReflectionNamedType || !\in_array($type->getName(), [WebSocket::class, ServerSentEvents::class, ClientRequest::class], true)) {
+            throw new \TypeError('Swerve::upgrade() takes a closure whose parameter is a ' . WebSocket::class . ', a ' . ServerSentEvents::class . ' or a ' . ClientRequest::class);
+        }
+        SapiRequest::upgrade($upgrade);
     }
 
     /** @return \Closure(ClientRequest): void */
@@ -536,6 +552,22 @@ final class Swerve
     }
 
     /**
+     * The request ended with its connection taken off it: what accept() returned is ready, and
+     * $upgrade gets the connection, in this coroutine.
+     */
+    private static function upgraded(ClientRequest $client, \Closure $upgrade): void
+    {
+        if ($client instanceof HttpClientRequest) {
+            $client->handedOff();
+        }
+        match ((new \ReflectionFunction($upgrade))->getParameters()[0]->getType()->getName()) {
+            WebSocket::class        => WebSocket::from($client, $upgrade),
+            ServerSentEvents::class => $upgrade(new ServerSentEvents($client)),
+            default                 => $upgrade($client),
+        };
+    }
+
+    /**
      * Serve with $code under sapi(), with the superglobals PHP gives a script: $_SERVER for
      * $script, then $_GET, $_COOKIE, $_POST, $_FILES and $_REQUEST.
      *
@@ -547,10 +579,13 @@ final class Swerve
     {
         return static function (ClientRequest $client) use ($script, $code): void {
             $_SERVER = self::serverVariables($client, $script);
-            SapiRequest::run($client, static function () use ($client, $code): void {
+            $upgrade = SapiRequest::run($client, static function () use ($client, $code): void {
                 self::requestVariables($client);
                 $code($client);
             });
+            if (null !== $upgrade) {
+                self::upgraded($client, $upgrade);
+            }
         };
     }
 
