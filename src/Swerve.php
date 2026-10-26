@@ -376,8 +376,9 @@ final class Swerve
     }
 
     /**
-     * Run $callback in every worker as it starts, before the application loads, inside the
-     * worker's event loop, so it may start coroutines that run for the worker's life. Register it
+     * Run $callback in every worker each time its lifecycle starts (each run of swerve.php),
+     * before the application loads, inside the event loop, so it may start coroutines that run
+     * until the lifecycle ends. Register it
      * the way {@see Swerve::ini()} says; calls after startup change nothing. A callback that
      * throws stops the worker, as an application that fails to load does.
      *
