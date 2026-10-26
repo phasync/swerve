@@ -129,6 +129,9 @@ final class HttpConnection
     private string $buffer = '';
     private int $offset    = 0;
 
+    /** A request was answered and the connection kept: the next one gets KEEP_ALIVE_TIMEOUT. */
+    private bool $keptAlive = false;
+
     /**
      * Before closing, stop writing and read what the client still sends. Closing with unread
      * data makes the kernel send a reset, which can destroy the response before the client
@@ -212,7 +215,7 @@ final class HttpConnection
     {
         $idle = false;
         try {
-            $first     = true;
+            $first     = !$this->keptAlive;
             $pipelined = 0;
             $keepAlive = false;
             do {
@@ -227,7 +230,8 @@ final class HttpConnection
                 // (a nested run(), which costs no coroutine): it runs in this connection's coroutine.
                 $this->current = $request;
                 $keepAlive     = (new \Scope())->run(fn (HttpClientRequest $request) => phasync::run($this->runRequest(...), $request), $request);
-                $this->current = null;
+                $this->current   = null;
+                $this->keptAlive = $keepAlive;
                 $request->recycle();
                 unset($request);
                 // With the next request already buffered (pipelined), and the response written
