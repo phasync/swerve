@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a03dad3bfa42edd88ffb3f9038cfff25",
+    "content-hash": "21d6ec482712c6f34e58d8e6a813643b",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -186,16 +186,16 @@
         },
         {
             "name": "phasync/serializor",
-            "version": "v2.1.1",
+            "version": "dev-master",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/serializor.git",
-                "reference": "9a2a068747af34fe010123387583187953cef204"
+                "reference": "dd49b30ea4cb352c1ccdcb66087d859f2ec23c3e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/serializor/zipball/9a2a068747af34fe010123387583187953cef204",
-                "reference": "9a2a068747af34fe010123387583187953cef204",
+                "url": "https://api.github.com/repos/phasync/serializor/zipball/dd49b30ea4cb352c1ccdcb66087d859f2ec23c3e",
+                "reference": "dd49b30ea4cb352c1ccdcb66087d859f2ec23c3e",
                 "shasum": ""
             },
             "require": {
@@ -210,6 +210,7 @@
                 "opis/closure": "^4.4",
                 "pestphp/pest": "^1.18"
             },
+            "default-branch": true,
             "type": "library",
             "autoload": {
                 "files": [
@@ -238,9 +239,9 @@
             ],
             "support": {
                 "issues": "https://github.com/phasync/serializor/issues",
-                "source": "https://github.com/phasync/serializor/tree/v2.1.1"
+                "source": "https://github.com/phasync/serializor/tree/master"
             },
-            "time": "2026-10-23T07:24:15+00:00"
+            "time": "2026-10-26T22:39:29+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -5976,10 +5977,18 @@
             "time": "2026-10-05T23:14:19+00:00"
         }
     ],
-    "aliases": [],
+    "aliases": [
+        {
+            "package": "phasync/serializor",
+            "version": "9999999-dev",
+            "alias": "2.1.1",
+            "alias_normalized": "2.1.1.0"
+        }
+    ],
     "minimum-stability": "stable",
     "stability-flags": {
-        "friendsofphp/php-cs-fixer": 20
+        "friendsofphp/php-cs-fixer": 20,
+        "phasync/serializor": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,

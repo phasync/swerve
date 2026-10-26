@@ -291,7 +291,7 @@ it('refuses at the call a WebSocket closure that must move and captures what can
     [, $addr] = accept_start('short-lived.php', 1);
     $handshake = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n";
     expect(accept_request(native_connect($addr), '/ws-resource', $handshake)['body'])->toStartWith('refused: Swerve::upgrade(): the closure moves');
-})->skip('needs phasync/serializor to refuse a resource (it serializes it as 0)');
+});
 
 it('runs the PHP file a request names below the static directory, index.php for a directory, and the script for the rest', function () {
     [, $addr] = accept_start('routed.php', 1);
