@@ -195,7 +195,7 @@ it('lets a request take over its connection with Swerve::upgrade()', function ()
         ->and($raw['body'])->toBe('written to the ClientRequest')
         ->and($raw['complete'])->toBeTrue();
     // The connection goes on with the next request
-    expect(accept_request($conn, '/stray')['body'])->toBe('echo refused')
+    expect(accept_request($conn, '/stray')['body'])->toBe('aborted')
         ->and(accept_request($conn, '/late')['body'])->toBe('begun, upgrade refused');
 });
 

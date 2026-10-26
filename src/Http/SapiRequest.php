@@ -28,7 +28,10 @@ final class SapiRequest
     /** The client went away: later writes are refused, as a SAPI's are. */
     private bool $gone;
 
-    /** upgrade() gave the application the connection: PHP's output and headers have no place on it. */
+    /**
+     * upgrade() took the connection off the request: to the request it is as if its client left
+     * (output dropped, connection_aborted() true), and PHP's headers are not sent.
+     */
     private bool $upgraded;
 
     private function __construct()
@@ -95,7 +98,7 @@ final class SapiRequest
     public function write(string $data): bool
     {
         if ($this->upgraded) {
-            throw new \LogicException('Output after Swerve::upgrade(): the connection is the application\'s, write to its ClientRequest');
+            return false; // as for a client that left: output is dropped, connection_aborted() is true
         }
         if (!$this->gone) {
             try {
@@ -158,6 +161,7 @@ final class SapiRequest
 
     public function connection_aborted(): bool
     {
-        return $this->client->isClosed();
+        // After upgrade() the connection is gone from the request, as if its client had left
+        return $this->upgraded || $this->client->isClosed();
     }
 }

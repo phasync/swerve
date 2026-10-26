@@ -15,12 +15,8 @@ while (Swerve::accept(null, function () {
             return;
         case '/stray':
             $client = Swerve::upgrade();
-            try {
-                echo 'stray';
-                $client->write('echo went through');
-            } catch (LogicException) {
-                $client->write('echo refused');
-            }
+            echo 'stray'; // dropped, as for a client that left
+            $client->write(connection_aborted() ? 'aborted' : 'not aborted');
             $client->end();
 
             return;

@@ -483,8 +483,8 @@ final class Swerve
     /**
      * Take over the connection of the request being served, to answer on it directly: a
      * WebSocket, a server-sent event stream, or any response written to the ClientRequest.
-     * From then on PHP's output and headers have no place on it: echo throws, and header()
-     * has no effect.
+     * To the request, it is then as if its client had left: connection_aborted() is true, and
+     * its output and header() calls go nowhere.
      *
      * ```php
      * while (Swerve::accept(null, function () {
