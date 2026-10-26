@@ -58,7 +58,7 @@ test('onShutdown() callbacks run once only, and one registered after the shutdow
 
 test('an exception in an onShutdown() callback is logged and does not stop the others', function () {
     $messages = [];
-    Swerve::setLog(new class($messages) extends Psr\Log\AbstractLogger {
+    swerve_set_log(new class($messages) extends Psr\Log\AbstractLogger {
         public function __construct(private array &$messages)
         {
         }
@@ -84,7 +84,7 @@ test('an exception in an onShutdown() callback is logged and does not stop the o
         return $log;
     });
     shutdown_reset();
-    Swerve::setLog(new Psr\Log\NullLogger());
+    swerve_set_log(null);
 
     expect($got)->toBe(['two', 'four']);
     expect(implode("\n", $messages))->toContain('callback one failed')->toContain('callback three failed');
@@ -209,3 +209,11 @@ test('the callbacks of requests that ended never run, and what they held is free
     }
     expect(file_get_contents($log))->not->toContain('a request that ended ran');
 });
+
+/** Swerve::log()'s logger, for a test to read what is logged; null: the default again. */
+function swerve_set_log(?Psr\Log\LoggerInterface $log): void
+{
+    Closure::bind(static function () use ($log) {
+        Swerve::$log = $log;
+    }, null, Swerve::class)();
+}

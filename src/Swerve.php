@@ -4,13 +4,14 @@ namespace Swerve;
 
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
+use Psr\Log\LogLevel;
 use Serializor\Codec;
 use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\Http\SapiRequest;
 use Swerve\Lot\LotClient;
 use Swerve\Psr\Psr7;
+use Swerve\Util\Logger;
 use Swerve\Util\Shutdown;
 use Swerve\Util\Topics;
 
@@ -52,51 +53,20 @@ final class Swerve
     private static array $staticFiles = [];
 
     /**
-     * The log of this process: swerve's own PSR-3 logger, in its format (the time, this worker's slot).
+     * The log of this process: swerve's own PSR-3 logger, in its format (the time, the process).
      *
-     * It writes wherever swerve logs (the terminal, or `--log`'s file), and is a `NullLogger` with
-     * `-q`. Without swerve's command line (swerve embedded), it is a `NullLogger` until
-     * {@see Swerve::setLog()} is called. Give it to the libraries that take a PSR-3 logger, or
-     * log directly:
+     * It writes to standard error, which in swerve's processes is the terminal or `--log`'s file.
+     * Give it to the libraries that take a PSR-3 logger, or log directly:
      *
      * ```php
      * Swerve::log()->warning('disk almost full: {free} MB', ['free' => $free]);
      * ```
      *
-     * @return LoggerInterface the log of this process
-     *
-     * @see Swerve::setLog  replaces it
-     *
      * @topic production
-     *
-     * @example examples/Swerve.log/1-default.php The logger before swerve sets one
      */
     public static function log(): LoggerInterface
     {
-        return self::$log ??= new NullLogger();
-    }
-
-    /**
-     * Replace the logger that {@see Swerve::log()} returns.
-     *
-     * `bin/swerve` calls it when a worker starts. An application that embeds swerve without its
-     * command line can call it to have `log()` return its own logger.
-     *
-     * ```php
-     * Swerve::setLog(new Monolog\Logger('app'));
-     * ```
-     *
-     * @param LoggerInterface $log returned by every later call of `Swerve::log()`
-     *
-     * @see Swerve::log
-     *
-     * @topic production
-     *
-     * @example examples/Swerve.setLog/1-own-logger.php Log through a PSR-3 logger of your own
-     */
-    public static function setLog(LoggerInterface $log): void
-    {
-        self::$log = $log;
+        return self::$log ??= new Logger(\STDERR, (string) \getmypid(), LogLevel::NOTICE);
     }
 
     /**

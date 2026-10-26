@@ -13,7 +13,6 @@ phasync\ext\run_next(__FILE__);
 
 (static function (): void {
     require \getenv('SWERVE_AUTOLOAD');
-    Swerve\Swerve::setLog(new Swerve\Util\Logger(\STDERR, (string) \getmypid(), Psr\Log\LogLevel::NOTICE));
     // The lifecycle ends once swerve.php and every coroutine it started have ended
     phasync::run(static function (): void {
         require \getenv('SWERVE_APP');

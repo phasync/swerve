@@ -7,6 +7,5 @@
 
 (static function (): void {
     require \getenv('SWERVE_AUTOLOAD');
-    Swerve\Swerve::setLog(new Swerve\Util\Logger(\STDERR, \getmypid() . ' websockets', Psr\Log\LogLevel::NOTICE));
     phasync::run(Swerve\Lot\WebSocketWorker::serve(...));
 })();
