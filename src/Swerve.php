@@ -193,9 +193,10 @@ final class Swerve
     }
 
     /**
-     * The cache every worker shares, held by the master process.
+     * The cache every worker shares, held in APCu, the shared memory every worker inherits from
+     * the master they are forked from.
      *
-     * A PSR-16 cache: see {@see Swerve\Cache} for how it is layered and what it keeps.
+     * A PSR-16 cache: see {@see Swerve\Cache} for what it keeps and how it evicts.
      *
      * ```php
      * $cache = Swerve::cache();
@@ -204,6 +205,8 @@ final class Swerve
      * ```
      *
      * @return \Psr\SimpleCache\CacheInterface the same cache on every call
+     *
+     * @throws \LogicException without APCu enabled for the CLI (swerve's master arranges this itself)
      *
      * @see Swerve\Cache
      *

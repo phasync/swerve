@@ -1,13 +1,13 @@
 <?php
 
 /*
- * Swerve::cache(): one PSR-16 cache for every worker, held by the master.
+ * Swerve::cache(): one PSR-16 cache for every worker, held in APCu, the shared memory every
+ * worker inherits from the master it is forked from.
  */
 
 use Swerve\Cache;
 
 test('what one worker stores, every worker reads; a delete is seen by all', function () {
-    test()->markTestSkipped('0.2: cross-worker cache is not ported yet');
     [$process, $addr, $log] = swerve_start(workers: 2);
     try {
         [$writer, $stored] = cache_call($addr, '/cache-set?k=greeting&v=' . urlencode('{"text":"hello"}'));
@@ -30,8 +30,7 @@ test('what one worker stores, every worker reads; a delete is seen by all', func
     expect(log_count($log, '/(ERROR|CRITICAL)/'))->toBe(0, file_get_contents($log));
 });
 
-test('a worker never keeps a value older than the last write: kept values and kept misses are forgotten', function () {
-    test()->markTestSkipped('0.2: cross-worker cache is not ported yet');
+test('every worker sees a write or a delete at once: there is no per-worker copy to go stale', function () {
     [$process, $addr, $log] = swerve_start(workers: 2);
     try {
         $readAll = static function (string $key) use ($addr): array {
@@ -40,11 +39,11 @@ test('a worker never keeps a value older than the last write: kept values and ke
                 [$pid, $value] = cache_call($addr, "/cache-get?k=$key");
                 $seen[$pid][]  = $value;
             }
-            expect(count($seen))->toBe(2); // both workers answered, each from its local layer after the first
+            expect(count($seen))->toBe(2); // both workers answered
 
             return array_values(array_unique(array_merge(...array_values($seen)), SORT_REGULAR));
         };
-        expect($readAll('fresh'))->toBe(['missing']);  // a miss, kept by both workers
+        expect($readAll('fresh'))->toBe(['missing']);  // not found by either worker
         cache_call($addr, '/cache-set?k=fresh&v=1');
         expect($readAll('fresh'))->toBe([1]);
         cache_call($addr, '/cache-set?k=fresh&v=2');
@@ -62,7 +61,7 @@ test('an entry with a TTL expires', function () {
     try {
         cache_call($addr, '/cache-set?k=brief&v=1&ttl=1');
         expect(cache_call($addr, '/cache-get?k=brief')[1])->toBe(1);
-        usleep(1_100_000);
+        usleep(2_100_000); // APCu's ttl is whole seconds on the wall clock: a 1 s ttl needs up to 2 s to be sure
         expect(cache_call($addr, '/cache-get?k=brief')[1])->toBe('missing');
     } finally {
         native_stop($process);
@@ -78,8 +77,8 @@ test('many lookups at once from coroutines of one request each get their own ans
     }
 });
 
-test('the cache lives in the master: a reload, which restarts swerve, starts it empty', function () {
-    test()->markTestSkipped('0.2: cross-worker cache and SIGHUP reload are not ported yet');
+test('a reload, which restarts swerve, starts the cache empty', function () {
+    test()->markTestSkipped('0.2: SIGHUP reload is not ported yet');
     [$process, $addr, $log] = swerve_start(workers: 1);
     try {
         [$old] = cache_call($addr, '/cache-set?k=kept&v=42');
@@ -92,13 +91,13 @@ test('the cache lives in the master: a reload, which restarts swerve, starts it 
     }
 });
 
-test('without a master the cache is the process\'s own, with PSR-16 key checks', function () {
+test('the cache works directly in this process too, with PSR-16 key checks', function () {
     $cache = Cache::instance();
     expect($cache->set('local', ['a' => 1]))->toBeTrue();
     expect([$cache->get('local'), $cache->has('local'), $cache->get('none', 'default')])->toBe([['a' => 1], true, 'default']);
     expect($cache->setMultiple(['x' => 1, 'y' => 2], new DateInterval('PT1M')))->toBeTrue();
     expect($cache->getMultiple(['x', 'y', 'z']))->toBe(['x' => 1, 'y' => 2, 'z' => null]);
-    expect($cache->set('x', 3, 0))->toBeTrue(); // a TTL of 0 or less deletes
+    expect($cache->set('x', 3, 0))->toBeTrue(); // a TTL of 0 or less deletes; 'x' was there
     expect($cache->has('x'))->toBeFalse();
     expect($cache->clear())->toBeTrue();
     expect($cache->has('y'))->toBeFalse();
@@ -106,4 +105,4 @@ test('without a master the cache is the process\'s own, with PSR-16 key checks',
         expect(fn () => $cache->get($bad))->toThrow(Swerve\CacheKeyException::class);
     }
     expect(new Swerve\CacheKeyException())->toBeInstanceOf(Psr\SimpleCache\InvalidArgumentException::class);
-});
+})->skip(!\extension_loaded('apcu') || !\apcu_enabled(), 'needs apc.enable_cli=1 in this process: run php with -d apc.enable_cli=1, as swerve\'s own master does for its workers');

@@ -2,14 +2,13 @@
 
 namespace Swerve;
 
-use phasync;
-use phasync\Util\LruCache;
 use Psr\SimpleCache\CacheInterface;
-use Swerve\Util\Topics;
 
 /**
- * The cache every worker shares, from Swerve::cache(): a PSR-16 cache held by the master
- * process, the least recently used entries evicted past --cache-size.
+ * The cache every worker shares, from Swerve::cache(): a PSR-16 cache held in APCu, the shared
+ * memory segment swerve's workers inherit from the master they are forked from (see bin/swerve.php,
+ * which restarts itself with `apc.enable_cli=1`). A get, set or delete is one APCu call: no trip
+ * to another process.
  *
  * ```php
  * $cache = Swerve::cache();
@@ -17,23 +16,19 @@ use Swerve\Util\Topics;
  * $cache->set("user.$id", $user, 60);
  * ```
  *
- * Two layers. Each worker keeps what it read (and what it found missing) in a local layer of
- * LOCAL_BYTES, so a repeated read costs no trip to the master. Writes go to the master, which
- * then tells every worker, the writer included, to forget those keys; it sends no values, a
- * worker fetches a value when it next reads it. The master's messages to a worker arrive in the
- * order it sent them, and a worker stores what it fetched as it reads the reply, so a worker
- * never keeps a value older than the last write it was told of. A trip to the master costs
- * about 0.1 ms, during which only the calling coroutine waits.
+ * Values are PHP values: APCu serializes them (an object included) on its own. An entry's
+ * contents last as long as the master: a rolling reload keeps them, a restart empties them.
+ * APCu's eviction is not LRU: once its shared memory is full it expunges to make room, and what
+ * it expunges is not chosen by age of use. Its size is `-d apc.shm_size=...` (bin/swerve.php
+ * sets it; a bigger cache needs a bigger one).
  *
- * Values are serialized in the worker; the master keeps the strings and never unserializes
- * them, so application classes never load there. An entry with a TTL expires at the same
- * moment in every layer (the monotonic clock is the machine's). The contents last as long as
- * the master: a rolling reload keeps them, a restart empties them. Without a master (the
- * application served by something other than swerve's workers), the cache is the process's own.
+ * Every key lives under a `swerve:` prefix, so {@see Cache::clear()} empties swerve's entries,
+ * not another application's sharing the same APCu segment.
  *
- * It needs the master: in a coroutine that `swerve.php` starts, a call that has to ask it waits
- * for the worker to serve, and directly in `swerve.php` it throws a `LogicException`. A key is a non-empty string without
- * `{}()/\@:`, else a {@see CacheKeyException} is thrown.
+ * It needs APCu, enabled for the CLI: without it, {@see Swerve::cache()} and {@see Cache::instance()}
+ * throw a `LogicException` -- swerve's master arranges this itself, so this is only seen when the
+ * cache is used outside a swerve worker. A key is a non-empty string without `{}()/\@:`, else a
+ * {@see CacheKeyException} is thrown.
  *
  * It implements every version of PSR-16 (psr/simple-cache 1, 2 and 3; the application's Composer
  * picks one): parameters are untyped, as 1.0 declares them, and checked here instead -- a key
@@ -41,7 +36,6 @@ use Swerve\Util\Topics;
  * TypeError.
  *
  * @see Swerve::cache
- * @see Swerve::claim
  * @see Swerve\CacheKeyException
  *
  * @topic resource-management
@@ -50,55 +44,32 @@ use Swerve\Util\Topics;
  */
 final class Cache implements CacheInterface
 {
-    /**
-     * The internal topic of the requests and replies between a worker and the master.
-     *
-     * @internal
-     */
-    public const TOPIC = "\0cache";
-
-    /**
-     * The internal topic on which the master tells the workers which keys to forget.
-     *
-     * @internal
-     */
-    public const FORGET = "\0cache-forget";
-
-    /** Bytes of a worker's local layer. */
-    public const LOCAL_BYTES = 8 << 20;
+    /** Every key lives under this prefix in APCu, so clear() touches only swerve's entries. */
+    private const PREFIX = 'swerve:';
 
     private static ?self $instance = null;
 
-    /** Set once the worker reads its pipe: before that no reply could arrive. */
-    public static bool $listening = false;
-
-    /** The coroutine that requires swerve.php, while it does: it can't wait for the worker to serve. */
-    public static ?\Fiber $loader = null;
-
-    private int $next = 0;
-
-    /** @var array<int, \stdClass> callers waiting for a reply, by request id */
-    private array $waiting = [];
-
-    /**
-     * In a worker, the local layer; without a master, the whole cache. Entries are the master's
-     * strings (see apply()), and '' for a key known to be missing.
-     */
-    private LruCache $layer;
-
     private function __construct()
     {
-        $this->layer = new LruCache(maxBytes: null === Topics::$toMaster ? 64 << 20 : self::LOCAL_BYTES);
     }
 
     /**
      * The cache of this process: the one {@see Swerve::cache()} returns.
      *
+     * @throws \LogicException without APCu enabled for the CLI
+     *
      * @see Swerve::cache
      */
     public static function instance(): self
     {
-        return self::$instance ??= new self();
+        if (null === self::$instance) {
+            if (!\extension_loaded('apcu') || !\apcu_enabled()) {
+                throw new \LogicException("Swerve::cache() needs APCu (pecl install apcu); swerve's master enables it for the CLI");
+            }
+            self::$instance = new self();
+        }
+
+        return self::$instance;
     }
 
     /**
@@ -115,7 +86,9 @@ final class Cache implements CacheInterface
      */
     public function get($key, mixed $default = null): mixed
     {
-        return $this->getMultiple([$key], $default)[$key];
+        $value = \apcu_fetch(self::prefixed($key), $found);
+
+        return $found ? $value : $default;
     }
 
     /**
@@ -135,9 +108,11 @@ final class Cache implements CacheInterface
      */
     public function getMultiple($keys, mixed $default = null): array
     {
+        $keys  = self::keys($keys);
+        $found = $keys ? \apcu_fetch(\array_map(self::prefix(...), $keys)) : [];
         $values = [];
-        foreach ($this->fetch(self::keys($keys)) as $key => $entry) {
-            $values[$key] = '' === $entry ? $default : \unserialize(\substr($entry, 8));
+        foreach ($keys as $key) {
+            $values[$key] = \array_key_exists(self::PREFIX . $key, $found) ? $found[self::PREFIX . $key] : $default;
         }
 
         return $values;
@@ -153,14 +128,11 @@ final class Cache implements CacheInterface
      */
     public function has($key): bool
     {
-        return '' !== $this->fetch(self::keys([$key]))[$key];
+        return \apcu_exists(self::prefixed($key));
     }
 
     /**
-     * Store `$value` under `$key` for every worker, for `$ttl` seconds or until evicted.
-     *
-     * The value is serialized in the calling worker. Once this returns, every worker has been told to
-     * forget the key and fetches the new value when it next reads it.
+     * Store `$value` under `$key` for every worker, for `$ttl` seconds or until APCu evicts it.
      *
      * ```php
      * Swerve::cache()->set("user.$id", $user, 60);
@@ -169,10 +141,9 @@ final class Cache implements CacheInterface
      * @param string                 $key
      * @param int|\DateInterval|null $ttl seconds, an interval, or null for no expiry; zero or less deletes the key
      *
-     * @return bool false when the value is larger than the cache holds
+     * @return bool what APCu reports
      *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      *
      * @see Cache::get
      * @see Cache::delete
@@ -188,10 +159,9 @@ final class Cache implements CacheInterface
      * @param iterable<string, mixed> $values
      * @param int|\DateInterval|null  $ttl    seconds, an interval, or null for no expiry; zero or less deletes the keys
      *
-     * @return bool false when a value is larger than the cache holds
+     * @return bool what APCu reports
      *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      *
      * @example examples/Cache.setMultiple/1-several-at-once.php Several values with one ttl
      */
@@ -205,7 +175,7 @@ final class Cache implements CacheInterface
         }
         $items = [];
         foreach ($values as $key => $value) {
-            $items[self::keys([(string) $key])[0]] = \serialize($value);
+            $items[self::keys([(string) $key])[0]] = $value;
         }
         if ($ttl instanceof \DateInterval) {
             $ttl = (new \DateTimeImmutable('@0'))->add($ttl)->getTimestamp();
@@ -213,24 +183,27 @@ final class Cache implements CacheInterface
         if (null !== $ttl && $ttl <= 0) {
             return $this->deleteMultiple(\array_keys($items)); // expired at once, as PSR-16 says
         }
+        $prefixed = [];
+        foreach ($items as $key => $value) {
+            $prefixed[self::PREFIX . $key] = $value;
+        }
 
-        return $this->call(['set', $items, $ttl]);
+        return [] === \apcu_store($prefixed, null, $ttl ?? 0);
     }
 
     /**
      * Remove `$key` from the cache of every worker.
      *
-     * @return bool true, also when there was nothing to remove
+     * @return bool what APCu reports: false also when there was nothing to remove
      *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      * @param string $key
      *
      * @example examples/Cache.delete/1-forget.php Delete one key, or several
      */
     public function delete($key): bool
     {
-        return $this->deleteMultiple([$key]);
+        return \apcu_delete(self::prefixed($key));
     }
 
     /**
@@ -238,224 +211,35 @@ final class Cache implements CacheInterface
      *
      * @param iterable<string> $keys
      *
+     * @return bool true only when every key was removed
+     *
      * @throws CacheKeyException for an invalid key
-     * @throws \LogicException   directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      */
     public function deleteMultiple($keys): bool
     {
-        return $this->call(['delete', self::keys($keys)]);
+        return [] === \apcu_delete(\array_map(self::prefix(...), self::keys($keys)));
     }
 
     /**
      * Remove everything from the cache of every worker.
      *
-     * @throws \LogicException directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
-     *
      * @example examples/Cache.clear/1-empty.php Empty the cache
      */
     public function clear(): bool
     {
-        return $this->call(['clear']);
+        return \apcu_delete(new \APCUIterator('/^' . \preg_quote(self::PREFIX, '/') . '/'));
     }
 
-    /**
-     * In the master: carry out a worker's request on $store and return the reply's message.
-     * A write first has $forget tell every worker which keys to forget (all of them: null), so
-     * that the writer, too, hears of it before its reply.
-     *
-     * @param \Closure(?list<string> $keys): void $forget
-     *
-     * @internal
-     */
-    public static function serve(LruCache $store, string $message, \Closure $forget): string
+    /** `$key`, prefixed and validated. */
+    private static function prefixed(mixed $key): string
     {
-        $call = \unserialize(\substr($message, 4), ['allowed_classes' => false]);
-        if ('set' === $call[0] || 'delete' === $call[0]) {
-            $forget(\array_map('strval', 'set' === $call[0] ? \array_keys($call[1]) : $call[1]));
-        } elseif ('clear' === $call[0]) {
-            $forget(null);
-        }
-
-        return \substr($message, 0, 4) . \serialize(self::apply($store, $call));
+        return self::PREFIX . self::keys([$key])[0];
     }
 
-    /**
-     * In a worker: forget keys, as the master says after a write; null forgets everything.
-     *
-     * @internal
-     */
-    public static function forget(string $message): void
+    /** `$key`, prefixed. */
+    private static function prefix(string $key): string
     {
-        if (null === self::$instance) {
-            return; // nothing read yet, nothing to forget
-        }
-        $keys = \unserialize($message, ['allowed_classes' => false]);
-        if (null === $keys) {
-            self::$instance->layer->clear();
-
-            return;
-        }
-        foreach ($keys as $key) {
-            self::$instance->layer->delete($key);
-        }
-    }
-
-    /**
-     * In a worker: a reply from the master. What it fetched is stored in the local layer now,
-     * in the order of the master's messages, then the caller waiting for it wakes.
-     *
-     * @internal
-     */
-    public static function reply(string $message): void
-    {
-        $self   = self::$instance;
-        $id     = \unpack('N', $message)[1];
-        $waiter = $self->waiting[$id];
-        unset($self->waiting[$id]);
-        $waiter->result = \unserialize(\substr($message, 4), ['allowed_classes' => false]);
-        foreach ($waiter->fetching ?? [] as $key) {
-            $entry = $waiter->result[$key] ?? '';
-            $ttl   = '' === $entry ? null : self::remaining($entry);
-            if (null === $ttl || $ttl > 0) {
-                $self->layer->set($key, $entry, $ttl);
-            }
-        }
-        phasync::raiseFlag($waiter);
-    }
-
-    /**
-     * The entries for $keys: from this process's layer, and what it lacks from the master.
-     *
-     * @param list<string> $keys
-     *
-     * @return array<string, string> '' for a missing key
-     */
-    private function fetch(array $keys): array
-    {
-        $entries = [];
-        $lacking = [];
-        foreach ($keys as $key) {
-            $entry = $this->layer->get($key);
-            if (null === $entry) {
-                $lacking[] = $key;
-            } else {
-                $entries[$key] = $entry;
-            }
-        }
-        if ($lacking && null !== Topics::$toMaster) {
-            $found = $this->call(['get', $lacking], $lacking);
-            foreach ($lacking as $key) {
-                $entries[$key] = $found[$key] ?? '';
-            }
-        }
-
-        $ordered = [];
-        foreach ($keys as $key) {
-            $ordered[$key] = $entries[$key] ?? '';
-        }
-
-        return $ordered;
-    }
-
-    /**
-     * Wait until the worker reads its pipe, which it does from the first turn of its event loop
-     * after swerve.php returned.
-     *
-     * @internal
-     *
-     * @throws \LogicException directly in swerve.php: the worker serves after it returns, so waiting would never end
-     */
-    public static function awaitListening(string $caller): void
-    {
-        if (phasync::getFiber() === self::$loader) {
-            throw new \LogicException("$caller cannot be used directly in swerve.php, which the worker serves after: use it in a coroutine (phasync::go()), or in a request");
-        }
-        while (!self::$listening) {
-            phasync::awaitFlag(self::instance()); // raised by markListening()
-        }
-    }
-
-    /**
-     * The worker reads its pipe from now on: wakes what waits in awaitListening().
-     *
-     * @internal
-     */
-    public static function markListening(): void
-    {
-        self::$listening = true;
-        phasync::raiseFlag(self::instance());
-    }
-
-    /**
-     * Carry out a request: on this process's layer without a master, else by the master.
-     *
-     * @param list<string>|null $fetching keys a get fetches, for the local layer
-     */
-    private function call(array $call, ?array $fetching = null): mixed
-    {
-        if (null === Topics::$toMaster) {
-            return self::apply($this->layer, $call);
-        }
-        if (!self::$listening) {
-            self::awaitListening('Swerve::cache()');
-        }
-        $id                 = ++$this->next;
-        $waiter             = new \stdClass();
-        $waiter->fetching   = $fetching;
-        $this->waiting[$id] = $waiter;
-        (Topics::$toMaster)(self::TOPIC, \pack('N', $id) . \serialize($call));
-        while (!\property_exists($waiter, 'result')) {
-            phasync::awaitFlag($waiter);
-        }
-
-        return $waiter->result;
-    }
-
-    /**
-     * A request on $store. Entries are the value serialized, after 8 bytes of its expiry on the
-     * monotonic clock in nanoseconds (0: none).
-     */
-    private static function apply(LruCache $store, array $call): mixed
-    {
-        switch ($call[0]) {
-            case 'get':
-                $found = [];
-                foreach ($call[1] as $key) {
-                    $entry = $store->get((string) $key);
-                    if (null !== $entry && '' !== $entry) {
-                        $found[$key] = $entry;
-                    }
-                }
-
-                return $found;
-            case 'set':
-                $expires = null === $call[2] ? 0 : \hrtime(true) + $call[2] * 1_000_000_000;
-                $stored  = true;
-                foreach ($call[1] as $key => $value) {
-                    $stored = $store->set((string) $key, \pack('q', $expires) . $value, $call[2]) && $stored;
-                }
-
-                return $stored;
-            case 'delete':
-                foreach ($call[1] as $key) {
-                    $store->delete((string) $key);
-                }
-
-                return true;
-            case 'clear':
-                $store->clear();
-
-                return true;
-        }
-        throw new \UnexpectedValueException("Unknown cache request '$call[0]'");
-    }
-
-    /** Seconds until an entry expires; null for never. */
-    private static function remaining(string $entry): ?float
-    {
-        $expires = \unpack('q', $entry)[1];
-
-        return 0 === $expires ? null : ($expires - \hrtime(true)) / 1e9;
+        return self::PREFIX . $key;
     }
 
     /**

@@ -77,6 +77,7 @@ require $autoload;
             'opcache.protect_memory'                => '0',
             'opcache.preload'                       => '',
             'apc.enable_cli'                        => '1',
+            'apc.shm_size'                           => '128M',
         ];
         $php = \extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache'];
         foreach ($ini as $name => $value) {

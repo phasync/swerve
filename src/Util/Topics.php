@@ -11,7 +11,6 @@ use phasync\TimeoutException;
 use phasync\Util\LruCache;
 use phasync\WriteChannelInterface;
 use Psr\Log\LoggerInterface;
-use Swerve\Cache;
 
 /**
  * The topics subscribed to in this process, behind Swerve::publish() and Swerve::subscribe().
@@ -53,6 +52,8 @@ final class Topics
     public static bool $draining = false;
     /** The process must now close its connections: subscriptions have ended, see drain(). */
     public static bool $closed = false;
+    /** Set once the worker reads its pipe: before that no reply from the master could arrive. */
+    public static bool $listening = false;
 
     /** @var array<string, SubscribersInterface> */
     private static array $subscribers = [];
@@ -79,6 +80,8 @@ final class Topics
     private static array $dropped = [];
     /** @var array<string, \SplQueue<string>> messages published while a topic's bitmap is unknown, in order; sendPending() fetches it and flushes them, not the publisher */
     private static array $pending = [];
+    /** The anchor awaitListening()'s wait is raised on, by markListening(). */
+    private static ?\stdClass $listenFlag = null;
 
     /**
      * In a worker: its inbox, and the others' to write to. Needs Topics::$toMaster.
@@ -91,6 +94,34 @@ final class Topics
         self::$peers   = $peers;
         self::$logger  = $logger;
         self::$bitmaps = new LruCache(maxBytes: self::BITMAP_BYTES);
+    }
+
+    /**
+     * Wait until the worker reads its pipe, which it does from the first turn of its event loop
+     * after swerve.php returned.
+     *
+     * @throws \LogicException directly in swerve.php: the worker serves after it returns, so waiting would never end
+     */
+    public static function awaitListening(string $caller): void
+    {
+        if (null === phasync::getFiber()) {
+            throw new \LogicException("$caller cannot be used directly in swerve.php, which the worker serves after: use it in a coroutine (phasync::go()), or in a request");
+        }
+        self::$listenFlag ??= new \stdClass();
+        while (!self::$listening) {
+            phasync::awaitFlag(self::$listenFlag); // raised by markListening()
+        }
+    }
+
+    /**
+     * The worker reads its pipe from now on: wakes what waits in awaitListening().
+     */
+    public static function markListening(): void
+    {
+        self::$listening = true;
+        if (null !== self::$listenFlag) {
+            phasync::raiseFlag(self::$listenFlag);
+        }
     }
 
     /**
@@ -158,8 +189,8 @@ final class Topics
 
             return;
         }
-        if (!Cache::$listening) {
-            Cache::awaitListening("$caller()"); // throws directly in swerve.php; else waits until the worker serves, as before
+        if (!self::$listening) {
+            self::awaitListening("$caller()"); // throws directly in swerve.php; else waits until the worker serves, as before
         }
         if (isset(self::$pending[$topic])) {
             self::$pending[$topic]->enqueue($message); // sendPending() is already fetching this topic's bitmap: joins its queue, in order
@@ -209,8 +240,8 @@ final class Topics
      */
     public static function bitmap(string $caller, string $topic): string
     {
-        if (!Cache::$listening) {
-            Cache::awaitListening("$caller()");
+        if (!self::$listening) {
+            self::awaitListening("$caller()");
         }
 
         return self::$bitmaps->get($topic) ?? self::fetch($topic);
@@ -360,7 +391,7 @@ final class Topics
     {
         $id     = 0;
         $waiter = null;
-        if ('-' !== $op && Cache::$listening) {
+        if ('-' !== $op && self::$listening) {
             $id            = ++self::$next;
             $waiter        = self::$waiting[$id] = new \stdClass();
             $waiter->topic = $topic;

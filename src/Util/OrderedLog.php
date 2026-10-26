@@ -5,7 +5,6 @@ namespace Swerve\Util;
 use phasync;
 use phasync\SubscriberInterface;
 use phasync\TimeoutException;
-use Swerve\Cache;
 use Swerve\Subscription;
 
 /**
@@ -133,8 +132,8 @@ final class OrderedLog
         if ('' === $topic || \strlen($topic) > Topics::MAX_TOPIC) {
             throw new \InvalidArgumentException('A topic is 1 to ' . Topics::MAX_TOPIC . ' bytes, not ' . \strlen($topic));
         }
-        if (null !== Topics::$toMaster && !Cache::$listening) {
-            Cache::awaitListening('OrderedChannel::subscribe()');
+        if (null !== Topics::$toMaster && !Topics::$listening) {
+            Topics::awaitListening('OrderedChannel::subscribe()');
         }
         $id           = \hash('sha256', $topic);
         $subscription = new Subscription(self::MESSAGES . $id, $maxLag, $heartbeat);
