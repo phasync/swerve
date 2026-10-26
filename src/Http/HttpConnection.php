@@ -117,7 +117,7 @@ final class HttpConnection
      * deadline) or a fatal error: the suspended coroutines are destroyed, which runs their
      * finally blocks, and the event loop can no longer take a raised flag or a suspension;
      * trying turns the exit into a PHP fatal error (exit 255). Set by a shutdown function
-     * (HttpServer::listen()), which PHP calls before it destroys them.
+     * (Swerve::accept()'s), which PHP calls before it destroys them.
      */
     public static bool $exiting = false;
 
@@ -287,7 +287,7 @@ final class HttpConnection
     }
 
     /**
-     * Stop keeping the connection alive, see HttpServer::drain(). A request in flight is
+     * Stop keeping the connection alive, for a draining worker. A request in flight is
      * answered with `Connection: close`. An idle kept-alive connection is closed now: a client
      * must expect that of a kept-alive connection, and retries. A new connection that sent
      * nothing yet gets DRAIN_NEW_WAIT to send its request first, since its client has no
