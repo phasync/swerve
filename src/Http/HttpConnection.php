@@ -220,12 +220,9 @@ final class HttpConnection
                 $first = false;
                 // Each request is a Scope of its own, its identity: state kept per request hangs on a
                 // WeakMap keyed by Scope::getCurrent(), and phasync::onScopeChange() hooks swap process
-                // state (a locale) as the event loop moves between requests. Its lifetime is the frame
-                // of a nested phasync::run(), which the coroutines it starts join and which waits for
-                // them. It runs in this connection's coroutine: a coroutine per request cost about half
-                // of a hello-world request. The response is finished inside it, so phasync::finally()
-                // in the handler runs once all of it is sent.
-                $keepAlive = (new \Scope())->run(phasync::run(...), $this->runRequest(...), $request);
+                // state (a locale) as the event loop moves between requests. It runs in this
+                // connection's coroutine, with no coroutine or event loop of its own.
+                $keepAlive = (new \Scope())->run($this->runRequest(...), $request);
                 unset($request);
                 // With the next request already buffered (pipelined), and the response written
                 // without waiting, nothing would suspend this coroutine: a client sending many
