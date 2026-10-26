@@ -117,3 +117,13 @@ it('replaces a worker that was killed', function () {
     expect($body)->toMatch('/^Hello from \d+\n$/')
         ->and((int) substr($body, strlen('Hello from ')))->not->toBe($pid);
 });
+
+it('gives a closure handler the request body through php://input and $_POST', function () {
+    [, $addr] = accept_start('body.php', 1);
+    $conn     = native_connect($addr);
+    $big      = str_repeat('x', 200000);
+    fwrite($conn, "POST / HTTP/1.1\r\nHost: test\r\nContent-Length: " . strlen($big) . "\r\n\r\n$big");
+    expect(native_read_response($conn)['body'])->toBe("200000 []\n");
+    fwrite($conn, "POST / HTTP/1.1\r\nHost: test\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\na=1&b=2");
+    expect(native_read_response($conn)['body'])->toBe("7 {\"a\":\"1\",\"b\":\"2\"}\n");
+});
