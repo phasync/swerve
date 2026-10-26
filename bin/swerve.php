@@ -7,7 +7,7 @@
  * swerve.php, again and again (run_next()). A worker that exits is replaced. The WebSockets
  * of short-lived lifecycles (WordPress's) move to one more process, the WebSocket worker.
  *
- *     swerve [--http=127.0.0.1:8080] [--workers=N] [--log=FILE] [swerve.php]
+ *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php]
  */
 
 use phasync\ext;
@@ -104,18 +104,34 @@ require $autoload;
     $out    = null === $log ? \STDERR : \fopen($log, 'a');
     $logger = new Logger($out, 'master', LogLevel::NOTICE);
 
-    $listener = @\stream_socket_server("tcp://$http", $errno, $error);
+    $address = "tcp://$http";
+    $socket  = null; // a unix: address's file, removed as swerve stops
+    if (\str_starts_with($http, 'unix:') || \str_starts_with($http, '/')) {
+        $path    = \preg_replace('#^unix:(?://)?#', '', $http);
+        $address = "unix://$path";
+        // A socket file nobody listens on is a stale one of ours; anything else is not ours to remove
+        if ('socket' === @\filetype($path) && false === @\stream_socket_client($address)) {
+            \unlink($path);
+        }
+    }
+    $listener = @\stream_socket_server($address, $errno, $error);
+    if (false !== $listener && isset($path)) {
+        $socket = $path;
+    }
     if (false === $listener) {
-        $logger->critical('Cannot listen on {address}: {error}', ['address' => $http, 'error' => $error]);
+        $logger->critical('Cannot listen on {address}: {error}', ['address' => $http, 'error' => $error ?: \error_get_last()['message'] ?? '']);
         exit(1);
     }
 
     $inc = \dirname(__DIR__) . '/inc';
 
     $pids = [];
-    $stop = static function (int $status = 0) use (&$pids): never {
+    $stop = static function (int $status = 0) use (&$pids, $socket): never {
         foreach ($pids as $pid) {
             \posix_kill($pid, \SIGTERM);
+        }
+        if (null !== $socket) {
+            @\unlink($socket);
         }
         exit($status);
     };
