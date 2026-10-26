@@ -203,7 +203,9 @@ final class Cache implements CacheInterface
      */
     public function delete($key): bool
     {
-        return \apcu_delete(self::prefixed($key));
+        $key = self::prefixed($key);
+
+        return \apcu_delete($key) || !\apcu_exists($key); // a key that isn't there is removed
     }
 
     /**
@@ -217,7 +219,8 @@ final class Cache implements CacheInterface
      */
     public function deleteMultiple($keys): bool
     {
-        return [] === \apcu_delete(\array_map(self::prefix(...), self::keys($keys)));
+        // apcu_delete() lists the keys it didn't find too: only one still there failed
+        return [] === \array_filter(\apcu_delete(\array_map(self::prefix(...), self::keys($keys))), \apcu_exists(...));
     }
 
     /**

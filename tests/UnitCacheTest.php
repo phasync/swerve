@@ -29,13 +29,13 @@ test('a stored value keeps its type: null, false, objects and nested arrays', fu
     $cache->clear();
 });
 
-test('delete and deleteMultiple remove keys; a key that was never there answers false', function () {
+test('delete and deleteMultiple remove keys; a key that was never there counts as removed', function () {
     $cache = Cache::instance();
     $cache->clear();
     $cache->setMultiple(['a' => 1, 'b' => 2, 'c' => 3]);
     expect($cache->delete('a'))->toBeTrue();
-    expect($cache->delete('never-set'))->toBeFalse();
-    expect($cache->deleteMultiple(['b', 'missing']))->toBeFalse();   // 'b' is still removed
+    expect($cache->delete('never-set'))->toBeTrue();
+    expect($cache->deleteMultiple(['b', 'missing']))->toBeTrue();
     expect($cache->getMultiple(['a', 'b', 'c'], 'gone'))->toBe(['a' => 'gone', 'b' => 'gone', 'c' => 3]);
     $cache->clear();
 });

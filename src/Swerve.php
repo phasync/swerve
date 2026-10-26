@@ -18,9 +18,9 @@ use Swerve\Util\Topics;
 /**
  * What swerve gives the application: its log, the cache and the messages shared by every worker, and the state of the worker.
  *
- * Every method is static. Workers share no memory: the cache and the messages go through the
- * master process. A coroutine that `swerve.php` starts waits for the worker to serve before its
- * first call goes through; directly in `swerve.php` the cache and publishing throw (see docs/bootstrap.md).
+ * Every method is static. The cache is APCu memory that every worker shares; messages go through
+ * the master process. A coroutine that `swerve.php` starts waits for the worker to serve before
+ * its first publish goes through; directly in `swerve.php` publishing throws (see docs/bootstrap.md).
  *
  * ```php
  * use Swerve\Swerve;
