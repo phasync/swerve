@@ -81,19 +81,24 @@ under `rawurlencode($key)`: it is one to one, and what it returns has none of th
 | `a/b` | `a%2Fb` |
 | `a%3Ab` | `a%253Ab` (not the same key as `a:b`) |
 
-## 5. Atomic operations with claims
+## 5. Atomic operations with flock()
 
-The cache has no compare-and-set, and workers do not share memory. A `Swerve::claim()` is a name
-that one holder at a time can have across all workers, so each write takes the claim of its key:
+The cache has no compare-and-set, and workers do not share memory. An `flock()` on a file is held
+by one process at a time, so each write locks its key's file:
 
 ```php
-if (null === ($claim = Swerve::claim("mc:$key")->acquire(5.0))) {
-    return "SERVER_ERROR key is busy\r\n";
-}
+$lock = fopen(sys_get_temp_dir() . '/memcached-' . md5($key) . '.lock', 'c');
 try {
+    for ($tries = 250; !flock($lock, LOCK_EX | LOCK_NB); --$tries) {
+        if (0 === $tries) {
+            return "SERVER_ERROR key is busy\r\n";
+        }
+        phasync::sleep(0.02);           // the worker serves other connections meanwhile
+    }
+
     return $fn();                       // read the entry, decide, write it
 } finally {
-    $claim->release();
+    fclose($lock);                      // releases the lock
 }
 ```
 
@@ -102,11 +107,11 @@ What is and is not atomic:
 - Every write command (`set`, `add`, `replace`, `append`, `prepend`, `cas`, `delete`, `incr`,
   `decr`, `touch`) is atomic against every other write to the same key, in any worker. So `cas`
   has one winner, `incr` and `append` lose no update, and `add` stores once.
-- Reads do not take the claim. A `get` sees an entry as it was before or after a concurrent
+- Reads do not take the lock. A `get` sees an entry as it was before or after a concurrent
   write, never a part of one. A multi-key `get` is not a snapshot of the keys.
 - `flush_all` is not ordered against writes in progress.
-- A write waits for the key's claim up to 5 s, polling every 20 ms while another holds it, then
-  answers `SERVER_ERROR key is busy`. A worker that dies holding a claim loses it.
+- A write waits for the key's lock up to 5 s, trying every 20 ms while another holds it, then
+  answers `SERVER_ERROR key is busy`. The kernel releases the lock of a worker that dies.
 - `cas` ids are random 63-bit numbers, new on every write (a `set` of the same value too);
   `touch` keeps the id. No coordination is needed between the workers for that.
 - `incr` and `decr` work on decimal values up to 2^63 - 1: more is `CLIENT_ERROR`. `decr`

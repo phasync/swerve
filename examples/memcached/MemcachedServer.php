@@ -11,8 +11,8 @@ use Swerve\Swerve;
  *
  * Each worker runs one of these and listens on the same port with SO_REUSEPORT: the kernel
  * gives every new connection to one of them, and a connection stays with its worker. Reads go
- * straight to the cache. Every write takes a `Swerve::claim()` on its key, which is what makes
- * cas, incr, decr, append and prepend atomic across the workers.
+ * straight to the cache. Every write holds an flock() on its key's lock file, which is what
+ * makes cas, incr, decr, append and prepend atomic across the workers.
  *
  * ```php
  * (new MemcachedServer(11211))->start();   // in swerve.php
@@ -368,19 +368,25 @@ final class MemcachedServer
     }
 
     /**
-     * Run `$fn` while holding the claim on `$key`, so that no other worker changes that key meanwhile.
+     * Run `$fn` while holding the lock on `$key`, so that no other worker changes that key
+     * meanwhile: an flock() on a file per key, tried every 20 ms for up to 5 s.
      *
      * @param \Closure(): string $fn
      */
     private function locked(string $key, \Closure $fn): string
     {
-        if (null === ($claim = Swerve::claim("mc:$key")->acquire(5.0))) {
-            return "SERVER_ERROR key is busy\r\n";
-        }
+        $lock = \fopen(\sys_get_temp_dir() . '/memcached-' . \md5($key) . '.lock', 'c');
         try {
+            for ($tries = 250; !\flock($lock, \LOCK_EX | \LOCK_NB); --$tries) {
+                if (0 === $tries) {
+                    return "SERVER_ERROR key is busy\r\n";
+                }
+                phasync::sleep(0.02);
+            }
+
             return $fn();
         } finally {
-            $claim->release();
+            \fclose($lock); // releases the lock
         }
     }
 
