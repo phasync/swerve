@@ -206,6 +206,20 @@ it('serves a WebSocket on an upgraded request', function () {
     expect(ws_read($ws))->toBe([0x1, 'echo hi']);
 });
 
+it('forks the workers from the master, so they share APCu', function () {
+    [, $addr] = accept_start('apcu.php', 2);
+    [$stored] = explode(' ', accept_request(native_connect($addr), '/set')['body']);
+    // A new connection each time, until another worker answers
+    for ($i = 0; $i < 50; ++$i) {
+        [$seen, $pid] = explode(' ', accept_request(native_connect($addr), '/')['body']);
+        if ($pid !== $stored) {
+            break;
+        }
+    }
+    expect($pid)->not->toBe($stored)
+        ->and($seen)->toBe($stored);
+})->skip(!extension_loaded('apcu'), 'needs APCu');
+
 it('gives what a handler threw to the swerve.php that awaits the request; the client gets a 500', function () {
     [, $addr] = accept_start('throws.php', 1);
     $response = accept_request(native_connect($addr), '/boom');
