@@ -13,7 +13,6 @@
 use phasync\ext;
 use Psr\Log\LogLevel;
 use Swerve\Lot\Lot;
-use Swerve\Swerve;
 use Swerve\Util\Logger;
 use Swerve\Util\System;
 
@@ -47,8 +46,8 @@ require $autoload;
     // The workers are forked from this process, so the settings PHP reads only as it starts are
     // this process's: it starts itself over with them, once. A long-running server, like Node.js:
     // php.ini's limits for shared hosting don't apply, and memory is the container's to bound.
-    // Code changes reach the workers by a restart, so nothing checks timestamps. Then what
-    // installed packages need (Swerve::ini()); an explicit -d on the command line wins over all.
+    // Code changes reach the workers by a restart, so nothing checks timestamps. An explicit -d
+    // on the command line wins.
     if (false === \getenv('SWERVE_MASTER')) {
         $ini = [
             'memory_limit'                          => '-1',
@@ -78,7 +77,6 @@ require $autoload;
             'opcache.protect_memory'                => '0',
             'opcache.preload'                       => '',
             'apc.enable_cli'                        => '1',
-            ...Swerve::registeredIni(),
         ];
         $php = \extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache'];
         foreach ($ini as $name => $value) {

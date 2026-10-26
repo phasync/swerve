@@ -48,17 +48,8 @@ final class Swerve
     /** The log of this process, see log(). */
     private static ?LoggerInterface $log = null;
 
-    /** @var array<string, string> the php.ini settings packages registered with ini() */
-    private static array $ini = [];
-
     /** @var array<string, StaticFiles> accept()'s static files, by the directory it was given */
     private static array $staticFiles = [];
-
-    /** @var list<\Closure> the onWorkerStart() callbacks */
-    private static array $workerStart = [];
-
-    /** Startup is over: later registrations change nothing */
-    private static bool $started = false;
 
     /**
      * The log of this process: swerve's own PSR-3 logger, in its format (the time, this worker's slot).
@@ -346,85 +337,6 @@ final class Swerve
     public static function awaitShutdown(?float $timeout = null): bool
     {
         return Shutdown::await($timeout);
-    }
-
-    /**
-     * php.ini settings a package needs in every swerve process. Call it from a file listed in
-     * your package's composer.json `files`: Composer loads it after swerve's own, as the master
-     * starts. swerve applies the settings with its startup restart, over its own settings; an
-     * explicit `-d` on the command line still wins.
-     *
-     * Calls after startup change nothing, so the file may run again: an application that
-     * includes Composer's autoloader in every request includes it again.
-     *
-     * ```php
-     * Swerve::ini(['memory_limit' => '512M']);
-     * ```
-     *
-     * @param array<string, string|int|float|bool> $settings
-     *
-     * @topic production
-     */
-    public static function ini(array $settings): void
-    {
-        if (self::$started) {
-            return;
-        }
-        foreach ($settings as $name => $value) {
-            self::$ini[$name] = \is_bool($value) ? ($value ? '1' : '0') : (string) $value;
-        }
-    }
-
-    /**
-     * Run $callback in every worker each time its lifecycle starts (each run of swerve.php),
-     * before the application loads, inside the event loop, so it may start coroutines that run
-     * until the lifecycle ends. Register it
-     * the way {@see Swerve::ini()} says; calls after startup change nothing. A callback that
-     * throws stops the worker, as an application that fails to load does.
-     *
-     * ```php
-     * // a file in your package's composer.json "files"
-     * Swerve::onWorkerStart(function () {
-     *     phasync::go(function () {
-     *         while (true) {
-     *             refresh_feature_flags();
-     *             phasync::sleep(60);
-     *         }
-     *     });
-     * });
-     * ```
-     *
-     * @param \Closure():void $callback
-     *
-     * @topic production
-     */
-    public static function onWorkerStart(\Closure $callback): void
-    {
-        if (self::$started) {
-            return;
-        }
-        self::$workerStart[] = $callback;
-    }
-
-    /**
-     * @internal the settings ini() registered, for swerve's startup restart
-     *
-     * @return array<string, string>
-     */
-    public static function registeredIni(): array
-    {
-        return self::$ini;
-    }
-
-    /**
-     * @internal end startup in this worker, and run the onWorkerStart() callbacks
-     */
-    public static function startWorker(): void
-    {
-        self::$started = true;
-        foreach (self::$workerStart as $callback) {
-            $callback();
-        }
     }
 
     /**

@@ -253,28 +253,6 @@ given; `-t` with the `swerve` adapter is a usage error (`--public` serves files 
 function entry(string $appDir, ?string $docroot = null, ?string $file = null): Swerve\RequestHandler
 ```
 
-### Integrating a package with swerve
-
-A package configures swerve from a file in its `composer.json` `files`, which Composer loads after
-swerve's own, when the master loads the autoloader at startup:
-
-```json
-{"autoload": {"files": ["integrate-with-swerve.php"]}}
-```
-
-```php
-use Swerve\Swerve;
-
-Swerve::ini(['memory_limit' => '512M']);  // php.ini settings, applied by swerve's startup restart
-Swerve::onWorkerStart(function () {           // in every worker, before the application loads
-    // set up what the worker shares between requests; coroutines started here run for its life
-});
-```
-
-`ini()` wins over swerve's own settings, and an explicit `-d` on the command line wins over it.
-Calls after startup change nothing, so the file may run again when an application includes the
-autoloader in every request.
-
 ## Per-request process state, for framework authors
 
 Each request runs in a `Scope` of its own (fiber-interop/scope), which the coroutines it starts
