@@ -8,7 +8,9 @@ namespace Swerve;
  * It is what {@see Swerve::accept()} uses for its `$staticPath`.
  *
  * A GET or HEAD request whose path names a file below the directory gets that file: streamed,
- * with its Content-Type (by extension), Content-Length, Last-Modified and ETag; `304 Not
+ * with its Content-Type (by extension), Content-Length, Last-Modified and ETag, or in its
+ * place a compressed copy beside it (`app.js.br`, `.zst`, `.gz`) for a client that accepts that
+ * encoding (`Content-Encoding`, `Vary: Accept-Encoding`); `304 Not
  * Modified` for If-None-Match or If-Modified-Since; a single byte range (`Range: bytes=`) as
  * `206 Partial Content`, or 416 when it lies past the end. A directory is served by its
  * index.html, after a redirect to the path with a trailing slash.
@@ -38,8 +40,17 @@ final class StaticFiles
         'ico' => 'image/x-icon', 'woff' => 'font/woff', 'woff2' => 'font/woff2', 'ttf' => 'font/ttf', 'otf' => 'font/otf',
         'pdf' => 'application/pdf', 'wasm' => 'application/wasm', 'mp4' => 'video/mp4', 'webm' => 'video/webm',
         'mp3' => 'audio/mpeg', 'ogg' => 'audio/ogg', 'wav' => 'audio/wav', 'zip' => 'application/zip',
-        'gz' => 'application/gzip', 'webmanifest' => 'application/manifest+json',
+        'gz' => 'application/gzip', 'webmanifest' => 'application/manifest+json', 'jsonld' => 'application/ld+json',
+        'xhtml' => 'application/xhtml+xml', 'rss' => 'application/rss+xml', 'atom' => 'application/atom+xml',
+        'ics' => 'text/calendar; charset=utf-8', 'apng' => 'image/apng', 'bmp' => 'image/bmp', 'tif' => 'image/tiff',
+        'tiff' => 'image/tiff', 'm4a' => 'audio/mp4', 'aac' => 'audio/aac', 'flac' => 'audio/flac', 'opus' => 'audio/opus',
+        'mov' => 'video/quicktime', 'm4v' => 'video/mp4', 'ogv' => 'video/ogg', 'tar' => 'application/x-tar',
+        '7z' => 'application/x-7z-compressed', 'epub' => 'application/epub+zip', 'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
+
+    /** The compressed copies looked for beside a file, by content coding, in order of preference. */
+    private const ENCODINGS = ['br' => '.br', 'zstd' => '.zst', 'gzip' => '.gz'];
 
     private readonly string $root;
 
@@ -112,8 +123,31 @@ final class StaticFiles
 
     private function serve(ClientRequest $request, string $file): void
     {
+        $in   = $request->getRequestHeaders();
+        $type = self::TYPES[\strtolower(\pathinfo($file, \PATHINFO_EXTENSION))] ?? 'application/octet-stream';
         $stat = @\stat($file);
-        $fp   = false !== $stat ? @\fopen($file, 'r') : false;
+        // A compressed copy beside the file (style.css.br, style.css.gz), not older than it, for a
+        // client that accepts its encoding: served in its place, as nginx's gzip_static does
+        $vary     = [];
+        $encoding = null;
+        if (false !== $stat) {
+            foreach (self::ENCODINGS as $coding => $suffix) {
+                if (!\is_file($file . $suffix)) {
+                    continue;
+                }
+                $variant = \stat($file . $suffix); // from is_file()'s stat cache
+                if ($variant['mtime'] < $stat['mtime'] || !\str_starts_with((string) \realpath($file . $suffix), $this->root . '/')) {
+                    continue;
+                }
+                $vary = ['Vary' => 'Accept-Encoding'];
+                if (null === $encoding && self::accepts($in['accept-encoding'] ?? [], $coding)) {
+                    $encoding = $coding;
+                    $file    .= $suffix;
+                    $stat     = $variant;
+                }
+            }
+        }
+        $fp = false !== $stat ? @\fopen($file, 'r') : false;
         if (false === $fp) {
             $request->sendResponseHeaders(403);
             $request->end();
@@ -123,14 +157,13 @@ final class StaticFiles
         try {
             $size     = $stat['size'];
             $modified = \gmdate('D, d M Y H:i:s', $stat['mtime']) . ' GMT';
-            $etag     = '"' . \dechex($stat['mtime']) . '-' . \dechex($size) . '"';
+            $etag     = '"' . \dechex($stat['mtime']) . '-' . \dechex($size) . (null === $encoding ? '' : "-$encoding") . '"';
             $headers  = [
-                'Content-Type'  => self::TYPES[\strtolower(\pathinfo($file, \PATHINFO_EXTENSION))] ?? 'application/octet-stream',
+                'Content-Type'  => $type,
                 'Last-Modified' => $modified,
                 'ETag'          => $etag,
                 'Accept-Ranges' => 'bytes',
-            ];
-            $in          = $request->getRequestHeaders();
+            ] + $vary + (null === $encoding ? [] : ['Content-Encoding' => $encoding]);
             $ifNoneMatch = \implode(', ', $in['if-none-match'] ?? []);
             if ('' !== $ifNoneMatch
                 ? \in_array($etag, \array_map(static fn ($t) => \preg_replace('#^W/#', '', \trim($t)), \explode(',', $ifNoneMatch)), true) || '*' === \trim($ifNoneMatch)
@@ -170,5 +203,33 @@ final class StaticFiles
         } finally {
             \fclose($fp);
         }
+    }
+
+    /**
+     * Whether an Accept-Encoding header accepts $coding: named, or by `*`, with a q above 0.
+     *
+     * @param list<string> $header
+     */
+    private static function accepts(array $header, string $coding): bool
+    {
+        $any = false;
+        foreach (\explode(',', \strtolower(\implode(',', $header))) as $item) {
+            $parts = \explode(';', $item);
+            $name  = \trim($parts[0]);
+            $q     = 1.0;
+            foreach (\array_slice($parts, 1) as $param) {
+                if (\preg_match('/^\s*q\s*=\s*([0-9.]+)\s*$/', $param, $m)) {
+                    $q = (float) $m[1];
+                }
+            }
+            if ($name === $coding) {
+                return $q > 0;
+            }
+            if ('*' === $name) {
+                $any = $q > 0;
+            }
+        }
+
+        return $any;
     }
 }

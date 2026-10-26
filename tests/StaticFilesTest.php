@@ -337,3 +337,28 @@ test('a file changed after the middleware was made is served as it is now', func
     unlink("$dir/digits.txt");
     expect(unit_static($files, '/digits.txt')[1])->toBe('app');
 });
+
+test('a compressed copy beside a file is served in its place to a client that accepts its encoding', function () {
+    $dir = static_dir();
+    file_put_contents("$dir/app.js.br", 'BROTLI');
+    file_put_contents("$dir/app.js.gz", 'GZIP');
+    touch("$dir/app.js.br", filemtime("$dir/app.js") + 1);
+    touch("$dir/app.js.gz", filemtime("$dir/app.js") + 1);
+    $files = new StaticFiles($dir);
+
+    $br = static_get($files, '/app.js', ['Accept-Encoding' => 'gzip, deflate, br']);
+    expect([$br['headers']['content-encoding'], $br['headers']['content-type'], $br['headers']['vary'], $br['body']])
+        ->toBe(['br', 'text/javascript; charset=utf-8', 'Accept-Encoding', 'BROTLI']);
+    $gzip = static_get($files, '/app.js', ['Accept-Encoding' => 'br;q=0, gzip']);
+    expect([$gzip['headers']['content-encoding'], $gzip['body']])->toBe(['gzip', 'GZIP'])
+        ->and($gzip['headers']['etag'])->not->toBe($br['headers']['etag']);
+    $plain = static_get($files, '/app.js');
+    expect([$plain['headers']['content-encoding'] ?? null, $plain['headers']['vary'], $plain['body']])
+        ->toBe([null, 'Accept-Encoding', 'console.log(1)']);
+    // Revalidating the compressed copy by its own ETag
+    expect(static_get($files, '/app.js', ['Accept-Encoding' => 'br', 'If-None-Match' => $br['headers']['etag']])['status'])->toBe(304);
+
+    // A copy older than the file is stale: not served
+    touch("$dir/app.js.br", filemtime("$dir/app.js") - 10);
+    expect(static_get($files, '/app.js', ['Accept-Encoding' => 'br'])['body'])->toBe('console.log(1)');
+});
