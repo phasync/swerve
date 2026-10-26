@@ -13,6 +13,7 @@
 use phasync\ext;
 use Psr\Log\LogLevel;
 use Swerve\Lot\Lot;
+use Swerve\Swerve;
 use Swerve\Util\Logger;
 use Swerve\Util\System;
 
@@ -44,23 +45,51 @@ require $autoload;
         exit(1);
     }
     // The workers are forked from this process, so the settings PHP reads only as it starts are
-    // this process's: it starts itself over with them, once. A long-running server, not shared
-    // hosting; opcache and APCu, when loaded, are shared by the workers.
+    // this process's: it starts itself over with them, once. A long-running server, like Node.js:
+    // php.ini's limits for shared hosting don't apply, and memory is the container's to bound.
+    // Code changes reach the workers by a restart, so nothing checks timestamps. Then what
+    // installed packages need (Swerve::ini()); an explicit -d on the command line wins over all.
     if (false === \getenv('SWERVE_MASTER')) {
-        $php = [];
+        $ini = [
+            'memory_limit'                          => '-1',
+            'max_execution_time'                    => '0',
+            'max_input_time'                        => '-1',
+            'open_basedir'                          => '',
+            'disable_functions'                     => '',
+            'disable_classes'                       => '',
+            'auto_prepend_file'                     => '',
+            'auto_append_file'                      => '',
+            'realpath_cache_size'                   => '64M',
+            'realpath_cache_ttl'                    => '86400',
+            'opcache.enable_cli'                    => '1',
+            'opcache.jit'                           => '1054', // not tracing: ext-phasync#47
+            'opcache.jit_buffer_size'               => '64M',
+            'opcache.memory_consumption'            => '4096',
+            'opcache.interned_strings_buffer'       => '64',
+            'opcache.max_accelerated_files'         => '100000',
+            'opcache.max_file_size'                 => '0',
+            'opcache.validate_timestamps'           => '0',
+            'opcache.file_update_protection'        => '0',
+            'opcache.enable_file_override'          => '1',
+            'opcache.save_comments'                 => '1',
+            'opcache.file_cache'                    => '',
+            'opcache.file_cache_consistency_checks' => '0',
+            'opcache.consistency_checks'            => '0',
+            'opcache.protect_memory'                => '0',
+            'opcache.preload'                       => '',
+            'apc.enable_cli'                        => '1',
+            ...Swerve::registeredIni(),
+        ];
+        $php = \extension_loaded('Zend OPcache') ? [] : ['-d', 'zend_extension=opcache'];
+        foreach ($ini as $name => $value) {
+            \array_push($php, '-d', "$name=$value");
+        }
         $cmd = \explode("\0", \rtrim((string) \file_get_contents('/proc/self/cmdline'), "\0"));
         for ($i = 1; $i < \count($cmd) && \str_starts_with($cmd[$i], '-d'); ++$i) {
             $php[] = $cmd[$i];
             if ('-d' === $cmd[$i]) {
                 $php[] = $cmd[++$i];
             }
-        }
-        foreach ([
-            'memory_limit' => '-1', 'max_execution_time' => '0', 'opcache.enable_cli' => '1',
-            'opcache.jit' => '1054', 'opcache.jit_buffer_size' => '64M', 'opcache.validate_timestamps' => '0',
-            'apc.enable_cli' => '1',
-        ] as $name => $value) {
-            \array_push($php, '-d', "$name=$value");
         }
         // The environment, not putenv(): PHP undoes putenv() when a request ends, and the
         // workers' lifecycles are requests
