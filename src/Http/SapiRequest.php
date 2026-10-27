@@ -181,10 +181,12 @@ final class SapiRequest
         if ($this->upgraded) {
             return; // PHP's own headers, at the request's end: the application answers itself
         }
-        $map = [];
+        // A name as the script first wrote it, as php-fpm sends it; its later lines join it
+        $map = $names = [];
         foreach ($headers as $line) {
-            [$name, $value]                   = \explode(':', $line, 2) + [1 => ''];
-            $map[\strtolower(\trim($name))][] = \ltrim($value);
+            [$name, $value] = \explode(':', $line, 2) + [1 => ''];
+            $name           = $names[\strtolower($name = \trim($name))] ??= $name;
+            $map[$name][]   = \ltrim($value);
         }
         $this->client->sendResponseHeaders($status, $map);
     }

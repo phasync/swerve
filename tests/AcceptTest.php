@@ -234,6 +234,18 @@ it('gives a request the worker\'s own $_SERVER entries along with its own', func
         ->and(accept_request(native_connect($addr), '/b')['body'])->toBe('env /b');
 });
 
+it('sends header names as the script wrote them, a name\'s later lines joining its first', function () {
+    [, $addr] = accept_start('header-case.php', 1);
+    $conn     = native_connect($addr);
+    fwrite($conn, "GET / HTTP/1.1\r\nHost: t\r\n\r\n");
+    stream_set_blocking($conn, true);
+    for ($head = ''; !str_contains($head, "\r\n\r\n") && !feof($conn);) {
+        $head .= fread($conn, 8192);
+    }
+    expect($head)->toContain("\r\nX-Custom-Name: a\r\nX-Custom-Name: b\r\n")
+        ->and($head)->toContain("\r\nLocation: /elsewhere\r\n");
+});
+
 it('forks the workers from the master, so they share APCu', function () {
     [, $addr] = accept_start('apcu.php', 2);
     [$stored] = explode(' ', accept_request(native_connect($addr), '/set')['body']);
