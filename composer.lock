@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "7670a83da746278390a542d99eb7cd13",
+    "content-hash": "049fb4f0906025a86f3b619f55df8c13",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -114,16 +114,16 @@
         },
         {
             "name": "phasync/phasync",
-            "version": "dev-main",
+            "version": "2.0.5",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "7c7984cffd9eaa2504c725b145ea04ebef14b5b1"
+                "reference": "1417159296045a31307a7d73c7489cd0513bb0ab"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/7c7984cffd9eaa2504c725b145ea04ebef14b5b1",
-                "reference": "7c7984cffd9eaa2504c725b145ea04ebef14b5b1",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/1417159296045a31307a7d73c7489cd0513bb0ab",
+                "reference": "1417159296045a31307a7d73c7489cd0513bb0ab",
                 "shasum": ""
             },
             "require": {
@@ -136,12 +136,14 @@
             "provide": {
                 "psr/http-factory-implementation": "1.1"
             },
+            "replace": {
+                "phasync/fiber-interop-facade": "^1.0"
+            },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.58",
                 "pestphp/pest": "^2.34 || ^3.0",
                 "php-http/psr7-integration-tests": "^1.5"
             },
-            "default-branch": true,
             "bin": [
                 "bin/phasync"
             ],
@@ -180,9 +182,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/main"
+                "source": "https://github.com/phasync/phasync/tree/2.0.5"
             },
-            "time": "2026-10-26T17:43:54+00:00"
+            "time": "2026-10-27T21:48:32+00:00"
         },
         {
             "name": "phasync/serializor",
@@ -5979,8 +5981,7 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "friendsofphp/php-cs-fixer": 20,
-        "phasync/phasync": 20
+        "friendsofphp/php-cs-fixer": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,
