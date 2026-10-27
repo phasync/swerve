@@ -366,11 +366,9 @@ final class Swerve
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
         }
 
-        if (null !== $staticPath) {
-            $files = self::$staticFiles[$staticPath] ??= new StaticFiles($staticPath);
-        }
+        $files = null === $staticPath ? null : self::$staticFiles[$staticPath] ??= new StaticFiles($staticPath);
 
-        return LotClient::get()->accept(self::handler($handler, $files?->root), $files ?? null);
+        return LotClient::get()->accept(self::handler($handler, $files?->root), $files);
     }
 
     /**
