@@ -1,4 +1,4 @@
-# php-src request-level phpts where swerve differs today (swerve #89/#90/#91, ext-phasync #10/#11).
+# php-src request-level phpts where swerve differs today (swerve #90/#91, ext-phasync #13/#14/#15; php_sapi_name is "swerve" by design).
 # Paths relative to php-src. tests/phpt/run.php fails on a difference not listed here, and on a listed test that now passes.
 ext/session/tests/rfc1867.phpt
 ext/session/tests/rfc1867_cleanup.phpt
