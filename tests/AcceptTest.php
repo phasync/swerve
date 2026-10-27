@@ -135,6 +135,9 @@ it('gives a closure handler the request body through php://input and $_POST', fu
     expect(native_read_response($conn)['body'])->toBe("200000 []\n");
     fwrite($conn, "POST / HTTP/1.1\r\nHost: test\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\na=1&b=2");
     expect(native_read_response($conn)['body'])->toBe("7 {\"a\":\"1\",\"b\":\"2\"}\n");
+    // $_REQUEST in request_order (GP): the form's value wins over the query's
+    fwrite($conn, "POST /?a=get&c=3 HTTP/1.1\r\nHost: test\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 6\r\n\r\na=post");
+    expect(native_read_response($conn)['body'])->toBe("{\"a\":\"post\",\"c\":\"3\"}\n");
 });
 
 it('serves static files without using up accept(), as long as the client has the next request written', function () {

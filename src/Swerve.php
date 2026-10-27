@@ -609,7 +609,16 @@ final class Swerve
         if (\preg_match('#^(application/x-www-form-urlencoded|multipart/form-data)\b#i', $type)) {
             [$_POST, $_FILES] = \request_parse_body();
         }
-        $_REQUEST = $_GET + $_POST;
+        // As PHP builds it: in request_order (else variables_order), a later source winning
+        $_REQUEST = [];
+        foreach (\str_split(\strtoupper((string) (\ini_get('request_order') ?: \ini_get('variables_order')))) as $source) {
+            $_REQUEST = match ($source) {
+                'G'     => $_GET,
+                'P'     => $_POST,
+                'C'     => $_COOKIE,
+                default => [],
+            } + $_REQUEST;
+        }
     }
 
     /**
