@@ -13,7 +13,21 @@ final class Seen
 
 // Swerve::upgrade(): the connection goes on to a closure once the request ended
 while (Swerve::accept(null, function () {
-    switch ($_SERVER['REQUEST_URI']) {
+    switch (strtok($_SERVER['REQUEST_URI'], '?')) {
+        case '/ws-state':
+            date_default_timezone_set('Asia/Tokyo');
+            Swerve::upgrade(static function (WebSocket $ws): void {
+                foreach ($ws as $message) {
+                    $ws->send(json_encode([$_GET, date_default_timezone_get()]));
+                }
+            });
+            $_GET['changed'] = 'after upgrade()';
+
+            return;
+        case '/tz':
+            echo json_encode([$_GET, date_default_timezone_get()]);
+
+            return;
         case '/raw':
             Swerve::upgrade(static function (ClientRequest $client): void {
                 $client->sendResponseHeaders(200, ['x-raw' => 'yes']);

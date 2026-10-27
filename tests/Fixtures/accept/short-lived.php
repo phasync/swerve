@@ -14,6 +14,16 @@ phasync::await(Swerve::accept(null, function () {
 
         return;
     }
+    if ('/ws-state' === strtok($_SERVER['REQUEST_URI'], '?')) {
+        date_default_timezone_set('Asia/Tokyo');
+        Swerve::upgrade(static function (WebSocket $ws): void {
+            foreach ($ws as $message) {
+                $ws->send(json_encode([$_GET, date_default_timezone_get()]));
+            }
+        });
+
+        return;
+    }
     if ('/ws-busy' === $_SERVER['REQUEST_URI']) {
         Swerve::upgrade(static function (WebSocket $ws): void {
             foreach ($ws as $message) {

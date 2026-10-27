@@ -15,7 +15,8 @@ use Swerve\WebSocket;
  * ('W', see {@see LotClient}). The master starts them as they are needed, up to one per worker,
  * and they take the WebSockets that wait in turn; one that exits is replaced.
  *
- * The closure arrives serialized with phasync/serializor and unsigned: the socket it comes
+ * The closure arrives with the request's Scope state ($_GET, $_POST, $_COOKIE, $_FILES,
+ * $_REQUEST, timezone, intl locale), serialized with phasync/serializor and unsigned: the socket it comes
  * over is open only to swerve's own processes.
  *
  * @internal
@@ -39,10 +40,16 @@ final class WebSocketWorker
             if ('W' !== $bytes[0] || null === $conn) {
                 throw new \UnexpectedValueException("A worker sent '$bytes[0]' to the WebSocket worker");
             }
-            $closure = $codec->unserialize(\substr($bytes, 1));
+            [$closure, $state] = $codec->unserialize(\substr($bytes, 1));
             $stream  = \socket_export_stream($conn);
             \stream_set_blocking($stream, false);
-            phasync::go(static function () use ($stream, $closure): void {
+            // In a Scope of its own with the request's superglobals, timezone and locale
+            phasync::go(static fn () => (new \Scope())->run(static function () use ($stream, $closure, $state): void {
+                [$_GET, $_POST, $_COOKIE, $_FILES, $_REQUEST] = [$state['_GET'], $state['_POST'], $state['_COOKIE'], $state['_FILES'], $state['_REQUEST']];
+                \date_default_timezone_set($state['timezone']);
+                if (null !== $state['locale']) {
+                    \Locale::setDefault($state['locale']);
+                }
                 $connection = new StreamDuplex($stream);
                 try {
                     WebSocket::run($connection, $closure);
@@ -51,7 +58,7 @@ final class WebSocketWorker
                 } finally {
                     $connection->close();
                 }
-            });
+            }));
         }
     }
 }

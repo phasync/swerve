@@ -34,8 +34,8 @@ final class SapiRequest
      */
     private bool $upgraded;
 
-    /** upgrade()'s closure, for the connection once the request ended. */
-    private ?\Closure $upgrade;
+    /** upgrade()'s closure and the Scope it runs in, for the connection once the request ended. */
+    private ?array $upgrade;
 
     private function __construct()
     {
@@ -44,9 +44,10 @@ final class SapiRequest
     /**
      * Run $code as a request of $client under sapi().
      *
-     * @return ?\Closure upgrade()'s closure, to run on the connection now that the request ended
+     * @return array{0: \Closure, 1: \Scope}|null upgrade()'s closure and its Scope, to run on the
+     *                                          connection now that the request ended
      */
-    public static function run(ClientRequest $client, \Closure $code): ?\Closure
+    public static function run(ClientRequest $client, \Closure $code): ?array
     {
         $sapi           = self::popInstance() ?? new self();
         $sapi->client   = $client;
@@ -90,12 +91,12 @@ final class SapiRequest
     }
 
     /**
-     * Take the connection off the request running in this scope, for $upgrade once the request
-     * ended (see {@see \Swerve\Swerve::upgrade()}).
+     * Take the connection off the request running in this scope, for $upgrade in $scope once the
+     * request ended (see {@see \Swerve\Swerve::upgrade()}).
      *
      * @throws \LogicException outside a request, a second time, or once the response has begun
      */
-    public static function upgrade(\Closure $upgrade): void
+    public static function upgrade(\Closure $upgrade, \Scope $scope): void
     {
         $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
         if (null === $sapi) {
@@ -112,7 +113,7 @@ final class SapiRequest
             throw new \LogicException('Swerve::upgrade() is called before the response begins; there is output in an output buffer');
         }
         $sapi->upgraded = true;
-        $sapi->upgrade  = $upgrade;
+        $sapi->upgrade  = [$upgrade, $scope];
     }
 
     public function name(): string
