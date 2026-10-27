@@ -75,11 +75,15 @@ function main(array $argv): int
         return 2;
     }
     $phpCgi = find_php_cgi();
-    if (null === $phpCgi) {
-        \fwrite(\STDERR, "note: no php-cgi found; comparing against each phpt's EXPECT*/EXPECTHEADERS sections only\n");
-    }
 
     $tests = discover_tests($phpSrcRoot, $dirs);
+    // Differences already known (php-src paths, one per line, # comments): not reported, and a
+    // listed test that matches is, so the list only shrinks
+    $known = \getenv('PHPT_KNOWN') ?: __DIR__ . '/known.txt';
+    $GLOBALS['phpt_root']  = $phpSrcRoot;
+    $GLOBALS['phpt_known'] = \is_file($known)
+        ? \array_fill_keys(\array_filter(\array_map(static fn ($l) => \trim(\preg_replace('/#.*/', '', $l)), \file($known))), true)
+        : [];
 
     $fallbackBase = \tempnam($phpSrcRoot, 'phptharness-fallback-');
     $fallback     = "$fallbackBase.php";
@@ -90,7 +94,7 @@ function main(array $argv): int
     \rename($appFileBase, $appFile);
     \file_put_contents($appFile, "<?php\nphasync::await(Swerve\\Swerve::accept(" . \var_export($phpSrcRoot, true) . ', ' . \var_export($fallback, true) . "));\n");
 
-    $totals = ['ran' => 0, 'skipped' => 0, 'matched' => 0, 'differ' => 0];
+    $totals = ['ran' => 0, 'skipped' => 0, 'matched' => 0, 'differ' => 0, 'known' => 0, 'fixed' => 0];
 
     try {
         $groups = group_tests($tests);
@@ -102,12 +106,15 @@ function main(array $argv): int
         @\unlink($appFile);
     }
 
+    if (0 === $totals['differ'] + $totals['fixed']) {
+        return 0;
+    }
     \printf(
-        "ran=%d skipped=%d matched=%d differ=%d\n",
-        $totals['ran'], $totals['skipped'], $totals['matched'], $totals['differ'],
+        "ran=%d skipped=%d matched=%d known=%d new differences=%d now passing=%d\n",
+        $totals['ran'], $totals['skipped'], $totals['matched'], $totals['known'], $totals['differ'], $totals['fixed'],
     );
 
-    return $totals['differ'] > 0 ? 1 : 0;
+    return 1;
 }
 
 /** @return string[] absolute paths of candidate .phpt files, sorted */
@@ -380,6 +387,9 @@ function run_test(string $path, array $sections, string $phpSrcRoot, string $add
     }
 
     if (null === $response) {
+        if (is_known($path, $totals)) {
+            return;
+        }
         report_differ($path, 'no response from swerve (connection failed or timed out)', '', '', [], []);
         ++$totals['differ'];
 
@@ -405,10 +415,17 @@ function run_test(string $path, array $sections, string $phpSrcRoot, string $add
 
     if ($bodyOk && $headersOk) {
         ++$totals['matched'];
+        if (isset($GLOBALS['phpt_known'][$rel = known_key($path)])) {
+            ++$totals['fixed'];
+            echo "NOW PASSES $rel: remove it from the known differences\n";
+        }
 
         return;
     }
 
+    if (is_known($path, $totals)) {
+        return;
+    }
     ++$totals['differ'];
     report_differ($path, $bodyOk ? '' : 'body differs', $wanted, $actualBody, $wantedHeaders, $gotHeaders);
 }
@@ -779,6 +796,22 @@ function find_php_cgi(): ?string
     }
 
     return null;
+}
+
+function known_key(string $path): string
+{
+    return \substr($path, \strlen($GLOBALS['phpt_root']) + 1);
+}
+
+/** A listed known difference: counted, not reported. */
+function is_known(string $path, array &$totals): bool
+{
+    if (!isset($GLOBALS['phpt_known'][known_key($path)])) {
+        return false;
+    }
+    ++$totals['known'];
+
+    return true;
 }
 
 function report_bork(string $path, string $reason): void

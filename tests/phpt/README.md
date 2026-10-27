@@ -13,7 +13,7 @@ PHASYNC_EXT_SO=/path/to/phasync.so php run.php <php-src-path> [dir ...]
 `ext/standard`, `ext/session`, `ext/filter`, `ext/zlib`, `ext/mbstring`). `ext/phar`'s
 front-controller tests are always excluded.
 
-Baseline: a live `php-cgi` (`php-cgiN.N` or `php-cgi` on `PATH`), if installed — swerve's
+Baseline (silently): a live `php-cgi` (`php-cgiN.N` or `php-cgi` on `PATH`), if installed — swerve's
 response is then compared to it byte-for-byte. Without one (the common case; this never installs
 one), the phpt's own `--EXPECT--`/`--EXPECTF--`/`--EXPECTREGEX--` and `--EXPECTHEADERS--` sections
 are the baseline, matched with the same wildcards and the same case-sensitive header-name lookup
