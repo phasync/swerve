@@ -2,6 +2,7 @@
 
 namespace Swerve;
 
+use phasync;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
@@ -555,11 +556,12 @@ final class Swerve
                 $code($client, $file);
             });
             if (null !== $upgrade) {
-                // In a Scope of its own, seeded with the request's state as it was at upgrade()
-                (new \Scope())->run(static function () use ($client, $upgrade): void {
+                // In a Scope of its own, seeded with the request's state as it was at upgrade(), and
+                // a frame of its own as a request has: onScopeChange() hooks see it enter
+                (new \Scope())->run(static fn () => phasync::run(static function () use ($client, $upgrade): void {
                     SapiRequest::seed($upgrade[1]);
                     self::upgraded($client, $upgrade[0]);
-                });
+                }));
             }
         };
     }

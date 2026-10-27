@@ -43,8 +43,9 @@ final class WebSocketWorker
             [$closure, $state] = $codec->unserialize(\substr($bytes, 1));
             $stream  = \socket_export_stream($conn);
             \stream_set_blocking($stream, false);
-            // In a Scope of its own, seeded with the request's state
-            phasync::go(static fn () => (new \Scope())->run(static function () use ($stream, $closure, $state): void {
+            // In a Scope of its own, seeded with the request's state, and a frame of its own:
+            // onScopeChange() hooks see it enter
+            phasync::go(static fn () => (new \Scope())->run(static fn () => phasync::run(static function () use ($stream, $closure, $state): void {
                 SapiRequest::seed($state);
                 $connection = new StreamDuplex($stream);
                 try {
@@ -54,7 +55,7 @@ final class WebSocketWorker
                 } finally {
                     $connection->close();
                 }
-            }));
+            })));
         }
     }
 }
