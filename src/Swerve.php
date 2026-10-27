@@ -383,9 +383,10 @@ final class Swerve
      * here, and the closure, serialized with phasync/serializor along with what it captures, runs
      * in that process, which has the application's autoloader and nothing else of it.
      *
-     * Either way the closure runs in a Scope of its own with the request's $_GET, $_POST, $_COOKIE,
-     * $_FILES, $_REQUEST, default timezone and intl locale as they were at this call. $_SERVER,
-     * $_SESSION and setlocale() are not Scope state: copy what it needs into a captured variable.
+     * Either way the closure runs in a Scope of its own, seeded with the request's state as it was
+     * at this call: $_GET, $_POST, $_COOKIE, $_FILES, $_REQUEST, $_SERVER, $_SESSION (the data; the
+     * session itself was written and closed with the request), the default timezone and the intl
+     * locale. setlocale() is process-wide, not Scope state.
      *
      * ```php
      * while (Swerve::accept(null, function () {
@@ -431,17 +432,9 @@ final class Swerve
                 throw new UpgradeException("Not a WebSocket handshake: $handshake->body", $handshake->status, $handshake->headers, $handshake->body);
             }
             if (LotClient::get()->shortLived()) {
-                // It moves to a WebSocket worker as the request ends, with the state its Scope would
-                // have: serialized now, so a closure that can't go fails here
-                $moving = [$upgrade, [
-                    '_GET'     => $_GET,
-                    '_POST'    => $_POST,
-                    '_COOKIE'  => $_COOKIE,
-                    '_FILES'   => $_FILES,
-                    '_REQUEST' => $_REQUEST,
-                    'timezone' => \date_default_timezone_get(),
-                    'locale'   => \class_exists(\Locale::class, false) ? \Locale::getDefault() : null,
-                ]];
+                // It moves to a WebSocket worker as the request ends, with the request's state:
+                // serialized now, so a closure that can't go fails here
+                $moving = [$upgrade, SapiRequest::state()];
                 try {
                     $closure = (new Codec())->serialize($moving);
                 } catch (\Throwable $e) {
@@ -453,9 +446,7 @@ final class Swerve
                 $upgrade = static fn (ClientRequest $client) => self::moveWebSocket($client, $closure);
             }
         }
-        // A Scope of its own, made now: the request's superglobals, timezone and locale as they
-        // are, which the closure sees and changes alone
-        SapiRequest::upgrade($upgrade, new \Scope());
+        SapiRequest::upgrade($upgrade, SapiRequest::state());
     }
 
     /**
@@ -560,7 +551,11 @@ final class Swerve
                 $code($client, $file);
             });
             if (null !== $upgrade) {
-                $upgrade[1]->run(self::upgraded(...), $client, $upgrade[0]);
+                // In a Scope of its own, seeded with the request's state as it was at upgrade()
+                (new \Scope())->run(static function () use ($client, $upgrade): void {
+                    SapiRequest::seed($upgrade[1]);
+                    self::upgraded($client, $upgrade[0]);
+                });
             }
         };
     }

@@ -5,6 +5,7 @@ namespace Swerve\Lot;
 use phasync;
 use phasync\Net\StreamDuplex;
 use Serializor\Codec;
+use Swerve\Http\SapiRequest;
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
@@ -15,8 +16,7 @@ use Swerve\WebSocket;
  * ('W', see {@see LotClient}). The master starts them as they are needed, up to one per worker,
  * and they take the WebSockets that wait in turn; one that exits is replaced.
  *
- * The closure arrives with the request's Scope state ($_GET, $_POST, $_COOKIE, $_FILES,
- * $_REQUEST, timezone, intl locale), serialized with phasync/serializor and unsigned: the socket it comes
+ * The closure arrives with the request's state ({@see SapiRequest::state()}), serialized with phasync/serializor and unsigned: the socket it comes
  * over is open only to swerve's own processes.
  *
  * @internal
@@ -43,13 +43,9 @@ final class WebSocketWorker
             [$closure, $state] = $codec->unserialize(\substr($bytes, 1));
             $stream  = \socket_export_stream($conn);
             \stream_set_blocking($stream, false);
-            // In a Scope of its own with the request's superglobals, timezone and locale
+            // In a Scope of its own, seeded with the request's state
             phasync::go(static fn () => (new \Scope())->run(static function () use ($stream, $closure, $state): void {
-                [$_GET, $_POST, $_COOKIE, $_FILES, $_REQUEST] = [$state['_GET'], $state['_POST'], $state['_COOKIE'], $state['_FILES'], $state['_REQUEST']];
-                \date_default_timezone_set($state['timezone']);
-                if (null !== $state['locale']) {
-                    \Locale::setDefault($state['locale']);
-                }
+                SapiRequest::seed($state);
                 $connection = new StreamDuplex($stream);
                 try {
                     WebSocket::run($connection, $closure);

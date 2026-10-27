@@ -34,7 +34,7 @@ final class SapiRequest
      */
     private bool $upgraded;
 
-    /** upgrade()'s closure and the Scope it runs in, for the connection once the request ended. */
+    /** upgrade()'s closure and the request's state() it runs with, for the connection once the request ended. */
     private ?array $upgrade;
 
     private function __construct()
@@ -44,8 +44,8 @@ final class SapiRequest
     /**
      * Run $code as a request of $client under sapi().
      *
-     * @return array{0: \Closure, 1: \Scope}|null upgrade()'s closure and its Scope, to run on the
-     *                                          connection now that the request ended
+     * @return array{0: \Closure, 1: array}|null upgrade()'s closure and its state(), to run on the
+     *                                         connection now that the request ended
      */
     public static function run(ClientRequest $client, \Closure $code): ?array
     {
@@ -91,12 +91,12 @@ final class SapiRequest
     }
 
     /**
-     * Take the connection off the request running in this scope, for $upgrade in $scope once the
-     * request ended (see {@see \Swerve\Swerve::upgrade()}).
+     * Take the connection off the request running in this scope, for $upgrade with $state once
+     * the request ended (see {@see \Swerve\Swerve::upgrade()}).
      *
      * @throws \LogicException outside a request, a second time, or once the response has begun
      */
-    public static function upgrade(\Closure $upgrade, \Scope $scope): void
+    public static function upgrade(\Closure $upgrade, array $state): void
     {
         $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
         if (null === $sapi) {
@@ -113,7 +113,33 @@ final class SapiRequest
             throw new \LogicException('Swerve::upgrade() is called before the response begins; there is output in an output buffer');
         }
         $sapi->upgraded = true;
-        $sapi->upgrade  = [$upgrade, $scope];
+        $sapi->upgrade  = [$upgrade, $state];
+    }
+
+    /**
+     * The current scope's state, to seed() a new Scope with: a new Scope starts empty (the Scope
+     * RFC), and the creator gives it what it should have.
+     */
+    public static function state(): array
+    {
+        return [
+            $_GET, $_POST, $_COOKIE, $_FILES, $_REQUEST, $_SERVER, $_SESSION ?? null,
+            \date_default_timezone_get(),
+            \class_exists(\Locale::class, false) ? \Locale::getDefault() : null,
+        ];
+    }
+
+    /** Give the current scope a state() taken elsewhere. */
+    public static function seed(array $state): void
+    {
+        [$_GET, $_POST, $_COOKIE, $_FILES, $_REQUEST, $_SERVER, $session, $timezone, $locale] = $state;
+        if (null !== $session) {
+            $_SESSION = $session;
+        }
+        \date_default_timezone_set($timezone);
+        if (null !== $locale) {
+            \Locale::setDefault($locale);
+        }
     }
 
     public function name(): string

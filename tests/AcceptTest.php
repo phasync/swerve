@@ -211,12 +211,12 @@ it('serves a WebSocket on an upgraded request', function () {
     expect(ws_read($ws))->toBe([0x1, 'echo hi']);
 });
 
-it('runs an upgrade closure with the request\'s superglobals and timezone, in place and moved to a WebSocket worker', function (string $script) {
+it('runs an upgrade closure with the request\'s superglobals, session data and timezone, in place and moved to a WebSocket worker', function (string $script) {
     [, $addr] = accept_start($script, 1);
     $ws       = ws_connect($addr, '/ws-state?n=1');
     ws_send($ws, 0x1, 'hi');
     // The request's own $_GET and timezone as they were at upgrade(), not what came after
-    expect(ws_read($ws))->toBe([0x1, '[{"n":"1"},"Asia\\/Tokyo"]']);
+    expect(ws_read($ws))->toBe([0x1, '[{"n":"1"},"n=1",{"user":7},"Asia\\/Tokyo"]']);
     if ('upgrade.php' === $script) {
         // nor did they reach another request on the same worker
         expect(accept_request(native_connect($addr), '/tz')['body'])->toBe('[[],"' . addcslashes(date_default_timezone_get(), '/') . '"]');

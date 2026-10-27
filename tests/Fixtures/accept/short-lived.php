@@ -16,9 +16,10 @@ phasync::await(Swerve::accept(null, function () {
     }
     if ('/ws-state' === strtok($_SERVER['REQUEST_URI'], '?')) {
         date_default_timezone_set('Asia/Tokyo');
+        $_SESSION = ['user' => 7];
         Swerve::upgrade(static function (WebSocket $ws): void {
             foreach ($ws as $message) {
-                $ws->send(json_encode([$_GET, date_default_timezone_get()]));
+                $ws->send(json_encode([$_GET, $_SERVER['QUERY_STRING'], $_SESSION, date_default_timezone_get()]));
             }
         });
 
