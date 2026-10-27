@@ -25,6 +25,9 @@ final class SapiRequest
 
     private ClientRequest $client;
 
+    /** @var array<string, mixed> the request's $_SERVER entries, for request_info() */
+    private array $server;
+
     /** The client went away: later writes are refused, as a SAPI's are. */
     private bool $gone;
 
@@ -42,15 +45,16 @@ final class SapiRequest
     }
 
     /**
-     * Run $code as a request of $client under sapi().
+     * Run $code as a request of $client under sapi(), with $server as its $_SERVER entries.
      *
      * @return array{0: \Closure, 1: array}|null upgrade()'s closure and its state(), to run on the
      *                                         connection now that the request ended
      */
-    public static function run(ClientRequest $client, \Closure $code): ?array
+    public static function run(ClientRequest $client, array $server, \Closure $code): ?array
     {
         $sapi           = self::popInstance() ?? new self();
         $sapi->client   = $client;
+        $sapi->server   = $server;
         $sapi->gone     = $sapi->upgraded = false;
         $sapi->upgrade  = null;
         $scope          = \Scope::getCurrent();
@@ -73,7 +77,7 @@ final class SapiRequest
 
     public function returnToPool(): void
     {
-        unset($this->client);
+        unset($this->client, $this->server);
         $this->upgrade = null;
         $this->pushInstance();
     }
@@ -210,6 +214,8 @@ final class SapiRequest
             'content_length' => isset($headers['content-length'][0]) ? (int) $headers['content-length'][0] : null,
             'query_string'   => (string) \parse_url($target, \PHP_URL_QUERY),
             'request_uri'    => $target,
+            'cookie'         => isset($headers['cookie']) ? \implode('; ', $headers['cookie']) : null,
+            'server'         => $this->server,
         ];
     }
 

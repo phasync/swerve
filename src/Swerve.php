@@ -43,7 +43,10 @@ final class Swerve
     /** accept() was called in this lifecycle (its shutdown function is registered). */
     private static bool $accepting = false;
 
-    /** The worker's own $_SERVER, which each request's starts from: a request's Scope starts empty. */
+    /**
+     * The worker's own $_SERVER, which each request's starts from (a request's Scope starts empty),
+     * without the worker's argv and argc: PHP's request startup sets the request's.
+     */
     private static array $server;
 
     private function __construct()
@@ -362,7 +365,7 @@ final class Swerve
         }
         if (!self::$accepting) {
             self::$accepting = true;
-            self::$server    = $_SERVER;
+            self::$server    = \array_diff_key($_SERVER, ['argv' => 0, 'argc' => 0]);
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
         }
 
@@ -536,8 +539,8 @@ final class Swerve
     }
 
     /**
-     * Serve with $code under sapi(), with the superglobals PHP gives a script: $_SERVER for the
-     * script $route names, then $_GET, $_COOKIE, $_POST, $_FILES and $_REQUEST.
+     * Serve with $code under sapi(), whose request startup gives it the superglobals PHP gives a
+     * script, $_SERVER for the script $route names.
      *
      * @param \Closure(ClientRequest): array{0: string, 1: string, 2: ?string} $route the script: [file, SCRIPT_NAME, PATH_INFO]
      * @param \Closure(ClientRequest, string): void                         $code  given the script file
@@ -548,11 +551,8 @@ final class Swerve
     {
         return static function (ClientRequest $client) use ($root, $route, $code): void {
             [$file, $name, $info] = $route($client);
-            $_SERVER              = self::serverVariables($client, $root, $file, $name, $info);
-            $upgrade              = SapiRequest::run($client, static function () use ($client, $code, $file): void {
-                self::requestVariables($client);
-                $code($client, $file);
-            });
+            $server               = self::serverVariables($client, $root, $file, $name, $info);
+            $upgrade              = SapiRequest::run($client, $server, static fn () => $code($client, $file));
             if (null !== $upgrade) {
                 // In a Scope of its own, seeded with the request's state as it was at upgrade(), and
                 // a frame of its own as a request has: onScopeChange() hooks see it enter
@@ -564,12 +564,11 @@ final class Swerve
         };
     }
 
-    /** @return array<string, mixed> $_SERVER for a request: the worker's own, and the request's */
+    /** @return array<string, mixed> $_SERVER for a request: the worker's own, and the request's; PHP adds REQUEST_TIME */
     private static function serverVariables(ClientRequest $client, string $root, string $script, string $name, ?string $info): array
     {
-        $target   = $client->getTarget();
-        $now      = \microtime(true);
-        $server   = [
+        $target = $client->getTarget();
+        $server = [
             'REQUEST_METHOD'     => $client->getMethod(),
             'REQUEST_URI'        => $target,
             'QUERY_STRING'       => (string) \parse_url($target, \PHP_URL_QUERY),
@@ -578,8 +577,6 @@ final class Swerve
             'SCRIPT_NAME'        => $name,
             'PHP_SELF'           => $name . $info,
             'DOCUMENT_ROOT'      => $root,
-            'REQUEST_TIME'       => (int) $now,
-            'REQUEST_TIME_FLOAT' => $now,
         ] + self::$server;
         if (null !== $info) {
             $server['PATH_INFO']       = $info;
@@ -601,40 +598,6 @@ final class Swerve
         $server['SERVER_NAME'] = \explode(':', $server['HTTP_HOST'] ?? 'localhost')[0];
 
         return $server;
-    }
-
-    /** $_GET, $_COOKIE, $_POST, $_FILES and $_REQUEST, inside the request's Scope and sapi(). */
-    private static function requestVariables(ClientRequest $client): void
-    {
-        \parse_str((string) \parse_url($client->getTarget(), \PHP_URL_QUERY), $_GET);
-        // As PHP parses them: the name as sent (its dots and brackets as in a query), the value
-        // rawurldecode()d (a '+' stays), and the first of two cookies of one name wins
-        $cookies = $seen = [];
-        foreach ($client->getRequestHeaders()['cookie'] ?? [] as $header) {
-            foreach (\explode(';', $header) as $pair) {
-                [$name, $value] = \explode('=', \trim($pair), 2) + [1 => ''];
-                if ('' !== $name && (\str_contains($name, '[]') || !isset($seen[$name]))) {
-                    $seen[$name] = true;
-                    $cookies[]   = \rawurlencode($name) . '=' . \rawurlencode(\rawurldecode($value));
-                }
-            }
-        }
-        \parse_str(\implode('&', $cookies), $_COOKIE);
-        $_POST  = $_FILES = [];
-        $type   = $client->getRequestHeaders()['content-type'][0] ?? '';
-        if (\preg_match('#^(application/x-www-form-urlencoded|multipart/form-data)\b#i', $type)) {
-            [$_POST, $_FILES] = \request_parse_body();
-        }
-        // As PHP builds it: in request_order (else variables_order), a later source winning
-        $_REQUEST = [];
-        foreach (\str_split(\strtoupper((string) (\ini_get('request_order') ?: \ini_get('variables_order')))) as $source) {
-            $_REQUEST = match ($source) {
-                'G'     => $_GET,
-                'P'     => $_POST,
-                'C'     => $_COOKIE,
-                default => [],
-            } + $_REQUEST;
-        }
     }
 
     /**
