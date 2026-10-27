@@ -308,3 +308,10 @@ it('runs the PHP file a request names below the static directory, index.php for 
         ->and($get('/wp-admin/../wp-login.php'))->toBe('index.php /index.php /index.php - routed routed')
         ->and($get('/style.css'))->toBe("style\n");
 });
+
+it('parses cookies as PHP does: names as sent, values rawurldecoded, the first of a name winning', function () {
+    [, $addr] = accept_start('cookies.php', 1);
+    // What php -S (PHP's own parser) makes of the same header
+    expect(accept_request(native_connect($addr), '/', "Cookie: a.b=1; c[d]=2; e%20f=3; g=x%20y+z; a.b=dup; h=; i\r\n")['body'])
+        ->toBe('{"a_b":"1","c":{"d":"2"},"e%20f":"3","g":"x y+z","h":"","i":""}');
+});

@@ -595,15 +595,19 @@ final class Swerve
     private static function requestVariables(ClientRequest $client): void
     {
         \parse_str((string) \parse_url($client->getTarget(), \PHP_URL_QUERY), $_GET);
-        $_COOKIE = [];
+        // As PHP parses them: the name as sent (its dots and brackets as in a query), the value
+        // rawurldecode()d (a '+' stays), and the first of two cookies of one name wins
+        $cookies = $seen = [];
         foreach ($client->getRequestHeaders()['cookie'] ?? [] as $header) {
             foreach (\explode(';', $header) as $pair) {
                 [$name, $value] = \explode('=', \trim($pair), 2) + [1 => ''];
-                if ('' !== $name) {
-                    $_COOKIE[\urldecode($name)] ??= \urldecode($value);
+                if ('' !== $name && (\str_contains($name, '[]') || !isset($seen[$name]))) {
+                    $seen[$name] = true;
+                    $cookies[]   = \rawurlencode($name) . '=' . \rawurlencode(\rawurldecode($value));
                 }
             }
         }
+        \parse_str(\implode('&', $cookies), $_COOKIE);
         $_POST  = $_FILES = [];
         $type   = $client->getRequestHeaders()['content-type'][0] ?? '';
         if (\preg_match('#^(application/x-www-form-urlencoded|multipart/form-data)\b#i', $type)) {
