@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "7fa762bf4d091a5c39813ea6a8f09887",
+    "content-hash": "7670a83da746278390a542d99eb7cd13",
     "packages": [
         {
             "name": "fiber-interop/scope",
-            "version": "v0.3.0",
+            "version": "v0.4.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/fiber-interop/scope.git",
-                "reference": "74e579e94c2e46e29075550f14fa9b5577e772fe"
+                "reference": "b70a8bc3d81dd71f1d43e8e07652060a8ef67a73"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/fiber-interop/scope/zipball/74e579e94c2e46e29075550f14fa9b5577e772fe",
-                "reference": "74e579e94c2e46e29075550f14fa9b5577e772fe",
+                "url": "https://api.github.com/repos/fiber-interop/scope/zipball/b70a8bc3d81dd71f1d43e8e07652060a8ef67a73",
+                "reference": "b70a8bc3d81dd71f1d43e8e07652060a8ef67a73",
                 "shasum": ""
             },
             "require": {
@@ -32,7 +32,7 @@
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-main": "0.3.x-dev"
+                    "dev-main": "0.4.x-dev"
                 }
             },
             "autoload": {
@@ -60,9 +60,9 @@
             ],
             "support": {
                 "issues": "https://github.com/fiber-interop/scope/issues",
-                "source": "https://github.com/fiber-interop/scope/tree/v0.3.0"
+                "source": "https://github.com/fiber-interop/scope/tree/v0.4.0"
             },
-            "time": "2026-10-19T11:28:48+00:00"
+            "time": "2026-10-23T11:37:28+00:00"
         },
         {
             "name": "phasync/net",
@@ -114,20 +114,20 @@
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.0",
+            "version": "dev-main",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "505d0aaf5f040fc910c81431cbc9bd549d5d96a3"
+                "reference": "7c7984cffd9eaa2504c725b145ea04ebef14b5b1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/505d0aaf5f040fc910c81431cbc9bd549d5d96a3",
-                "reference": "505d0aaf5f040fc910c81431cbc9bd549d5d96a3",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/7c7984cffd9eaa2504c725b145ea04ebef14b5b1",
+                "reference": "7c7984cffd9eaa2504c725b145ea04ebef14b5b1",
                 "shasum": ""
             },
             "require": {
-                "fiber-interop/scope": "^0.3",
+                "fiber-interop/scope": "^0.4",
                 "php": "^8.2",
                 "psr/http-factory": "^1.0",
                 "psr/http-message": "^1.0 || ^2.0",
@@ -141,6 +141,7 @@
                 "pestphp/pest": "^2.34 || ^3.0",
                 "php-http/psr7-integration-tests": "^1.5"
             },
+            "default-branch": true,
             "bin": [
                 "bin/phasync"
             ],
@@ -155,7 +156,6 @@
             },
             "autoload": {
                 "files": [
-                    "src/async_interfaces.php",
                     "src/functions.php",
                     "src/ext_loader.php"
                 ],
@@ -180,9 +180,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0"
+                "source": "https://github.com/phasync/phasync/tree/main"
             },
-            "time": "2026-10-19T14:52:01+00:00"
+            "time": "2026-10-26T17:43:54+00:00"
         },
         {
             "name": "phasync/serializor",
@@ -5979,7 +5979,8 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "friendsofphp/php-cs-fixer": 20
+        "friendsofphp/php-cs-fixer": 20,
+        "phasync/phasync": 20
     },
     "prefer-stable": true,
     "prefer-lowest": false,
