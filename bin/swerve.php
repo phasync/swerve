@@ -21,8 +21,21 @@ $autoload = $GLOBALS['_composer_autoload_path']
 require $autoload;
 
 (static function (string $autoload, array $argv): void {
-    if (!\function_exists('phasync\ext\run_next')) {
-        \fwrite(\STDERR, "swerve: needs ext-phasync with run_next()\n");
+    // The -d flags PHP was started with (php -d ... vendor/bin/swerve): kept when it starts over
+    $cmd   = \explode("\0", \rtrim((string) \file_get_contents('/proc/self/cmdline'), "\0"));
+    $flags = [];
+    for ($i = 1; $i < \count($cmd) && \str_starts_with($cmd[$i], '-d'); ++$i) {
+        $flags[] = $cmd[$i];
+        if ('-d' === $cmd[$i]) {
+            $flags[] = $cmd[++$i];
+        }
+    }
+    if (!\extension_loaded('phasync') || !\ini_get('phasync.keywords')) {
+        // Started on plain PHP (vendor/bin/swerve's shebang): start over through phasync's
+        // bin/phasync, which loads the extension phasync bundles and turns its keywords on
+        $phasync = \dirname((new \ReflectionClass(\phasync::class))->getFileName()) . '/bin/phasync';
+        \pcntl_exec(\PHP_BINARY, [...$flags, $phasync, ...$argv]);
+        \fwrite(\STDERR, "swerve: could not start over through $phasync\n");
         exit(1);
     }
     $http    = '127.0.0.1:8080';
@@ -34,9 +47,13 @@ require $autoload;
             \str_starts_with($arg, '--http=')    => $http    = \substr($arg, 7),
             \str_starts_with($arg, '--workers=') => $workers = (int) \substr($arg, 10),
             \str_starts_with($arg, '--log=')     => $log     = \substr($arg, 6),
-            \str_starts_with($arg, '-')          => throw new \InvalidArgumentException("swerve: unknown option $arg"),
+            \str_starts_with($arg, '-')          => $unknown = $arg,
             default                              => $app     = $arg,
         };
+    }
+    if (isset($unknown)) {
+        \fwrite(\STDERR, "swerve: unknown option $unknown\nusage: swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php]\n");
+        exit(1);
     }
     $appFile = \realpath($app);
     if (false === $appFile) {
@@ -83,13 +100,7 @@ require $autoload;
         foreach ($ini as $name => $value) {
             \array_push($php, '-d', "$name=$value");
         }
-        $cmd = \explode("\0", \rtrim((string) \file_get_contents('/proc/self/cmdline'), "\0"));
-        for ($i = 1; $i < \count($cmd) && \str_starts_with($cmd[$i], '-d'); ++$i) {
-            $php[] = $cmd[$i];
-            if ('-d' === $cmd[$i]) {
-                $php[] = $cmd[++$i];
-            }
-        }
+        \array_push($php, ...$flags);
         // The environment, not putenv(): PHP undoes putenv() when a request ends, and the
         // workers' lifecycles are requests
         $env = ['SWERVE_MASTER' => '1', 'SWERVE_AUTOLOAD' => \realpath($autoload), 'SWERVE_APP' => $appFile];
