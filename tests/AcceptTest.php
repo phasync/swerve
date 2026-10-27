@@ -223,6 +223,17 @@ it('runs an upgrade closure with the request\'s superglobals, session data and t
     }
 })->with(['upgrade.php', 'short-lived.php']);
 
+it('gives a request the worker\'s own $_SERVER entries along with its own', function () {
+    putenv('SWERVE_TEST_ENV=1');
+    try {
+        [, $addr] = accept_start('server-env.php', 1);
+    } finally {
+        putenv('SWERVE_TEST_ENV');
+    }
+    expect(accept_request(native_connect($addr), '/a')['body'])->toBe('env /a')
+        ->and(accept_request(native_connect($addr), '/b')['body'])->toBe('env /b');
+});
+
 it('forks the workers from the master, so they share APCu', function () {
     [, $addr] = accept_start('apcu.php', 2);
     [$stored] = explode(' ', accept_request(native_connect($addr), '/set')['body']);

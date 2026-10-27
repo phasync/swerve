@@ -42,6 +42,9 @@ final class Swerve
     /** accept() was called in this lifecycle (its shutdown function is registered). */
     private static bool $accepting = false;
 
+    /** The worker's own $_SERVER, which each request's starts from: a request's Scope starts empty. */
+    private static array $server;
+
     private function __construct()
     {
     }
@@ -358,6 +361,7 @@ final class Swerve
         }
         if (!self::$accepting) {
             self::$accepting = true;
+            self::$server    = $_SERVER;
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
         }
 
@@ -563,8 +567,6 @@ final class Swerve
     /** @return array<string, mixed> $_SERVER for a request: the worker's own, and the request's */
     private static function serverVariables(ClientRequest $client, string $root, string $script, string $name, ?string $info): array
     {
-        static $worker = null;
-        $worker ??= $_SERVER;
         $target   = $client->getTarget();
         $now      = \microtime(true);
         $server   = [
@@ -578,7 +580,7 @@ final class Swerve
             'DOCUMENT_ROOT'      => $root,
             'REQUEST_TIME'       => (int) $now,
             'REQUEST_TIME_FLOAT' => $now,
-        ] + $worker;
+        ] + self::$server;
         if (null !== $info) {
             $server['PATH_INFO']       = $info;
             $server['PATH_TRANSLATED'] = $root . $info;
