@@ -14,6 +14,19 @@ phasync::await(Swerve::accept(null, function () {
 
         return;
     }
+    if ('/ws-busy' === $_SERVER['REQUEST_URI']) {
+        Swerve::upgrade(static function (WebSocket $ws): void {
+            foreach ($ws as $message) {
+                if ('block' === $message) {
+                    // About two seconds in one C call: no coroutine of this process runs meanwhile
+                    password_hash('x', PASSWORD_BCRYPT, ['cost' => 15]);
+                }
+                $ws->send("$message from " . getmypid());
+            }
+        });
+
+        return;
+    }
     if ('/ws-resource' === $_SERVER['REQUEST_URI']) {
         $file = fopen(__FILE__, 'r');
         try {

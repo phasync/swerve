@@ -1,8 +1,8 @@
 <?php
 
 /*
- * swerve's WebSocket worker, forked from the master: it serves the WebSockets that short-lived
- * lifecycles moved here (Swerve\Lot\WebSocketWorker), until the master is gone.
+ * A swerve WebSocket worker, forked from the master as WebSockets need one: it serves those that
+ * short-lived lifecycles moved here (Swerve\Lot\WebSocketWorker), until the master is gone.
  */
 
 (static function (): void {

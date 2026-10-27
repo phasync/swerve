@@ -379,9 +379,9 @@ final class Swerve
      *
      * A swerve.php that has called accept() only once may end with this request (WordPress's
      * serves one request per lifecycle), and its connections with it. A WebSocket opened there
-     * moves on to swerve's WebSocket worker: its `101` is sent here, and the closure, serialized
-     * with phasync/serializor along with what it captures, runs in that process, which has the
-     * application's autoloader and nothing else of it.
+     * moves on to one of swerve's WebSocket workers, started as they are needed: its `101` is sent
+     * here, and the closure, serialized with phasync/serializor along with what it captures, runs
+     * in that process, which has the application's autoloader and nothing else of it.
      *
      * ```php
      * while (Swerve::accept(null, function () {

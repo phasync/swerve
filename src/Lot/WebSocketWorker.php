@@ -12,7 +12,8 @@ use Swerve\WebSocket;
  * The process that serves the WebSockets of short-lived lifecycles: an application whose
  * swerve.php ends after each request (WordPress's) can't keep a connection, so its worker
  * answers the handshake and moves the connection, with the Swerve::upgrade() closure, here
- * ('W', see {@see LotClient}). The master starts it once, and again when it exits.
+ * ('W', see {@see LotClient}). The master starts them as they are needed, up to one per worker,
+ * and they take the WebSockets that wait in turn; one that exits is replaced.
  *
  * The closure arrives serialized with phasync/serializor and unsigned: the socket it comes
  * over is open only to swerve's own processes.

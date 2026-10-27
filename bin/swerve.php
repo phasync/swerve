@@ -5,7 +5,7 @@
  * (Swerve\Lot\Lot). The workers are forked from it, as php-fpm's are, so they share its
  * opcache and APCu memory; each runs inc/worker.php, and through it the application's
  * swerve.php, again and again (run_next()). A worker that exits is replaced. The WebSockets
- * of short-lived lifecycles (WordPress's) move to one more process, the WebSocket worker.
+ * of short-lived lifecycles (WordPress's) move to WebSocket workers, started as they are needed.
  *
  *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php]
  */
@@ -142,8 +142,8 @@ require $autoload;
     \pcntl_signal(\SIGTERM, static fn () => $stop());
     \pcntl_signal(\SIGINT, static fn () => $stop());
 
-    // The WebSockets of short-lived lifecycles move to the WebSocket worker over this pair: the
-    // workers write to one end (their fd 4), the WebSocket worker reads the other (its fd 3)
+    // The WebSockets of short-lived lifecycles move to the WebSocket workers over this pair: the
+    // workers write to one end (their fd 4), the WebSocket workers read the other (their fd 3)
     [$toWebSockets, $webSockets] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
 
     // Fork a process that runs $script with $descriptors' descriptors (fd 3 on), then $supervise
@@ -191,8 +191,26 @@ require $autoload;
     phasync::run(static function () use ($listener, $logger, $workers, $inc, $spawn, $toWebSockets, $webSockets): void {
         $lot = new Lot($listener, $logger);
         phasync::go($lot->run(...));
-        phasync::go(static fn () => $spawn('The WebSocket worker', "$inc/websocket-worker.php", static fn () => [$webSockets], static function (): void {
-        }));
+        // WebSocket workers on demand, which read the pair's end in turn: the first when a WebSocket
+        // first waits there, another whenever one waits there unread for 10 ms (those running are
+        // busy), up to one per worker. The master only watches the end; it never reads it.
+        phasync::go(static function () use ($workers, $inc, $spawn, $webSockets): void {
+            for ($running = 0; $running < $workers;) {
+                phasync::readable($webSockets);
+                if ($running > 0) {
+                    phasync::sleep(0.01);
+                    $waiting = [$webSockets];
+                    $none    = null;
+                    if (0 === \stream_select($waiting, $none, $none, 0)) {
+                        continue; // taken meanwhile
+                    }
+                }
+                $n = ++$running;
+                phasync::go(static fn () => $spawn("WebSocket worker $n", "$inc/websocket-worker.php", static fn () => [$webSockets], static function (): void {
+                }));
+                phasync::sleep(0.5); // its start: until it reads, what waits is no sign of busy ones
+            }
+        });
         for ($n = 0; $n < $workers; ++$n) {
             phasync::go(static function () use ($n, $lot, $inc, $spawn, $toWebSockets): void {
                 $master = $channel = null;

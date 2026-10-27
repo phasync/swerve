@@ -315,3 +315,27 @@ it('parses cookies as PHP does: names as sent, values rawurldecoded, the first o
     expect(accept_request(native_connect($addr), '/', "Cookie: a.b=1; c[d]=2; e%20f=3; g=x%20y+z; a.b=dup; h=; i\r\n")['body'])
         ->toBe('{"a_b":"1","c":{"d":"2"},"e%20f":"3","g":"x y+z","h":"","i":""}');
 });
+
+it('starts a WebSocket worker when the first WebSocket moves, and another when those running are busy', function () {
+    [$process, $addr] = accept_start('short-lived.php', 2);
+    $children         = static fn () => count(array_filter(explode("\n", (string) shell_exec('pgrep -P ' . proc_get_status($process)['pid']))));
+    expect($children())->toBe(2); // the two workers, no WebSocket worker yet
+
+    $first = ws_connect($addr, '/ws-busy');
+    ws_send($first, 0x1, 'hi');
+    [, $reply] = ws_read($first);
+    expect($children())->toBe(3);
+    $busy = substr($reply, strlen('hi from '));
+
+    // While that one is busy, a second WebSocket waits unread: the master starts another for it
+    ws_send($first, 0x1, 'block');
+    usleep(100000);
+    $second = ws_connect($addr, '/ws-busy');
+    ws_send($second, 0x1, 'hi');
+    $started = microtime(true);
+    [, $other] = ws_read($second);
+    expect(substr($other, strlen('hi from ')))->not->toBe($busy)
+        ->and(microtime(true) - $started)->toBeLessThan(1.5)
+        ->and($children())->toBe(4)
+        ->and(ws_read($first)[1])->toBe("block from $busy");
+});
