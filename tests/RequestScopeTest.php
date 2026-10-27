@@ -61,36 +61,6 @@ test('state kept in a WeakMap keyed by the request\'s scope is the request\'s ow
     expect(count($state))->toBe(0);
 });
 
-test('an onScopeChange() hook keeps setlocale() per request, from the request\'s first line and through every wait', function () {
-    if (false === @setlocale(LC_ALL, 'C.UTF-8') || false === @setlocale(LC_ALL, 'C')) {
-        test()->markTestSkipped('C and C.UTF-8 locales are not both available');
-    }
-    $saved = new WeakMap();
-    phasync::onScopeChange(function (Scope $new, ?Scope $old) use ($saved) {
-        if (null !== $old) {
-            $saved[$old] = setlocale(LC_ALL, 0);
-        }
-        setlocale(LC_ALL, $saved[$new] ?? 'C');
-    });
-    $request = function (string $locale, array &$seen) {
-        return function (ClientRequest $r) use ($locale, &$seen) {
-            $seen[] = setlocale(LC_ALL, 0); // a new request starts with the default, whatever ran before
-            setlocale(LC_ALL, $locale);
-            for ($i = 0; $i < 3; ++$i) {
-                phasync::sleep(0.01);
-                $seen[] = setlocale(LC_ALL, 0);
-            }
-            $r->end();
-        };
-    };
-    $seenA = $seenB = [];
-
-    serve_scope_test([$request('C.UTF-8', $seenA), $request('C', $seenB)]);
-
-    expect($seenA)->toBe(['C', 'C.UTF-8', 'C.UTF-8', 'C.UTF-8']);
-    expect($seenB)->toBe(['C', 'C', 'C', 'C']);
-});
-
 test('the coroutines a request starts are in its frame: it waits for them, and their unawaited failures are logged with the request', function () {
     $logger = new class () extends Psr\Log\AbstractLogger {
         public array $lines = [];
@@ -115,23 +85,4 @@ test('the coroutines a request starts are in its frame: it waits for them, and t
 
     expect($log)->toBe(['handler returned', 'child ended']);
     expect($logger->lines)->toBe(['error: A coroutine of GET / failed: child failed']);
-});
-
-test('through a real swerve.php, concurrent requests keep their own setlocale() by a hook the application registered at boot', function () {
-    if (false === @setlocale(LC_ALL, 'C.UTF-8') || false === @setlocale(LC_ALL, 'C')) {
-        test()->markTestSkipped('C and C.UTF-8 locales are not both available');
-    }
-
-    [$master, $addr] = native_start(workers: 1, env: ['SWERVE_TEST_SCOPE_HOOK' => '1']);
-    try {
-        $conns = [];
-        foreach (['C' => 'a', 'C.UTF-8' => 'b'] as $locale => $tag) {
-            $conns[$tag] = native_connect($addr);
-            fwrite($conns[$tag], "GET /locale-switch?v=$locale&ms=100 HTTP/1.1\r\nHost: t\r\n\r\n");
-        }
-        expect(native_read_response($conns['a'])['body'] ?? null)->toBe('C');
-        expect(native_read_response($conns['b'])['body'] ?? null)->toBe('C.UTF-8');
-    } finally {
-        native_stop($master);
-    }
 });

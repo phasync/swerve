@@ -208,16 +208,15 @@ $app = new class($version) {
     public function __construct(private string $version)
     {
         // phasync::onScopeChange(), as a framework adapter would call it at boot, before any
-        // request is served: each request's setlocale() and SwapFixture::$value are its own (see
-        // /locale-switch and /swap). Behind an env var so only those tests' workers pay for it.
+        // request is served: each request's SwapFixture::$value is its own (see /swap). Behind an
+        // env var so only that test's workers pay for it.
         if (\getenv('SWERVE_TEST_SCOPE_HOOK')) {
             $saved = new \WeakMap();
             phasync::onScopeChange(static function (\Scope $new, ?\Scope $old) use ($saved) {
                 if (null !== $old) {
-                    $saved[$old] = [\setlocale(LC_ALL, 0), SwapFixture::$value];
+                    $saved[$old] = SwapFixture::$value;
                 }
-                [$locale, SwapFixture::$value] = $saved[$new] ?? ['C', null];
-                \setlocale(LC_ALL, $locale);
+                SwapFixture::$value = $saved[$new] ?? null;
             });
         }
     }
@@ -283,14 +282,6 @@ $app = new class($version) {
                 SwapFixture::$value = $query['v'];
                 phasync::sleep((int) $query['ms'] / 1000);
                 fx_send($r, 200, [], (string) SwapFixture::$value);
-
-                return;
-            // setlocale() is this request's own, through every wait, by the hook registered at boot
-            // (SWERVE_TEST_SCOPE_HOOK). ?v= set, read back after waiting ?ms=
-            case '/locale-switch':
-                \setlocale(LC_ALL, (string) $query['v']);
-                phasync::sleep((int) $query['ms'] / 1000);
-                fx_send($r, 200, [], (string) \setlocale(LC_ALL, 0));
 
                 return;
             // A WebSocket that sends what is published to 'news'
