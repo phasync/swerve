@@ -12,7 +12,7 @@
         "ext-posix": "*",
         "ext-sockets": "*",
         "phasync/net": "^2.0",
-        "phasync/serializor": "dev-master as 2.1.1"
+        "phasync/serializor": "^2.1.2"
     },
     "bin": [
         "bin/swerve"
