@@ -12,6 +12,7 @@ ext/session/tests/rfc1867_sid_only_cookie_2.phpt
 ext/session/tests/rfc1867_sid_post.phpt
 ext/standard/tests/general_functions/header_redirection_014.phpt
 ext/standard/tests/general_functions/phpcredits2.phpt
+ext/standard/tests/general_functions/phpcredits_title.phpt
 ext/standard/tests/general_functions/phpinfo-header-anchors.phpt
 ext/standard/tests/general_functions/phpinfo2.phpt
 ext/standard/tests/versioning/php_sapi_name_variation001.phpt
