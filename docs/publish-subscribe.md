@@ -25,8 +25,8 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
   subscribers, publish from a single writer: one process or request that every change goes
   through.
 - **At most once**: to the subscriptions that exist when the message reaches their worker. There
-  is no history and no retry: a subscriber that starts later, a worker started after a reload,
-  a recycle or a crash, see nothing sent before. Keep what must not be lost in storage, and use
+  is no history and no retry: a subscriber that starts later, a worker started after a reload
+  or a crash, see nothing sent before. Keep what must not be lost in storage, and use
   publish/subscribe to tell the others it changed.
 - **One machine**: swerve on several servers needs Redis, NATS or the like between them.
 - **Without the master** (swerve embedded in your own process), messages stay in that process.
@@ -42,8 +42,7 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
   unsubscribe to forget.
 - Iterating waits for messages. With `heartbeat: 15`, it also yields `null` after 15 s without
   one: for a producer that sends keep-alives while it waits.
-- When the worker stops (a shutdown or reload, or the end of the lingering of a recycled worker,
-  which keeps receiving until then), the loop throws a `Swerve\WorkerStoppingException` at its
+- When the worker stops (a shutdown or reload), the loop throws a `Swerve\WorkerStoppingException` at its
   wait, as every wait does then; a subscription made while draining ends at once.
   `Swerve::draining()` says whether the worker drains.
 - A message is kept once per worker, however many subscribe, until the slowest subscriber read

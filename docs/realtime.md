@@ -46,8 +46,7 @@ are in [WebSockets and Server-Sent Events](websocket.md#server-sent-events). Wit
 - Messages go the other way as ordinary requests: `POST /messages` in the example.
 - Swerve has no message history to resume from after a `Last-Event-ID`
   (`$sse->lastEventId()`), so a reconnecting client catches up from your storage.
-- **On a reload or shutdown** (and at the end of the lingering of a recycled worker, see
-  [Production](production.md)), every handler gets a `Swerve\WorkerStoppingException` at its
+- **On a reload or shutdown**, every handler gets a `Swerve\WorkerStoppingException` at its
   wait, at once, and the browser reconnects to another worker.
 - Behind a proxy, buffering must be off (nginx: `proxy_buffering off`).
 
@@ -70,8 +69,6 @@ spoken over it with `read()` and `write()`; a client that stops reading is dropp
   a goodbye then is written inside `phasync::shielded()`, since every later wait throws it too.
 - When the handler returns, the connection closes, after reading the client's last bytes for up to
   2 s so that your goodbye arrives.
-- A recycled worker keeps its upgraded connections up to `--linger` seconds instead of draining
-  them; see [Production](production.md#sizing).
 - Without ext-phasync a worker holds 512 connections; see [Production](production.md#sizing).
 
 ## WebSockets

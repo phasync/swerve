@@ -75,7 +75,7 @@ listen only while you hold it.
 
 - When the worker stops, every coroutine you started gets a `Swerve\WorkerStoppingException`
   at its wait, at once, and the worker exits once they have ended: your server does not hold up
-  a reload, and its clients reconnect, as they do after a crash or a recycle. Save or undo
+  a reload, and its clients reconnect, as they do after a crash. Save or undo
   partial work in `phasync::finally()` or `phasync::shielded()`.
 - `Swerve::draining()` turns true when the worker starts to stop.
 - A lock is released as its handle goes, when the exception unwinds the job; a worker that

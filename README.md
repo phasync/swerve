@@ -48,7 +48,7 @@ requests and connections at once on [phasync](https://github.com/phasync/phasync
 - **Isolated requests.** Each request runs in a `Scope` of its own, which the coroutines it
   starts share, so request-scoped state stays separate even with thousands in flight.
 - **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
-  workers that grow are recycled, and reloads roll one worker at a time.
+  and reloads roll one worker at a time.
 - **Yours to own.** MIT, with no third-party dependencies beyond phasync and the PSR logger and
   cache interfaces. See [the Ennerd philosophy](PHILOSOPHY.md).
 
@@ -170,11 +170,8 @@ Logging (to the terminal, or with --log to a file):
 
 Limits:
   --max-body=<bytes>               HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
-  --grace=<seconds>                Seconds workers get to clean up on shutdown, reload and recycle before SIGKILL (default: 30)
-  --linger=<seconds>               Seconds a recycled worker may keep serving its upgraded connections (101) after its replacement took over; 0 = not at all (default: 1800)
+  --grace=<seconds>                Seconds workers get to clean up on shutdown and reload before SIGKILL (default: 30)
   --watchdog=<seconds>             Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
-  --max-memory=<size|P%>           Recycle a worker above this memory after gc: bytes, K, M or G, or a % of memory_limit; 0 = off (default: 80%)
-  --max-requests=<n>               Recycle a worker after about n requests; 0 = off (default: 0)
   --cache-size=<size>              The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G (default: 64M)
 
 Information:
@@ -334,16 +331,8 @@ body (`''` only at its end) and `write()` sends the response body. The module do
   a goodbye of your own (on a raw `101` tunnel, say) is written shielded. `$e->reason`
   (`Shutdown`, `Reload`, `Recycle`) says what happens next. The worker exits once every
   coroutine has ended, a second before `--grace` at most, whatever is left, which is logged.
-- **Recycle: lingering.** A worker replaced by a recycle (`--max-memory`, `--max-requests`)
-  keeps its upgraded connections instead of draining them: it stops accepting, finishes its
-  plain requests and stays until the last client has left, or `--linger` seconds (1800) have
-  passed, which then ends it like a shutdown. Subscriptions and the cache keep working
-  meanwhile. A slot has at most three lingering workers; a recycle that would make a fourth waits
-  until one exits. A reload or shutdown ends the lingering with `--grace`. `--linger=0` drains a
-  recycled worker at once.
 - **Saying goodbye.** `Swerve::onShutdown($callback)` runs the callback in a coroutine when the
-  worker stops (for a recycle, at the end of the lingering; `Swerve::draining()` turns true when
-  it begins), for example to send a protocol-level goodbye from a place that holds no request.
+  worker stops (`Swerve::draining()` turns true when it begins), for example to send a protocol-level goodbye from a place that holds no request.
   Its waits get the `WorkerStoppingException` too: write the goodbye shielded. A callback runs in
   the `Scope` that registered it, which holds it weakly: one whose request has ended is dropped (it relies on phasync's garbage collection, about half a
   second after a coroutine ends) and never runs. An exception in a callback is logged and
@@ -376,7 +365,7 @@ foreach (Swerve::subscribe('chat') as $message) {
   them; there is no order between workers. Without the master (swerve embedded in your own
   process), they are delivered in that process.
 - Delivery is at most once, to the subscriptions that exist when a message reaches their
-  worker. There is no history: a worker started after a reload, a recycle or a crash sees
+  worker. There is no history: a worker started after a reload or a crash sees
   nothing sent before it. Swerve is one machine; across machines, use Redis, NATS or the like.
 - A subscription ends when its last reference goes: a `break`, the variable going out of scope,
   the request's coroutine ending. A topic costs nothing in a worker without subscribers.
@@ -464,7 +453,7 @@ is doing: its requests in flight, and where its code runs.
   started fine: a request killed it, and it is restarted at once. When every slot failed to
   start before any worker became ready (the application can't load, the port is taken), swerve
   exits with the worker's exit code, or 1 when that is 0 (`die('no config')`). A new worker of a
-  reload or a recycle that fails to start leaves the old one serving, and is retried in its
+  reload that fails to start leaves the old one serving, and is retried in its
   slot with the same backoff, so a failure that passes (a database away for a moment) doesn't
   leave the old code serving for good. A PHP fatal error is logged by its worker, with the
   requests it had in flight. An exception in
@@ -481,16 +470,10 @@ is doing: its requests in flight, and where its code runs.
   the master died while it was stuck (see above), a second after the timeout, so that a live
   master kills it first and a shorter blocking call (`sleep()`, `stream_select()`) is never
   cut short; with `--watchdog=0` the application may use `SIGALRM` itself.
-- **Memory leaks.** After each request, and every tick, a worker compares
-  `memory_get_usage(true)` with `--max-memory` (by default 80 % of `memory_limit`, and off when
-  `memory_limit` is -1 unless the option is given). Above it, after a garbage collection, the
-  master starts a replacement and the leaking worker finishes its plain requests and lingers
-  (see Recycle: lingering above), up to `--linger` seconds. `--max-requests` recycles after
-  about so many requests. The limits get some jitter, so workers don't recycle together. A
-  `--max-memory` not below `memory_limit` could never be reached first: it is logged as a
-  warning, and recycling is off. A
-  worker that hits `memory_limit` itself dies with PHP's fatal error (in the log with `--log`),
-  loses its requests in flight, and is replaced.
+- **Memory leaks.** Each worker's `memory_limit` is a quarter of the machine's memory (or its
+  container's), at most 4 GiB, as V8 sizes a Node.js heap. A worker that reaches it dies with
+  PHP's fatal error (in the log with `--log`), loses its requests in flight, and is replaced.
+  `-d memory_limit=512M` sets another limit.
 - **`--watch`** watches the `*.php` files next to and below the swerve file (not in
   `vendor/`, nor names starting with a dot, such as editors' lock files; but
   `vendor/composer/installed.php`, so `composer install` counts) and reloads 1 to 2 seconds
@@ -519,9 +502,8 @@ Operating notes:
   `stop_grace_period: 35s` or systemd `TimeoutStopSec=35` for the default 30 seconds. During a
   handover a slot briefly has two workers, so budget for one worker's memory more.
 - Long responses such as Server-Sent Events or long polling are cut at once on a reload or
-  shutdown; a recycled worker keeps them up to `--linger` seconds. A slot
-  may then have up to three lingering workers beside the serving one: budget their memory too.
-- Without `-v` the log has notices and up: reloads, recycles, every worker exit, the pid of
+  shutdown.
+- Without `-v` the log has notices and up: reloads, every worker exit, the pid of
   each worker started after the first ones, and shutdown. `-v` adds the first starts and each
   worker's readiness, `-vv` debug lines. What a client sent, such as a request target in an
   error, is logged as it is, with control characters escaped.

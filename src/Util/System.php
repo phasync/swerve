@@ -59,6 +59,25 @@ final class System {
     }
 
     /**
+     * The memory this process may use, in bytes: the machine's, or its cgroup's limit when lower
+     * (a container's), as Node.js sizes its heap from.
+     */
+    public static function getMemorySize(): int
+    {
+        self::assertProcFS('/proc/meminfo');
+        \preg_match('/^MemTotal:\s+(\d+) kB/m', \file_get_contents('/proc/meminfo'), $m);
+        $size = (int) $m[1] * 1024;
+        if (\preg_match('/^0::(\S+)$/m', (string) @\file_get_contents('/proc/self/cgroup'), $m)) {
+            $max = @\file_get_contents("/sys/fs/cgroup{$m[1]}/memory.max");
+            if (false !== $max && \ctype_digit(\trim($max))) {
+                $size = \min($size, (int) $max);
+            }
+        }
+
+        return $size;
+    }
+
+    /**
      * Whether ext-sockets can be used (and not disabled): connections are then accepted, read and
      * written with its functions, which are a little faster than PHP's streams; otherwise
      * with streams alone.

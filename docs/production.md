@@ -36,7 +36,8 @@ configuration, with one restart at startup. An explicit `-d` on the command line
 
 | Setting | Value | Why |
 |---|---|---|
-| `memory_limit`, `max_execution_time`, `max_input_time` | -1, 0, -1 | no per-process limits: bound memory with the container or cgroup (worker recycling: `--max-memory=<size>`) |
+| `memory_limit` | a quarter of the memory (the container's, if lower), at most 4 GiB | per worker, as V8 sizes a Node.js heap: a worker that reaches it dies and another starts |
+| `max_execution_time`, `max_input_time` | 0, -1 | no per-request time limits in a long-running process |
 | `open_basedir`, `disable_functions`, `disable_classes` | empty | shared-hosting fences; swerve itself needs `pcntl_*` and `posix_*` |
 | `auto_prepend_file`, `auto_append_file`, `opcache.preload` | empty | no code injected into the server from outside the application |
 | `realpath_cache_size`, `realpath_cache_ttl` | 64M, 86400 | files only change through a reload, which starts new workers |
@@ -82,22 +83,13 @@ a request) to make room for new ones, and logs a warning at most once a minute. 
 (101) connections and ones whose request is still being handled are never closed to
 make room.
 
-**Memory.** `--max-memory` (80 % of `memory_limit` by default) recycles a worker whose memory
-grows past it: a new worker starts, then the old one finishes its plain requests and stops
-accepting. With `memory_limit=-1` this is off; give a size such as `--max-memory=512M`.
-`--max-requests` recycles after about so many requests.
+**Memory.** A worker that reaches its `memory_limit` dies with PHP's fatal error and is
+replaced, losing its requests in flight; there is no recycling before that, as in Node.js.
 
 `memory_limit` bounds the sum of the requests running at once in a worker, and a fatal error (out of
 memory, say) ends the worker and every request in it, not only the request that caused it. Count
 `memory_limit` as the peak of one request times the concurrency you expect.
 
-A recycled worker lingers: it keeps its upgraded connections and long responses fed by subscriptions (SSE) instead of
-dropping them, until the last client has left or `--linger` seconds (1800) have passed, then
-closes what is left and exits. Its subscriptions and cache go on
-working meanwhile. Budget for them: a slot may have up to three lingering workers besides its
-serving one, each with its memory (a recycle that would be the fourth waits until one exits, and
-is logged once). `--linger=0` drops the connections of a recycled worker at once, as a reload
-does. A reload or shutdown does not linger: it ends the lingering too, within `--grace`.
 
 ## Behind a proxy
 
@@ -189,9 +181,8 @@ proxy's, unless it is a [trusted proxy](#behind-a-proxy); the client's address i
   included, gets a `Swerve\WorkerStoppingException` at its wait at once: a request whose response
   has not started gets a `503`, long responses and upgraded connections are cut, a
   `Swerve\WebSocket` closes with 1001 (1012 on a reload). The worker exits once its coroutines
-  have cleaned up, a second before `--grace` (30 s) at most. A recycle is gentler: see Memory
-  above. Clients must retry and reconnect, as after any server's death: `EventSource` does by
-  itself; write reconnecting into other clients.
+  have cleaned up, a second before `--grace` (30 s) at most. Clients must retry and reconnect,
+  as after any server's death: `EventSource` does by itself; write reconnecting into other clients.
 - `sysctl net.ipv4.tcp_migrate_req=1` makes the kernel hand connections waiting in a closing
   worker's queue to another worker instead of resetting them; swerve logs a hint at start when
   it is 0.

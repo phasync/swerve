@@ -39,8 +39,7 @@ adapter named is not installed: see [Adapters](../README.md#adapters).
 
 **A reload takes the full grace period.** Something catches the `Swerve\WorkerStoppingException`
 and waits on, or waits inside `phasync::shielded()`: the log says how many coroutines were still
-running. A recycled worker, on the other hand, keeps upgraded connections for up to `--linger`;
-see [Production](production.md#sizing).
+running.
 
 ## Seeing more
 

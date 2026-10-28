@@ -1,5 +1,7 @@
 <?php
 
+use Swerve\Util\System;
+
 /*
  * swerve owns opcache's settings: it restarts itself once with them, so workers run with the
  * opcode cache and the JIT on, and never check source files for changes (a reload does that).
@@ -13,7 +15,7 @@ test('workers run with swerve\'s settings: no shared-hosting limits, its opcache
             $ini[$name] = http_get($addr, "/ini?k=$name");
         }
         expect($ini)->toBe([
-            'memory_limit'                    => '-1',
+            'memory_limit'                    => intdiv(min(System::getMemorySize() >> 2, 4 << 30), 1 << 20) . 'M', // a quarter of the memory, at most 4 GiB, as Node's heap
             'opcache.enable_cli'              => '1',
             'opcache.jit'                     => '1054', // tracing without register allocation, see bin/swerve.php
             'opcache.interned_strings_buffer' => '64',
@@ -22,6 +24,15 @@ test('workers run with swerve\'s settings: no shared-hosting limits, its opcache
             'opcache.enable_file_override'    => '1',
             'opcache.preload'                 => '',
         ]);
+    } finally {
+        native_stop($process);
+    }
+});
+
+test('-d memory_limit= on the command line wins over swerve\'s default', function () {
+    [$process, $addr] = native_start('app.php', [], 1, ['-d', 'memory_limit=256M']);
+    try {
+        expect(http_get($addr, '/ini?k=memory_limit'))->toBe('256M');
     } finally {
         native_stop($process);
     }

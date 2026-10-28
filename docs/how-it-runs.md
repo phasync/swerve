@@ -4,8 +4,7 @@
 
 `vendor/bin/swerve` starts a **master process**, which starts the **workers**: one per CPU
 core by default (`--workers`). The master never loads your application; it supervises:
-it restarts a worker that dies, replaces a stuck one (the watchdog) or one that uses too
-much memory (recycling), and reloads by restarting all workers.
+it restarts a worker that dies, replaces a stuck one (the watchdog), and reloads by restarting all workers.
 
 Every worker loads your application file once, inside its event loop. The file is the
 application's bootstrap: it sets things up, may start coroutines that run for the worker's
@@ -80,11 +79,8 @@ Everything in PHP memory belongs to one worker, and lives from the worker's star
 - **Other workers do not see it.** A chat room's members, counters, caches: each worker has
   its own. To reach every worker, use [publish and subscribe](publish-subscribe.md); for
   state all workers need to read, use storage outside PHP (a database, Redis, a file).
-- **A worker restarts** after a crash, a reload, or recycling (memory, `--max-requests`): its
-  memory starts empty. Clients connected to it are disconnected by a crash or a reload and must
-  reconnect (a browser's `EventSource` does); a
-  recycled worker keeps its upgraded connections for up to `--linger` seconds, so they usually leave on
-  their own.
+- **A worker restarts** after a crash or a reload: its memory starts empty. Clients connected to
+  it are disconnected and must reconnect (a browser's `EventSource` does).
 - **Process-wide PHP state** (`setlocale()`, `date_default_timezone_set()`, ...) is the same for
   every request of a worker while it runs, like the others above. A framework running requests as
   coroutines rather than one process each can keep it as each request's own with
@@ -123,9 +119,8 @@ unless ext-phasync is loaded and the database is MySQL: then they wait as a coro
   new one, but the others are cut off.
 - **Uncaught exceptions** become a `500 Internal Server Error` for that request (when nothing was
   sent yet) and are logged with their trace; the worker goes on.
-- **Memory leaks accumulate** over the worker's life. `--max-memory` (80 % of
-  `memory_limit` by default) recycles a worker that grows too large: a new one starts, then
-  the old one finishes its requests, and exits when its upgraded connections are gone.
+- **Memory leaks accumulate** over the worker's life. A worker that reaches its
+  `memory_limit` (a quarter of the memory, at most 4 GiB) dies and is replaced.
 
 ## phasync in one page
 

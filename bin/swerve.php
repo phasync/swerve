@@ -62,12 +62,13 @@ require $autoload;
     }
     // The workers are forked from this process, so the settings PHP reads only as it starts are
     // this process's: it starts itself over with them, once. A long-running server, like Node.js:
-    // php.ini's limits for shared hosting don't apply, and memory is the container's to bound.
+    // php.ini's limits for shared hosting don't apply. Each worker may use a quarter of the memory,
+    // at most 4 GiB, as V8 sizes Node's heap; a worker that reaches it dies and another starts.
     // Code changes reach the workers by a restart, so nothing checks timestamps. An explicit -d
     // on the command line wins.
     if (false === \getenv('SWERVE_MASTER')) {
         $ini = [
-            'memory_limit'                          => '-1',
+            'memory_limit'                          => \intdiv(\min(System::getMemorySize() >> 2, 4 << 30), 1 << 20) . 'M',
             'max_execution_time'                    => '0',
             'max_input_time'                        => '-1',
             'open_basedir'                          => '',
