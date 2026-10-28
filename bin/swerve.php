@@ -32,12 +32,25 @@ require $autoload;
     }
     if (!\extension_loaded('phasync') || !\ini_get('phasync.keywords')) {
         // Started on plain PHP (vendor/bin/swerve's shebang): start over through phasync's
-        // bin/phasync, which loads the extension phasync bundles and turns its keywords on
+        // bin/phasync, which loads the extension phasync bundles and turns its keywords on; once
         $phasync = \dirname((new \ReflectionClass(\phasync::class))->getFileName()) . '/bin/phasync';
+        if (\getenv('SWERVE_STARTED_OVER')) {
+            // An extension loaded with -d that phasync does not support: phasync's run() says why
+            try {
+                \phasync::run(static fn () => null);
+                $message = 'the phasync extension ' . \phpversion('phasync') . ' is loaded, without phasync.keywords';
+            } catch (\RuntimeException $e) {
+                $message = $e->getMessage();
+            }
+            \fwrite(\STDERR, "swerve: $message\n");
+            exit(1);
+        }
+        \putenv('SWERVE_STARTED_OVER=1');
         \pcntl_exec(\PHP_BINARY, [...$flags, $phasync, ...$argv]);
         \fwrite(\STDERR, "swerve: could not start over through $phasync\n");
         exit(1);
     }
+    \putenv('SWERVE_STARTED_OVER');
     $http    = '127.0.0.1:8080';
     $workers = System::getCPUCount();
     $log     = null;
