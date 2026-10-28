@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "049fb4f0906025a86f3b619f55df8c13",
+    "content-hash": "bc749f361b1637c586b7b94381c3176a",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -114,16 +114,16 @@
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.5",
+            "version": "2.0.6",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "1417159296045a31307a7d73c7489cd0513bb0ab"
+                "reference": "1e081915ac94e83b3af9f22c1b6dab6560209571"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/1417159296045a31307a7d73c7489cd0513bb0ab",
-                "reference": "1417159296045a31307a7d73c7489cd0513bb0ab",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/1e081915ac94e83b3af9f22c1b6dab6560209571",
+                "reference": "1e081915ac94e83b3af9f22c1b6dab6560209571",
                 "shasum": ""
             },
             "require": {
@@ -182,9 +182,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.5"
+                "source": "https://github.com/phasync/phasync/tree/2.0.6"
             },
-            "time": "2026-10-27T21:48:32+00:00"
+            "time": "2026-10-28T13:21:22+00:00"
         },
         {
             "name": "phasync/serializor",
