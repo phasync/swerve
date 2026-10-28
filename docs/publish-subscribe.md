@@ -116,8 +116,8 @@ started when the application loads, subscribes and drops its cached copy.
 ## Limits
 
 The log lives in APCu beside the cache: `--pubsub-ring` messages of up to 128 KiB each must fit
-in `apc.shm_size` (128M by default; `-d apc.shm_size=512M`) with the cache. When APCu runs out
-it empties itself, and the subscribers of every worker get a `Swerve\SubscriberLagException`.
+in `apc.shm_size` with the cache: 256M by default, which takes memory only as it fills
+(`-d apc.shm_size=1G` for more). When APCu runs out it empties itself, and the subscribers of every worker get a `Swerve\SubscriberLagException`.
 A publish costs an `apcu_inc()`, an `apcu_store()` and a one-byte datagram to each worker with
 subscribers; a slow subscriber holds up nobody but itself.
 
