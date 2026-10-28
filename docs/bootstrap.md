@@ -23,7 +23,9 @@ phasync::go(function () use ($app) {                          // drops what othe
 });
 
 phasync::go(function () use ($app) {                          // one worker at a time runs the job
-    while (!($claim = Swerve::claim('cleanup')->acquire(timeout: 5))) {
+    $lock = fopen(sys_get_temp_dir() . '/myapp-cleanup.lock', 'c');
+    while (!flock($lock, LOCK_EX | LOCK_NB)) {
+        phasync::sleep(5);
     }
     while (true) {                                            // a stop ends it at a wait
         $app->cleanup();
@@ -42,10 +44,10 @@ return new Swerve\RequestHandler($app->handle(...));          // the handler tha
 
 `Swerve::cache()` and `Swerve::publish()` go through the master, and the worker reads its
 answers from the first turn of its event loop after `swerve.php` returns. A coroutine that
-needs them before that waits for it, and carries on once the worker serves. `Swerve::claim()` and
-`Swerve::subscribe()` work at any time.
+needs them before that waits for it, and carries on once the worker serves. `Swerve::subscribe()` works
+at any time.
 
-| Your code runs | `cache()`, `publish()` | `claim()`, `subscribe()` |
+| Your code runs | `cache()`, `publish()` | `subscribe()` |
 |---|---|---|
 | directly in `swerve.php`, while it loads | throw `LogicException` | work |
 | in a coroutine started there (`phasync::go()`, `phasync::service()`) | wait for the worker to serve, then work | work |
@@ -60,13 +62,13 @@ publishes afterwards.
 
 Coroutines and servers started in `swerve.php` exist once in every worker: with 8 workers, a
 subscriber runs 8 times, and a periodic job runs 8 times unless it takes a
-[`Swerve::claim()`](../README.md#claims) first, as above. Nothing a worker keeps in memory is
+[lock](../README.md#one-worker-at-a-time) first, as above. Nothing a worker keeps in memory is
 seen by the others (see [state](how-it-runs.md#state-per-worker-shared-by-its-requests)); the
-cache, messages and claims are what the workers share.
+cache and messages are what the workers share.
 
 An extra listening socket needs `SO_REUSEPORT`, so that every worker can listen on the same
 port (with phasync/net: `phasync\Net\serve($address, ['so_reuseport' => true])`): the kernel hands each new connection to one worker, and it stays there. Keep what the
-connections must share in `Swerve::cache()`. Or let one worker own the port: take a claim, and
+connections must share in `Swerve::cache()`. Or let one worker own the port: take a lock, and
 listen only while you hold it.
 
 ## Restarts and reloads
@@ -76,8 +78,8 @@ listen only while you hold it.
   a reload, and its clients reconnect, as they do after a crash or a recycle. Save or undo
   partial work in `phasync::finally()` or `phasync::shielded()`.
 - `Swerve::draining()` turns true when the worker starts to stop.
-- A claim is released as its handle goes, when the exception unwinds the job; a worker that
-  exits or dies loses its claims.
+- A lock is released as its handle goes, when the exception unwinds the job; a worker that
+  exits or dies loses its locks.
 - A reload stops every worker before starting new ones, so old and new code never run at the
   same time.
 

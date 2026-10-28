@@ -338,7 +338,7 @@ body (`''` only at its end) and `write()` sends the response body. The module do
 - **Recycle: lingering.** A worker replaced by a recycle (`--max-memory`, `--max-requests`)
   keeps its upgraded connections instead of draining them: it stops accepting, finishes its
   plain requests and stays until the last client has left, or `--linger` seconds (1800) have
-  passed, which then ends it like a shutdown. Subscriptions, the cache and claims keep working
+  passed, which then ends it like a shutdown. Subscriptions and the cache keep working
   meanwhile. A slot has at most three lingering workers; a recycle that would make a fourth waits
   until one exits. A reload or shutdown ends the lingering with `--grace`. `--linger=0` drains a
   recycled worker at once.
@@ -381,15 +381,8 @@ foreach (Swerve::subscribe('chat') as $message) {
   nothing sent before it. Swerve is one machine; across machines, use Redis, NATS or the like.
 - A subscription ends when its last reference goes: a `break`, the variable going out of scope,
   the request's coroutine ending. A topic costs nothing in a worker without subscribers.
-- `new \Swerve\OrderedChannel('ledger')` is for many publishers that need one common order: its
-  `write()` and `subscribe()` (or `foreach ($channel as $m)`) give every subscriber, in every
-  worker, the same order, apart from the plain topic of that name.
-  The workers append to a log file in the master's temporary directory, and a message that was
-  appended survives the death of its worker. Files are kept for about 30 s, a subscriber further
-  behind gets a `SubscriberLagException`, and nothing is written while nobody subscribes.
-  `SWERVE_TMPDIR` names the directory the master makes its temporary directories in (default
-  the system's temporary directory; tmpfs such as `/dev/shm` is fine). Nothing is synced or
-  durable beyond the master.
+- For one order across all subscribers, publish from a single writer: one process or request
+  that every change goes through.
 - A message is kept once per worker, however many subscribe, until the slowest subscriber
   read it. One falling more than `maxLag` seconds behind (30 by default,
   `Swerve::subscribe('prices', maxLag: 5)`) gets a `SubscriberLagException` from its loop.
@@ -422,30 +415,23 @@ $cache->set("user.$id", $user, 60);
   `swerve.php` it throws ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
   embedded in your own process), the cache is the process's own.
 
-### Claims
+### One worker at a time
 
-`Swerve::claim($name)` gives a handle on a name that one worker at a time can hold: a job that
-must not run twice, a leader. The handle claims nothing yet.
+A job that must not run twice, or a leader, takes a lock with `flock()` on a file of its own.
+The kernel releases it when the handle closes or the worker dies.
 
 ```php
 function nightlyReport(): void
 {
-    if ($claim = Swerve::claim('nightly-report')->acquire()) {
+    $lock = fopen(sys_get_temp_dir() . '/myapp-nightly-report.lock', 'c');
+    if (flock($lock, LOCK_EX | LOCK_NB)) {
         work();
     }
-}   // $claim goes out of scope: released
+}   // $lock goes out of scope: released
 ```
 
-- `available()` tells whether nobody holds the name, claiming nothing. `acquire($timeout)` takes
-  it and returns the handle, or `null`; with a `$timeout` it tries again every 20 ms until the
-  name is free (no queue: the first to try when it frees wins). On a handle that holds the name
-  already, it returns the handle. `held()` tells whether this handle holds it. `release()` gives
-  it up.
-- A claim has no TTL: it is held until released, destroyed, or its worker exits or dies (the
-  master clears a dead worker's claims). Names are apart from the cache's keys.
-- A claim is a file in a temporary directory (under `$SWERVE_TMPDIR`) that the master creates and removes: a hard link
-  to a file with its holder's pid in it. Linking is atomic, and fails while the name is held.
-  Without the master it works the same, in a directory of the process that dies with it.
+- `LOCK_NB` returns at once. A lock is held per opened handle, so two coroutines of one worker
+  that each `fopen()` the file exclude each other too.
 
 ## Supervision
 

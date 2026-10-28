@@ -6,7 +6,6 @@
  */
 
 use Swerve\ClientRequest;
-use Swerve\OrderedChannel;
 use Swerve\Swerve;
 
 $report = new ArrayObject();
@@ -28,7 +27,6 @@ phasync::go(static function () use ($attempt) {
         }
     });
     $attempt('go publish', static fn () => Swerve::publish('early', 'x'));
-    $attempt('go ordered', static fn () => (new OrderedChannel('early'))->subscribe());
 });
 phasync::service(static function () use ($attempt) {
     $attempt('service cache', static fn () => Swerve::cache()->get('early'));
@@ -37,7 +35,7 @@ $attempt('load', static fn () => Swerve::cache()->get('early'));
 
 while (Swerve::accept(null, function () use ($report) {
     Swerve::upgrade(static function (ClientRequest $r) use ($report): void {
-        for ($waited = 0; \count($report) < 5 && $waited < 200; ++$waited) {
+        for ($waited = 0; \count($report) < 4 && $waited < 200; ++$waited) {
             phasync::sleep(0.01); // the coroutines may still wait for the worker to serve
         }
         $copy = $report->getArrayCopy();

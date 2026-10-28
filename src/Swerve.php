@@ -108,7 +108,6 @@ final class Swerve
      *
      * @see Swerve::subscribe       receives the messages
      * @see Swerve::publishRaw      bytes that are not JSON, such as a binary WebSocket frame
-     * @see Swerve\OrderedChannel   when order between workers matters
      *
      * @topic coordination-across-workers
      *
@@ -177,7 +176,6 @@ final class Swerve
      * @throws \InvalidArgumentException for a topic starting with "\0"
      *
      * @see Swerve::publish         sends the messages
-     * @see Swerve\OrderedChannel   when every subscriber must see one common order
      *
      * @topic coordination-across-workers
      *
@@ -191,7 +189,7 @@ final class Swerve
         return new Subscription($topic, $maxLag, $heartbeat);
     }
 
-    /** Topics starting with "\0" are swerve's own: the ordered log's channels, among others (see OrderedChannel). */
+    /** Topics starting with "\0" are swerve's own (Inboxes::TOPIC, among others). */
     private static function refuseInternal(string $topic): void
     {
         if (\str_starts_with($topic, "\0")) {

@@ -16,11 +16,6 @@ use Swerve\WorkerStoppingException;
  * the load fail.
  */
 $testDir = \getenv('SWERVE_TEST_DIR') ?: null;
-if ($segment = \getenv('SWERVE_TEST_SEGMENT')) {
-    // The ordered log's segments, short enough to rotate in a test
-    \Swerve\Util\OrderedLog::$segment = (float) $segment;
-    \Swerve\Util\OrderedLog::$grace   = (float) $segment / 10;
-}
 if ($testDir && \file_exists("$testDir/crash")) {
     exit(3);
 }
@@ -719,12 +714,12 @@ $app = new class($version) {
                 fx_send($r, 200, [], (string) $this->sseLive);
 
                 return;
-            // Swerve::subscribe() (?ordered=1: an OrderedChannel) as Server-Sent Events: "ready <pid>"
+            // Swerve::subscribe() as Server-Sent Events: "ready <pid>"
             // once subscribed, then ?n= messages of ?topic=; ?maxlag= seconds, ?stall= seconds before
             // the first is read; "lag" if the subscription throws SubscriberLagException
             case '/subscribe':
                 $maxLag       = (float) ($query['maxlag'] ?? 30);
-                $subscription = isset($query['ordered']) ? (new \Swerve\OrderedChannel($query['topic']))->subscribe($maxLag) : Swerve::subscribe($query['topic'], $maxLag);
+                $subscription = Swerve::subscribe($query['topic'], $maxLag);
                 $r->sendResponseHeaders(200, ['Content-Type' => 'text/event-stream']);
                 $r->write('data: ready ' . \getmypid() . "\n\n");
                 $r->flush();
@@ -751,20 +746,15 @@ $app = new class($version) {
                 fx_send($r, 200, [], 'published');
 
                 return;
-            // ?count= messages "<?id>:<i>:" and ?size= (0) more bytes to ?topic=, ?sleep= ms (0.5) apart, with
-            // an OrderedChannel for ?ordered=1; answers the pid
+            // ?count= messages "<?id>:<i>:" and ?size= (0) more bytes to ?topic=, ?sleep= ms (0.5) apart;
+            // answers the pid
             case '/publish-seq':
                 for ($i = 0; $i < (int) $query['count']; ++$i) {
                     $message = $query['id'] . ':' . $i . ':' . \str_repeat((string) ($i % 10), (int) ($query['size'] ?? 0));
-                    isset($query['ordered']) ? (new \Swerve\OrderedChannel($query['topic']))->write($message) : Swerve::publish($query['topic'], $message);
+                    Swerve::publish($query['topic'], $message);
                     phasync::sleep((float) ($query['sleep'] ?? 0.5) / 1000);
                 }
                 fx_send($r, 200, [], (string) \getmypid());
-
-                return;
-            case '/publish-ordered':
-                (new \Swerve\OrderedChannel($query['topic']))->write($query['m']);
-                fx_send($r, 200, [], 'published');
 
                 return;
             // Blocks the worker's event loop for ?ms= (a busy wait: with ext-phasync, usleep() yields)

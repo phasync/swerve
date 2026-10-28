@@ -125,7 +125,7 @@ final class Topics
     }
 
     /**
-     * What publish() sends and OrderedChannel::write() writes: $message as JSON, after the checks of
+     * What publish() sends: $message as JSON, after the checks of
      * the topic and the message.
      */
     public static function encode(string $topic, mixed $message): string

@@ -6,8 +6,7 @@ namespace Swerve;
  * A subscription fell further behind its topic than its `$maxLag` seconds, see {@see Subscription}.
  *
  * Thrown from the subscription's loop, which ends. A client that can't keep up is better
- * disconnected: it reconnects and catches up from storage. An {@see OrderedChannel} subscription
- * also throws it when messages were lost because its worker did not run for about 30 s.
+ * disconnected: it reconnects and catches up from storage.
  *
  * ```php
  * try {
