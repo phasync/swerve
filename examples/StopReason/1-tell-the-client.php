@@ -13,7 +13,6 @@ $app = new RequestHandler(function (ClientRequest $request) {
         phasync::shielded(fn () => $request->write(match ($e->reason) {
             StopReason::Shutdown => "the server is going away\n",
             StopReason::Reload   => "new code is starting: reconnect\n",
-            StopReason::Recycle  => "this worker is replaced: reconnect\n",
         }));
     }
 });

@@ -77,15 +77,14 @@ test('many lookups at once from coroutines of one request each get their own ans
     }
 });
 
-test('a reload, which restarts swerve, starts the cache empty', function () {
-    test()->markTestSkipped('0.2: SIGHUP reload is not ported yet');
+test('a reload keeps the cache: the new worker reads what the old one stored', function () {
     [$process, $addr, $log] = swerve_start(workers: 1);
     try {
         [$old] = cache_call($addr, '/cache-set?k=kept&v=42');
         swerve_signal($process, SIGHUP);
         log_wait($log, '/Reload complete/', 8);
         [$pid, $value] = cache_call($addr, '/cache-get?k=kept');
-        expect([$pid !== $old, $value])->toBe([true, 'missing']);
+        expect([$pid !== $old, $value])->toBe([true, 42]);
     } finally {
         native_stop($process);
     }

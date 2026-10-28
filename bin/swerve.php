@@ -7,12 +7,13 @@
  * swerve.php, again and again (run_next()). A worker that exits is replaced. The WebSockets
  * of short-lived lifecycles (WordPress's) move to WebSocket workers, started as they are needed.
  *
- *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php | -S [dir] [router.php]]
+ *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [--grace=SECONDS] [--watch] [swerve.php | -S [dir] [router.php]]
  */
 
 use phasync\ext;
 use Psr\Log\LogLevel;
 use Swerve\Lot\Lot;
+use Swerve\Lot\Supervisor;
 use Swerve\Util\Logger;
 use Swerve\Util\System;
 
@@ -54,6 +55,8 @@ require $autoload;
     $http    = '127.0.0.1:8080';
     $workers = System::getCPUCount();
     $log     = null;
+    $grace   = 10.0;
+    $watch   = false;
     $serve   = false;
     $paths   = [];
     foreach (\array_slice($argv, 1) as $arg) {
@@ -61,13 +64,15 @@ require $autoload;
             \str_starts_with($arg, '--http=')    => $http    = \substr($arg, 7),
             \str_starts_with($arg, '--workers=') => $workers = (int) \substr($arg, 10),
             \str_starts_with($arg, '--log=')     => $log     = \substr($arg, 6),
+            \str_starts_with($arg, '--grace=')   => $grace   = (float) \substr($arg, 8),
+            '--watch' === $arg                   => $watch   = true,
             '-S' === $arg                        => $serve   = true,
             \str_starts_with($arg, '-')          => $unknown = $arg,
             default                              => $paths[] = $arg,
         };
     }
     $fail = static function (string $message): never {
-        \fwrite(\STDERR, "swerve: $message\nusage: swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php | -S [dir] [router.php]]\n");
+        \fwrite(\STDERR, "swerve: $message\nusage: swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [--grace=SECONDS] [--watch] [swerve.php | -S [dir] [router.php]]\n");
         exit(1);
     };
     if (isset($unknown)) {
@@ -174,110 +179,22 @@ require $autoload;
     $listener = @\stream_socket_server($address, $errno, $error, context: \stream_context_create(['socket' => ['backlog' => 65535]]));
     if (false !== $listener && isset($path)) {
         $socket = $path;
+        \chmod($path, 0o666); // a front server running as another user connects to it, as to php-fpm's
     }
     if (false === $listener) {
         $logger->critical('Cannot listen on {address}: {error}', ['address' => $http, 'error' => $error ?: \error_get_last()['message'] ?? '']);
         exit(1);
     }
 
-    $inc = \dirname(__DIR__) . '/inc';
-
-    $pids = [];
-    $stop = static function (int $status = 0) use (&$pids, $socket): never {
-        foreach ($pids as $pid) {
-            \posix_kill($pid, \SIGTERM);
-        }
-        if (null !== $socket) {
-            @\unlink($socket);
-        }
-        exit($status);
-    };
-    \pcntl_async_signals(true);
-    \pcntl_signal(\SIGTERM, static fn () => $stop());
-    \pcntl_signal(\SIGINT, static fn () => $stop());
-
     // The WebSockets of short-lived lifecycles move to the WebSocket workers over this pair: the
     // workers write to one end (their fd 4), the WebSocket workers read the other (their fd 3)
     [$toWebSockets, $webSockets] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
-
-    // Fork a process that runs $script with $descriptors' descriptors (fd 3 on), then $supervise
-    // here; once the process is gone, another
-    $spawn = static function (string $name, string $script, \Closure $descriptors, \Closure $supervise) use ($logger, $out, $workDir, &$pids, $stop): void {
-        try {
-            while (true) {
-                $started = \microtime(true);
-                $fds     = $descriptors();
-                $pid     = \pcntl_fork();
-                if (-1 === $pid) {
-                    throw new \RuntimeException('fork() failed: ' . \pcntl_strerror(\pcntl_get_last_error()));
-                }
-                if (0 === $pid) {
-                    // Its descriptors and stdio as ones that outlive this request; then this
-                    // script ends, and run_next() starts $script
-                    foreach ($fds as $n => $fd) {
-                        ext\dup2($fd, 3 + $n);
-                    }
-                    ext\dup2(\fopen('/dev/null', 'r'), 0);
-                    ext\dup2($out, 1);
-                    ext\dup2($out, 2);
-                    \chdir($workDir);
-                    ext\run_next($script);
-                    exit(0);
-                }
-                $pids[$name] = $pid;
-                $supervise();
-                while (0 === \pcntl_waitpid($pid, $status, \WNOHANG)) {
-                    phasync::sleep(0.01);
-                }
-                unset($pids[$name]);
-                $logger->warning('{name} exited ({status}); starting another', ['name' => $name, 'status' => \pcntl_wifexited($status) ? \pcntl_wexitstatus($status) : 'signal ' . \pcntl_wtermsig($status)]);
-                if (\microtime(true) - $started < 1) {
-                    phasync::sleep(1); // failing at once: not in a tight loop
-                }
-            }
-        } catch (\Throwable $e) {
-            // A process nobody supervises would be lost quietly: stop instead
-            $logger->critical('Supervising {name} failed: {exception}', ['name' => $name, 'exception' => $e]);
-            $stop(1);
+    $supervisor                  = new Supervisor(new Lot($listener, $logger), $logger, $workers, \dirname(__DIR__) . '/inc', $out, $workDir, $toWebSockets, $webSockets, $grace, $watch ? $workDir : null);
+    try {
+        phasync::run($supervisor->run(...));
+    } finally {
+        if (null !== $socket) {
+            @\unlink($socket);
         }
-    };
-
-    phasync::run(static function () use ($listener, $logger, $workers, $inc, $spawn, $toWebSockets, $webSockets): void {
-        $lot = new Lot($listener, $logger);
-        phasync::go($lot->run(...));
-        // WebSocket workers on demand, which read the pair's end in turn: the first when a WebSocket
-        // first waits there, another whenever one waits there unread for 10 ms (those running are
-        // busy), up to one per worker. The master only watches the end; it never reads it.
-        phasync::go(static function () use ($workers, $inc, $spawn, $webSockets): void {
-            for ($running = 0; $running < $workers;) {
-                phasync::readable($webSockets);
-                if ($running > 0) {
-                    phasync::sleep(0.01);
-                    $waiting = [$webSockets];
-                    $none    = null;
-                    if (0 === \stream_select($waiting, $none, $none, 0)) {
-                        continue; // taken meanwhile
-                    }
-                }
-                $n = ++$running;
-                phasync::go(static fn () => $spawn("WebSocket worker $n", "$inc/websocket-worker.php", static fn () => [$webSockets], static function (): void {
-                }));
-                phasync::sleep(0.5); // its start: until it reads, what waits is no sign of busy ones
-            }
-        });
-        for ($n = 0; $n < $workers; ++$n) {
-            phasync::go(static function () use ($n, $lot, $inc, $spawn, $toWebSockets): void {
-                $master = $channel = null;
-                $spawn("Worker $n", "$inc/worker.php", static function () use (&$master, &$channel, $toWebSockets): array {
-                    [$master, $channel] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
-
-                    return [$channel, $toWebSockets];
-                }, static function () use (&$master, &$channel, $lot): void {
-                    \fclose($channel);
-                    $lot->serve($master); // until the worker is gone
-                    \fclose($master);
-                });
-            });
-        }
-    });
+    }
 })($autoload, $argv);

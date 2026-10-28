@@ -13,7 +13,10 @@ use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
+use Swerve\StopReason;
 use Swerve\UpgradeException;
+use Swerve\Util\Topics;
+use Swerve\WorkerStoppingException;
 use Swerve\Util\ObjectPoolTrait;
 
 /**
@@ -23,9 +26,11 @@ use Swerve\Util\ObjectPoolTrait;
  * Packets, one letter, a connection riding along as SCM_RIGHTS:
  *
  * - worker 'H': a lifecycle starts. The master forgets the ask of the one before and answers
- *   'h', after any connection it sent to that one: those are this lifecycle's to serve.
+ *   'h', after any connection it sent to that one: those are this lifecycle's to serve; or 's'
+ *   when the worker is stopping: it exits without running the application.
  * - worker 'N': next, please. The master answers 'C' with a connection that has a request
- *   waiting, as soon as it has one.
+ *   waiting, as soon as it has one; or 'S' (the server shuts down) or 'L' (a reload replaces
+ *   this worker): the worker stops, see {@see LotClient::stop()}.
  * - worker 'R' + connection: back, kept alive, with its next request waiting.
  * - worker 'B' + connection: back, kept alive and idle: the lifecycle ended before its next request.
  *
@@ -88,6 +93,15 @@ final class LotClient
     /** The service receiving the master's answers, while one runs. */
     private ?\Fiber $reader = null;
 
+    /** Why this worker stops, once the master said so. */
+    private ?StopReason $stopping = null;
+
+    /** @var \WeakMap<Accepted, true> requests that got a connection, see stop() */
+    private \WeakMap $started;
+
+    /** Seconds the coroutines still running have to clean up once the worker's requests ended. */
+    private const STOP_WINDOW = 1.0;
+
     /** This lifecycle's client: one per lifecycle, since run_next() resets the statics. */
     public static function get(): self
     {
@@ -103,12 +117,35 @@ final class LotClient
         }
         $this->channel = $channel;
         $this->socket  = $socket;
+        $this->started = new \WeakMap();
+    }
+
+    /**
+     * Greet the master as this lifecycle starts: false when the worker is stopping, and must exit
+     * without running the application.
+     */
+    public function hello(): bool
+    {
+        self::send($this->socket, 'H');
+        // Before the answer: what the master sent the lifecycle before, a connection to serve, or
+        // the stop that its ask got
+        while (!\in_array([$type, $conn] = $this->receiveOrFail(), [['h', null], ['s', null]], true)) {
+            if ('C' === $type) {
+                $this->stash[] = \socket_export_stream($conn);
+            }
+        }
+        if ('s' === $type) {
+            foreach ($this->stash as $conn) {
+                $this->giveBack($conn, 'R');
+            }
+            $this->stash = [];
+
+            return false;
+        }
         // Registered from a shutdown function, so it runs after the application's
         \register_shutdown_function(fn () => \register_shutdown_function($this->shutdown(...)));
-        self::send($this->socket, 'H');
-        while ('h' !== ([$type, $conn] = $this->receiveOrFail())[0]) {
-            $this->stash[] = \socket_export_stream($conn);
-        }
+
+        return true;
     }
 
     /**
@@ -121,7 +158,9 @@ final class LotClient
     {
         ++$this->accepts;
         $request = new Accepted($handler, $files);
-        $this->assign($request);
+        if (!$this->assign($request)) {
+            throw new WorkerStoppingException($this->stopping);
+        }
 
         return $request;
     }
@@ -164,26 +203,37 @@ final class LotClient
         $client->moved();
     }
 
-    /** Give $request a connection with a request waiting: one served here, else one from the master. */
-    private function assign(Accepted $request): void
+    /**
+     * Give $request a connection with a request waiting: one served here, else one from the
+     * master. False when the worker stops first: $request is done, and failed.
+     */
+    private function assign(Accepted $request): bool
     {
         ++$this->accepting;
         try {
             while (true) {
+                if (null !== $this->stopping) {
+                    $request->fail(new WorkerStoppingException($this->stopping));
+                    $request->done();
+
+                    return false;
+                }
                 if ([] !== $this->ready) {
                     $offer                                = \array_shift($this->ready);
                     $this->busy[(int) $offer->stream]     = $offer->stream;
                     $offer->request                       = $request;
+                    $this->started[$request]              = true;
                     phasync::raiseFlag($offer);
 
-                    return;
+                    return true;
                 }
                 if ([] !== $this->stash) {
                     $stream                     = \array_shift($this->stash);
                     $this->busy[(int) $stream]  = $stream;
+                    $this->started[$request]    = true;
                     phasync::service($this->connection(...), $stream, $request);
 
-                    return;
+                    return true;
                 }
                 // The reader first: a service runs at once, and one started after the 'N' could
                 // take the answer, and raise the flag, before this waits for it
@@ -321,22 +371,85 @@ final class LotClient
         }
     }
 
-    /** The master's answers to 'N': connections with a request waiting. */
+    /**
+     * Once swerve.php ended, in the lifecycle's main coroutine: when the worker stops, wait for the
+     * requests that got a connection to end; then the Swerve::onShutdown() callbacks run, and
+     * every coroutine still running (an upgraded connection, work in the background) gets a
+     * WorkerStoppingException, and STOP_WINDOW seconds to end. The lifecycle ends, and the master
+     * answers the next one's hello with 's'. Nothing to do while the worker does not stop.
+     */
+    public function drain(): void
+    {
+        if (null === $this->stopping) {
+            return;
+        }
+        foreach ($this->started as $request => $_) {
+            try {
+                $request->await();
+            } catch (\Throwable) {
+                // its client got its answer; the application's await() has it
+            }
+        }
+        Topics::drain();
+        if (phasync::shutdown(self::STOP_WINDOW, new WorkerStoppingException($this->stopping)) > 0) {
+            exit(0); // what did not end is dropped
+        }
+    }
+
+    /** The master's answers to 'N': connections with a request waiting, or the stop. */
     private function read(): void
     {
         try {
             while (true) {
-                [$type, $conn] = $this->receiveOrFail();
+                $msg = self::receive($this->channel, $this->socket);
+                if (null === $msg) {
+                    $this->stop(StopReason::Shutdown); // the master is gone
+
+                    return;
+                }
+                [$type, $conn] = $msg;
+                $this->asking  = false;
+                if ('S' === $type || 'L' === $type) {
+                    $this->stop('S' === $type ? StopReason::Shutdown : StopReason::Reload);
+
+                    return;
+                }
                 if ('C' !== $type || null === $conn) {
                     throw new \UnexpectedValueException("The master answered '$type' to a worker's ask");
                 }
-                $this->asking  = false;
                 $this->stash[] = \socket_export_stream($conn);
                 phasync::raiseFlag($this);
             }
         } finally {
             $this->reader = null;
         }
+    }
+
+    /**
+     * The worker stops: accept() throws a WorkerStoppingException, and so does any accept()
+     * waiting; the connections waiting for their next request go back to the master. swerve.php
+     * ends, and drain() finishes the lifecycle.
+     */
+    private function stop(StopReason $reason): void
+    {
+        $this->stopping = $reason;
+        phasync::raiseFlag($this);
+        foreach ($this->idle as $id => $conn) {
+            phasync::cancel($this->connections[$id][1]);
+            $this->giveBack($conn, 'B');
+        }
+        foreach ($this->ready as $offer) {
+            phasync::cancel($this->connections[(int) $offer->stream][1]);
+            if ($offer->buffered) {
+                \fclose($offer->stream); // what was read here can't go with the socket
+            } else {
+                $this->giveBack($offer->stream, 'R');
+            }
+        }
+        foreach ($this->stash as $conn) {
+            $this->giveBack($conn, 'R');
+        }
+        $this->idle = $this->ready = $this->stash = [];
     }
 
     /**

@@ -14,41 +14,33 @@ Options:
   --http=<address>       Serve HTTP here: host:port, or unix:/path (default: 127.0.0.1:8080)
   --workers=<n>          Worker processes (default: one per CPU core)
   --log=<path>           Append the log, and the workers' PHP errors, to this file instead of the terminal
+  --grace=<seconds>      How long a stop waits for the requests in flight before it kills (default: 10)
+  --watch                Reload when a PHP file of the application changes (for development)
   -d name=value          PHP settings go to PHP itself: php -d memory_limit=1G vendor/bin/swerve
 ```
 
-- Options and the application file may come in any order. An option's value is attached
-  (`--workers=4`, `-w4`) or the next word (`--workers 4`, `-w 4`); flags may be grouped
-  (`-vv`).
-- A usage error prints one line to stderr and exits with code 2.
-- Addresses: `8080` is 127.0.0.1:8080, this machine only; `:8080` is every IPv4 interface;
-  `localhost:8080`, `192.168.1.10:8080` and `[::1]:8080` are that address. A host name is
-  resolved once, at start. `--http` may be given more than once.
+- A usage error prints the reason and the usage to stderr, and exits with code 1.
 - `unix:/run/swerve.sock` (also `unix:///run/swerve.sock`, or just `/run/swerve.sock`) listens on a
   Unix domain socket, for nginx on the same machine: `proxy_pass http://unix:/run/swerve.sock;`.
-  The workers share the one socket file, made at start (a stale file is replaced; where anything
-  listens, or a file that isn't a socket is in the way, swerve refuses to start) and removed at
-  stop. Anyone may connect: limit access with the permissions of the directory it is in.
-- `--adapter` picks what provides the entry point when a package such as a framework adapter is installed, see
-  [Adapters](../README.md#adapters). A `swerve.php` argument cannot be combined with an adapter other than `swerve`.
-- `--public` applies to HTTP, which is all swerve serves; a proxy in front (nginx,
-  HAProxy, Caddy) speaks HTTP to it.
+  The socket file is made at start (a stale one is replaced; where anything listens, or a file
+  that isn't a socket is in the way, swerve refuses to start) and removed at stop. Anyone may
+  connect: limit access with the permissions of the directory it is in.
+- `--watch` watches the PHP files below the application's directory (or `-S`'s), leaving out
+  `vendor/` and names that start with a dot; `vendor/composer/installed.php` tells when Composer
+  ran.
 
 ## Exit codes
 
 | | |
 |---|---|
-| 0 | stopped by a signal, after draining |
-| 1 | could not start: the address is taken, the log file can't be opened, the application file is missing |
-| 2 | a usage error; or the application can't start: loading it threw, or it returned something other than a `Swerve\RequestHandler` |
-| 255 | the application can't start because of a PHP fatal error, such as a syntax error (when every worker fails to start, swerve stops with the last one's exit code) |
+| 0 | stopped by a signal |
+| 1 | could not start: a usage error, the address is taken, the application file is missing, or the loaded phasync extension is one phasync can't use |
 
 ## Signals to the master process
 
 | | |
 |---|---|
-| `SIGTERM`, `SIGINT` (Ctrl+C), `SIGQUIT` | stop: workers finish their requests within `--grace`, then are killed; a second signal kills at once |
-| `SIGHUP`, `SIGUSR2` | reopen the log file, and reload: stop every worker, then restart swerve in place (same PID) running the current code |
-| `SIGUSR1` | reopen the log file (after log rotation) |
+| `SIGTERM`, `SIGINT` (Ctrl+C) | stop: the listener closes; workers finish the requests in flight, then their WebSockets and event streams get a `WorkerStoppingException` (a WebSocket closes with 1001); what still runs after `--grace` is killed. A second signal kills at once |
+| `SIGHUP` | reload: each worker is replaced by one running the code as it is now; the old one stops as above once the new one is ready (a WebSocket closes with 1012: reconnect). A new worker that fails to start leaves the old one serving |
 
 Next: [Production](production.md).

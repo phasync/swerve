@@ -73,14 +73,13 @@ listen only while you hold it.
 
 ## Restarts and reloads
 
-- When the worker stops, every coroutine you started gets a `Swerve\WorkerStoppingException`
-  at its wait, at once, and the worker exits once they have ended: your server does not hold up
-  a reload, and its clients reconnect, as they do after a crash. Save or undo
-  partial work in `phasync::finally()` or `phasync::shielded()`.
-- `Swerve::draining()` turns true when the worker starts to stop.
-- A lock is released as its handle goes, when the exception unwinds the job; a worker that
-  exits or dies loses its locks.
-- A reload stops every worker before starting new ones, so old and new code never run at the
-  same time.
+- When the worker stops, its requests in flight finish; then every coroutine still running gets
+  a `Swerve\WorkerStoppingException` at its wait, and a second to end: your server does not hold
+  up a reload, and its clients reconnect, as they do after a crash. Save or undo partial work in
+  `phasync::finally()` or `phasync::shielded()`. `Swerve::onShutdown()` callbacks run first.
+- A lock (`flock()`) is released as its handle goes, when the exception unwinds the job; a worker
+  that exits or dies loses its locks.
+- A reload starts each new worker before its old one stops, so old and new code run side by side
+  for a moment: a change to shared state (the cache, a database) must suit both.
 
 Next: [Requests and responses](requests-and-responses.md).

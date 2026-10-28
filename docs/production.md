@@ -108,21 +108,21 @@ After=network.target
 [Service]
 User=myapp
 WorkingDirectory=/srv/myapp/current
-ExecStart=/usr/bin/php vendor/bin/swerve --http=127.0.0.1:8080 --public=public
+ExecStart=/usr/bin/php vendor/bin/swerve --http=127.0.0.1:8080
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 LimitNOFILE=1048576
-# Longer than --grace (30 s), so swerve's own drain finishes first
-TimeoutStopSec=40
+# Longer than --grace (10 s), so swerve's own drain finishes first
+TimeoutStopSec=20
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-`systemctl reload myapp` stops every worker (requests in flight get a `503`), then restarts swerve in
-place, same PID, running the current code, swerve and `php.ini`: deploy, then reload. Connections
-arriving while it restarts are refused, and the cache starts empty. Logs go to the journal
-(`journalctl -u myapp`).
+`systemctl reload myapp` replaces each worker with one running the current code: deploy, then
+reload. The old worker stops once its replacement is ready, after finishing its requests; no
+connection is refused, and the cache is kept. A change to `php.ini` or to swerve itself needs a
+restart. Logs go to the journal (`journalctl -u myapp`).
 
 ## Docker
 
@@ -134,9 +134,9 @@ COPY . .
 CMD ["vendor/bin/swerve", "--http=:8080", "--public=public"]
 ```
 
-`docker stop` sends `SIGTERM` and waits 10 s by default: give it `--time=40` (or
-`stop_grace_period: 40s` in compose), or lower `--grace`. The container's CPU count is what
-`--workers=auto` sees.
+`docker stop` sends `SIGTERM` and waits 10 s by default, as long as swerve's `--grace`: give it
+`--time=20` (or `stop_grace_period: 20s` in compose), so swerve's own drain finishes first. The
+container's CPU count is what the default `--workers` sees.
 
 ## nginx in front: TLS, and SSE through it
 
@@ -177,15 +177,12 @@ proxy's, unless it is a [trusted proxy](#behind-a-proxy); the client's address i
 
 ## Reloads, shutdown, and long-lived connections
 
-- On a reload or shutdown, each worker stops accepting, and every coroutine, requests in flight
-  included, gets a `Swerve\WorkerStoppingException` at its wait at once: a request whose response
-  has not started gets a `503`, long responses and upgraded connections are cut, a
-  `Swerve\WebSocket` closes with 1001 (1012 on a reload). The worker exits once its coroutines
-  have cleaned up, a second before `--grace` (30 s) at most. Clients must retry and reconnect,
-  as after any server's death: `EventSource` does by itself; write reconnecting into other clients.
-- `sysctl net.ipv4.tcp_migrate_req=1` makes the kernel hand connections waiting in a closing
-  worker's queue to another worker instead of resetting them; swerve logs a hint at start when
-  it is 0.
+- On a reload or shutdown, each worker stops accepting and finishes its requests in flight; then
+  every coroutine still running (upgraded connections, event streams, work in the background)
+  gets a `Swerve\WorkerStoppingException` at its wait, and a second to end: a `Swerve\WebSocket`
+  closes with 1001 (1012 on a reload). What still runs after `--grace` (10 s) is killed. Clients
+  must reconnect, as after any server's death: `EventSource` does by itself; write reconnecting
+  into other clients.
 
 ## Logs
 
