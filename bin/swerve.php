@@ -152,6 +152,10 @@ require $autoload;
         // The environment, not putenv(): PHP undoes putenv() when a request ends, and the
         // workers' lifecycles are requests
         $env += ['SWERVE_MASTER' => '1', 'SWERVE_AUTOLOAD' => \realpath($autoload), 'SWERVE_APP' => $appFile];
+        if (\extension_loaded('grpc') && false === \getenv('GRPC_ENABLE_FORK_SUPPORT')) {
+            // The workers are forked: without this, grpc's threads keep a forked worker from exiting
+            $env['GRPC_ENABLE_FORK_SUPPORT'] = '1';
+        }
         // Descriptors 3 and 4 are the children's channels (see below): taken here, so the PHP
         // that starts opens its own files (the script, opcache's lock) above them
         $null = \fopen('/dev/null', 'r');
