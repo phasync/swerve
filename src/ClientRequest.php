@@ -55,7 +55,7 @@ interface ClientRequest extends Duplex
     /** '1.0' or '1.1'. */
     public function getProtocolVersion(): string;
 
-    /** 'http' or 'https'; from a trusted proxy's `X-Forwarded-Proto` (see `--trusted-proxy`). */
+    /** 'http' or 'https'. */
     public function getScheme(): string;
 
     /**

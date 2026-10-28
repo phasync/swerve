@@ -11,7 +11,6 @@ Application:
 Serving:
   --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
   --public=<dir>                   HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
-  --trusted-proxy=<ip|range|unix>  HTTP: believe the X-Forwarded-For, -Proto and -Host of a proxy at this IP address, range (10.0.0.0/8) or unix (unix: sockets); repeat for several
   -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
 
 Extension:
@@ -56,11 +55,6 @@ Information:
   [Adapters](../README.md#adapters). A `swerve.php` argument cannot be combined with an adapter other than `swerve`.
 - `--public` and `--max-body` apply to HTTP, which is all swerve serves; a proxy in front (nginx,
   HAProxy, Caddy) speaks HTTP to it.
-- `--trusted-proxy` names the proxies in front of swerve: an address (`10.0.0.5`, `::1`), a range
-  (`10.0.0.0/8`, `fd00::/8`) or `unix` for clients on a Unix socket. For a request from one of them,
-  `peer()` is the rightmost `X-Forwarded-For` address that is not a trusted proxy, `getScheme()` is
-  `https` when `X-Forwarded-Proto` is `https`, and the `host` header is `X-Forwarded-Host`. From any
-  other peer these headers are left as they came, and mean nothing to swerve.
 
 ## Exit codes
 

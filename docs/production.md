@@ -101,12 +101,9 @@ does. A reload or shutdown does not linger: it ends the lingering too, within `-
 
 ## Behind a proxy
 
-Behind nginx or HAProxy over HTTP, `peer()` is the proxy until swerve is told to trust it:
-`--trusted-proxy=10.0.0.5` (or a range, or `unix` for a Unix socket) makes the `X-Forwarded-For`,
-`-Proto` and `-Host` headers of that peer count: `peer()`, `getScheme()` and the `host` header of
-`getRequestHeaders()` are then the client's. The `X-Forwarded-For` chain is read from the right: the first address that is not a trusted
-proxy is the client, so a client's own forged entries are never reached. `X-Forwarded-Proto` and
-`-Host` are taken as the proxy sent them: trust only proxies that set them.
+Behind nginx or HAProxy, `REMOTE_ADDR` is the proxy, as on php-fpm. The application reads the
+`X-Forwarded-For`, `-Proto` and `-Host` headers of the proxies it trusts itself (Laravel's and
+Symfony's trusted proxies, for example).
 
 ## systemd
 

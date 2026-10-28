@@ -84,9 +84,6 @@ final class HttpClientRequest implements ClientRequest
     private bool $raw;        // after 101
     private ?\Throwable $gone; // the client failed or stalled, or close() was called
 
-    private string $client;
-    private bool $https;
-
     /** Whoever had this exchange keeps no reference after it, see reusable(). */
     private bool $reusable;
 
@@ -130,13 +127,8 @@ final class HttpClientRequest implements ClientRequest
         $r->finished   = false;
         $r->raw        = false;
         $r->gone       = null;
-        $r->client     = $connection->remoteAddr;
-        $r->https      = false;
         $r->reusable   = false;
         $r->onHandOff  = null;
-        if ($connection->proxied) {
-            $r->forwarded();
-        }
 
         return $r;
     }
@@ -184,35 +176,6 @@ final class HttpClientRequest implements ClientRequest
         $this->pushInstance();
     }
 
-    /**
-     * What the trusted proxy in front says about the client: its address (the last X-Forwarded-For
-     * hop that is not a trusted proxy itself; what is before it is only a claim), whether it came by
-     * https (X-Forwarded-Proto), and the host it asked for (X-Forwarded-Host, which replaces Host).
-     * A value that is not what it should be is ignored.
-     */
-    private function forwarded(): void
-    {
-        foreach (\array_reverse(\array_map('trim', \explode(',', \implode(',', $this->headers['x-forwarded-for'] ?? [])))) as $hop) {
-            if (\preg_match('/^\[([^\]]+)\](?::\d+)?$/', $hop, $m)) {
-                $hop = $m[1];
-            } elseif (1 === \substr_count($hop, ':')) {
-                $hop = \strstr($hop, ':', true);
-            }
-            if (false === \filter_var($hop, \FILTER_VALIDATE_IP)) {
-                break;
-            }
-            $this->client = $hop;
-            if (!$this->connection->proxies->trusts($hop)) {
-                break;
-            }
-        }
-        $host = \trim(\explode(',', $this->headers['x-forwarded-host'][0] ?? '')[0]);
-        if ('' !== $host && \strspn($host, HttpConnection::HOST) === \strlen($host)) {
-            $this->headers['host'] = [$host];
-        }
-        $this->https = 'https' === \strtolower(\trim(\explode(',', $this->headers['x-forwarded-proto'][0] ?? '')[0]));
-    }
-
     public function getMethod(): string
     {
         return $this->method;
@@ -230,7 +193,7 @@ final class HttpClientRequest implements ClientRequest
 
     public function getScheme(): string
     {
-        return $this->https ? 'https' : 'http';
+        return 'http';
     }
 
     public function getRequestHeaders(): array
@@ -455,11 +418,7 @@ final class HttpClientRequest implements ClientRequest
 
     public function peer(): string
     {
-        if (!$this->connection->proxied) {
-            return $this->connection->io->peer();
-        }
-
-        return (\str_contains($this->client, ':') ? "[$this->client]" : $this->client) . ':0';
+        return $this->connection->io->peer();
     }
 
     public function local(): string

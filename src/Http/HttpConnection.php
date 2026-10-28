@@ -169,18 +169,11 @@ final class HttpConnection
     /** See current(). */
     private ?HttpClientRequest $current = null;
 
-    /** The client's IP address, '' for a unix socket. */
-    public readonly string $remoteAddr;
-
-    /** The peer is a trusted proxy: what it says about the client is believed, see HttpClientRequest. */
-    public readonly bool $proxied;
-
     /**
      * @param \Closure(\Swerve\ClientRequest): void $handler     the application's; may be replaced between requests
      * @param ?Logger                               $access      the access log, if on
      * @param int                                   $maxBodySize a larger request body gets 413, by its Content-Length before
      *                                                           the application runs, or when a chunk would exceed it
-     * @param ?TrustedProxies                       $proxies     whose X-Forwarded-* headers are believed, when this peer is one of them
      */
     public function __construct(
         public readonly Duplex $io,
@@ -188,11 +181,7 @@ final class HttpConnection
         public readonly LoggerInterface $logger,
         public readonly ?Logger $access,
         public readonly int $maxBodySize = self::MAX_BODY,
-        public readonly ?TrustedProxies $proxies = null,
     ) {
-        $peer             = $io->peer();
-        $this->remoteAddr = \trim(\substr($peer, 0, (int) \strrpos($peer, ':')), '[]');
-        $this->proxied    = $proxies?->trusts($this->remoteAddr) ?? false;
     }
 
     /** The Date header's value: formatted once a second. */
