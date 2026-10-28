@@ -16,8 +16,9 @@ use Swerve\Util\Topics;
  * {@see WorkerStoppingException} at its wait, as every wait does then.
  *
  * A subscriber that falls behind gets a {@see SubscriberLagException} from the iteration: when
- * the message it is about to receive arrived in this process more than `$maxLag` seconds ago.
- * Messages wait for it meanwhile, shared with the topic's other subscribers.
+ * the message it is about to receive was published more than `$maxLag` seconds ago, or where
+ * messages were lost (its worker fell a whole `--pubsub-ring` behind). Messages wait for it
+ * meanwhile, shared with the topic's other subscribers.
  *
  * ```php
  * $subscription = Swerve::subscribe('chat', heartbeat: 15);   // subscribed from here
@@ -43,6 +44,9 @@ final class Subscription implements \IteratorAggregate
     /** Null when made while the process drains: it has ended already. */
     private ?SubscriberInterface $subscriber = null;
 
+    /** The sequence number of the last message published before it: the earlier ones are not its. */
+    private int $after = 0;
+
     /**
      * Subscribe to `$topic`: {@see Swerve::subscribe()} is how an application gets one.
      *
@@ -56,7 +60,7 @@ final class Subscription implements \IteratorAggregate
         public readonly ?float $heartbeat = null,
     ) {
         if (!Topics::$closed) {
-            $this->subscriber = Topics::subscribe($topic);
+            [$this->subscriber, $this->after] = Topics::subscribe($topic);
         }
     }
 
@@ -74,7 +78,7 @@ final class Subscription implements \IteratorAggregate
      *
      * @return \Generator<int, mixed> each message as published (a JSON message decoded; an object as a SealedObject), or null for a heartbeat
      *
-     * @throws SubscriberLagException when the next message arrived more than `$maxLag` seconds ago
+     * @throws SubscriberLagException when the next message was published more than `$maxLag` seconds ago, or messages were lost
      */
     public function getIterator(): \Generator
     {
@@ -88,8 +92,14 @@ final class Subscription implements \IteratorAggregate
             if ($eof) {
                 return;
             }
-            [$arrived, $message] = $item;
-            $lag                 = (\hrtime(true) - $arrived) / 1e9;
+            [$seq, $published, $message] = $item;
+            if ($seq <= $this->after) {
+                continue; // published before this subscription; its worker reads on for older ones
+            }
+            if (Topics::lost() === $message) {
+                throw new SubscriberLagException(\sprintf('A subscriber of "%s" lost messages: its worker fell a whole --pubsub-ring behind', $this->topic));
+            }
+            $lag = (\hrtime(true) - $published) / 1e9;
             if ($lag > $this->maxLag) {
                 throw new SubscriberLagException(\sprintf('A subscriber of "%s" fell %.1f s behind, more than its %.1f s', $this->topic, $lag, $this->maxLag));
             }

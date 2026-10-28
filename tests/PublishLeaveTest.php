@@ -60,7 +60,6 @@ function leave_subscribe(string $addr, string $topic, int $n)
 }
 
 test('in a cluster, subscribers that leave after one message do not stop any worker receiving, nor log an exception', function () {
-    test()->markTestSkipped('0.2: cross-worker publish/subscribe is not ported yet');
     [$process, $addr, $log] = swerve_start([], 2);
     try {
         for ($round = 0; $round < 25; ++$round) {

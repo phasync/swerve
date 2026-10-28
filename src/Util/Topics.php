@@ -2,25 +2,17 @@
 
 namespace Swerve\Util;
 
-use Closure;
 use phasync;
 use phasync\ChannelException;
-use phasync\SubscriberInterface;
 use phasync\SubscribersInterface;
-use phasync\TimeoutException;
-use phasync\Util\LruCache;
 use phasync\WriteChannelInterface;
-use Psr\Log\LoggerInterface;
 
 /**
  * The topics subscribed to in this process, behind Swerve::publish() and Swerve::subscribe().
  *
- * In a worker, a message is written as a datagram straight to the inbox of every worker that
- * has a subscriber on the topic (see Inboxes), this one included, without the master; each
- * delivers it to its own subscribers. A worker learns who subscribes from the master, as a
- * bitmap per topic, and keeps the answer until the master says to forget it. Messages from one
- * worker arrive at another in the order they were published; there is no order across senders.
- * Without a master (swerve embedded, no Cluster), messages are delivered in this process only.
+ * In a swerve worker a message goes in the log every worker shares (SharedLog), which orders
+ * every message of every publisher; each process reads it and hands each message to its own
+ * subscribers of the topic. Outside swerve (a test, a script), messages stay in this process.
  *
  * Each topic has its own phasync publisher: a message wakes only its topic's subscribers, and
  * is kept once, however many subscribe, until the slowest has read it. A topic exists from its
@@ -30,30 +22,15 @@ use Psr\Log\LoggerInterface;
  */
 final class Topics
 {
-    /** Longest topic name: its length goes in one byte of the frame. */
+    /** Longest topic name. */
     public const MAX_TOPIC = 255;
-    /** Largest message: a datagram carries it whole, and the sockets' buffers are about 200 KiB. */
+    /** Largest message. */
     public const MAX_MESSAGE = 1 << 17;
-    /** Largest datagram: the topic's length byte, the topic, the message, and publishRaw()'s one-byte marker. */
-    public const MAX_DATAGRAM = self::MAX_MESSAGE + self::MAX_TOPIC + 2;
-    /** How long a worker that does not read its inbox is waited for, before the messages for it are dropped. */
-    public const SEND_WAIT = 0.1;
-    /** What a worker keeps of the master's bitmaps. */
-    public const BITMAP_BYTES = 1 << 20;
 
-    /**
-     * Sends a message to the master, set by the Worker; null without a master.
-     *
-     * @var (Closure(string $topic, string $message, bool $json): void)|null
-     */
-    public static ?Closure $toMaster = null;
-
-    /** The process drains, see linger() and drain(): the early hint of Swerve::draining(). */
+    /** The process stops: the early hint of Swerve::draining(). */
     public static bool $draining = false;
     /** The process must now close its connections: subscriptions have ended, see drain(). */
     public static bool $closed = false;
-    /** Set once the worker reads its pipe: before that no reply from the master could arrive. */
-    public static bool $listening = false;
 
     /** @var array<string, SubscribersInterface> */
     private static array $subscribers = [];
@@ -62,67 +39,8 @@ final class Topics
     /** @var array<string, int> */
     private static array $counts = [];
 
-    /** This worker's inbox: its bit in the bitmaps. */
-    private static int $own = 0;
-    /** @var array<int, resource> the other workers' inboxes, by inbox */
-    private static array $peers = [];
-    /** What the master told: topic => bitmap, '' for a topic nobody subscribes to. */
-    private static ?LruCache $bitmaps = null;
-    private static ?LoggerInterface $logger = null;
-    private static int $next = 0;
-    /** @var array<int, \stdClass> callers waiting for the master's reply, by request id */
-    private static array $waiting = [];
-    /** @var array<string, \stdClass> a subscription not yet acknowledged by the master, by topic */
-    private static array $acks = [];
-    /** @var array<int, \SplQueue<string>> datagrams a full inbox did not take, by inbox; its flusher coroutine runs while there are any */
-    private static array $outbox = [];
-    /** @var array<int, true> inboxes that have dropped messages, until one is written again: one warning per episode */
-    private static array $dropped = [];
-    /** @var array<string, \SplQueue<string>> messages published while a topic's bitmap is unknown, in order; sendPending() fetches it and flushes them, not the publisher */
-    private static array $pending = [];
-    /** The anchor awaitListening()'s wait is raised on, by markListening(). */
-    private static ?\stdClass $listenFlag = null;
-
-    /**
-     * In a worker: its inbox, and the others' to write to. Needs Topics::$toMaster.
-     *
-     * @param array<int, resource> $peers
-     */
-    public static function connect(int $own, array $peers, LoggerInterface $logger): void
-    {
-        self::$own     = $own;
-        self::$peers   = $peers;
-        self::$logger  = $logger;
-        self::$bitmaps = new LruCache(maxBytes: self::BITMAP_BYTES);
-    }
-
-    /**
-     * Wait until the worker reads its pipe, which it does from the first turn of its event loop
-     * after swerve.php returned.
-     *
-     * @throws \LogicException directly in swerve.php: the worker serves after it returns, so waiting would never end
-     */
-    public static function awaitListening(string $caller): void
-    {
-        if (null === phasync::getFiber()) {
-            throw new \LogicException("$caller cannot be used directly in swerve.php, which the worker serves after: use it in a coroutine (phasync::go()), or in a request");
-        }
-        self::$listenFlag ??= new \stdClass();
-        while (!self::$listening) {
-            phasync::awaitFlag(self::$listenFlag); // raised by markListening()
-        }
-    }
-
-    /**
-     * The worker reads its pipe from now on: wakes what waits in awaitListening().
-     */
-    public static function markListening(): void
-    {
-        self::$listening = true;
-        if (null !== self::$listenFlag) {
-            phasync::raiseFlag(self::$listenFlag);
-        }
-    }
+    /** What a subscriber receives in place of the messages a gap lost. */
+    private static ?\stdClass $gap = null;
 
     /**
      * What publish() sends: $message as JSON, after the checks of
@@ -166,140 +84,62 @@ final class Topics
 
     public static function publish(string $topic, mixed $message): void
     {
-        self::publishEncoded('Swerve::publish', $topic, self::encode($topic, $message));
+        self::publishEncoded($topic, self::encode($topic, $message));
     }
 
     public static function publishRaw(string $topic, string $bytes): void
     {
-        self::publishEncoded('Swerve::publishRaw', $topic, self::encodeRaw($topic, $bytes));
+        self::publishEncoded($topic, self::encodeRaw($topic, $bytes));
     }
 
-    /**
-     * What publish() and publishRaw() both do once $message is encoded: deliver here, or fan it
-     * out. Never waits: a topic's bitmap, once known, is used at once; the first publish to a
-     * topic (or the first after the master forgets its bitmap, see forget()) queues the message
-     * instead and starts sendPending() to fetch it, which neither this call nor the event loop
-     * waits for. A publish from a coroutine the caller has already cancelled (a WebSocket
-     * handler's goodbye in a finally) still queues and is still sent: nothing here suspends it.
-     */
-    private static function publishEncoded(string $caller, string $topic, string $message): void
+    /** Never waits: a publish from a coroutine already cancelled (a goodbye in a finally) still goes out. */
+    private static function publishEncoded(string $topic, string $message): void
     {
-        if (null === self::$toMaster) {
-            self::deliver($topic, $message); // decoded again: what subscribers get never depends on where it came from
-
-            return;
-        }
-        if (!self::$listening) {
-            self::awaitListening("$caller()"); // throws directly in swerve.php; else waits until the worker serves, as before
-        }
-        if (isset(self::$pending[$topic])) {
-            self::$pending[$topic]->enqueue($message); // sendPending() is already fetching this topic's bitmap: joins its queue, in order
-
-            return;
-        }
-        $bitmap = self::$bitmaps->get($topic);
-        if (null !== $bitmap) {
-            if ('' !== $bitmap) {
-                self::fanOut($topic, $message, $bitmap);
-            }
-
-            return;
-        }
-        self::$pending[$topic] = new \SplQueue();
-        self::$pending[$topic]->enqueue($message);
-        phasync::service(self::sendPending(...), $topic);
-    }
-
-    /**
-     * The service publishEncoded() starts for a topic whose bitmap is unknown: fetches it, then
-     * sends what queued meanwhile, in the order it queued. Topics::$pending stays set for the
-     * whole fetch and flush, not just the fetch: fanOut() can suspend (deliver() to this
-     * worker's own subscribers waits for the slowest to take the message, see its docblock), and
-     * publishEncoded() checks Topics::$pending before Topics::$bitmaps (not the reverse), so a
-     * publish arriving during that suspension still joins this queue instead of its message
-     * overtaking one still waiting here to be sent.
-     */
-    private static function sendPending(string $topic): void
-    {
-        try {
-            $bitmap = self::fetch($topic);
-            $queue  = self::$pending[$topic];
-            if ('' !== $bitmap) {
-                while (!$queue->isEmpty()) {
-                    self::fanOut($topic, $queue->dequeue(), $bitmap);
-                }
-            }
-        } finally {
-            unset(self::$pending[$topic]);
+        if (SharedLog::shared()) {
+            SharedLog::append($topic, $message);
+        } else {
+            self::deliver(0, \hrtime(true), $topic, $message);
         }
     }
 
     /**
-     * The master's bitmap of the workers with a subscription on the topic, kept until the master
-     * says to forget it: '' for none. Needs a master, and waits for a worker that serves.
-     */
-    public static function bitmap(string $caller, string $topic): string
-    {
-        if (!self::$listening) {
-            self::awaitListening("$caller()");
-        }
-
-        return self::$bitmaps->get($topic) ?? self::fetch($topic);
-    }
-
-    /** A JSON message to every worker in $bitmap, this one included. */
-    public static function fanOut(string $topic, string $message, string $bitmap): void
-    {
-        $length   = \strlen($bitmap);
-        $datagram = \chr(\strlen($topic)) . $topic . $message;
-        for ($byte = 0; $byte < $length; ++$byte) {
-            if (0 === $bits = \ord($bitmap[$byte])) {
-                continue;
-            }
-            for ($bit = 0; $bit < 8; ++$bit) {
-                if ($bits & (1 << $bit)) {
-                    $inbox = ($byte << 3) | $bit;
-                    if ($inbox === self::$own) {
-                        self::deliver($topic, $message);
-                    } else {
-                        self::send($inbox, $datagram);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * A datagram from this worker's inbox: a message for this process's subscribers of its topic.
-     */
-    public static function receive(string $datagram): void
-    {
-        $length = \ord($datagram[0]);
-        self::deliver(\substr($datagram, 1, $length), \substr($datagram, 1 + $length));
-    }
-
-    /**
-     * A message for this process's subscribers of $topic, if any: decoded here, once for all of
-     * them. A message from publishRaw() is marked with a leading "\0" (no JSON text starts with
-     * it): the rest goes to subscribers unchanged, as a plain string, skipping json_decode().
-     * Otherwise it is JSON, as publish() sent it. They share the value (an array is copied only
-     * if one changes it; an object is a SealedObject, which nobody can change). Each message
-     * carries when it arrived (now, unless $arrived says), for Subscription's lag check.
+     * Message $seq, published at $published (hrtime()), for this process's subscribers of $topic,
+     * if any: decoded here, once for all of them. A message from publishRaw() is marked with a
+     * leading "\0" (no JSON text starts with it): the rest goes to subscribers unchanged, as a
+     * plain string. Otherwise it is JSON, as publish() sent it. They share the value (an object
+     * is a SealedObject, which nobody can change).
      *
      * The write suspends until the topic's publisher has taken the message. If the last
-     * subscriber leaves meanwhile (leave()), or the process drains, the publisher is closed and
-     * the write throws: nobody is left to deliver to, which is the outcome, not a failure.
+     * subscriber leaves meanwhile, or the process drains, the publisher is closed and the write
+     * throws: nobody is left to deliver to, which is the outcome, not a failure.
      */
-    public static function deliver(string $topic, string $message, ?int $arrived = null): void
+    public static function deliver(int $seq, int $published, string $topic, string $message): void
     {
         if (isset(self::$writers[$topic])) {
             try {
                 $value = "\0" === ($message[0] ?? '') ? \substr($message, 1) : SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR));
-                self::$writers[$topic]->write([$arrived ?? \hrtime(true), $value]);
+                self::$writers[$topic]->write([$seq, $published, $value]);
             } catch (ChannelException) {
                 // Closed while the write was suspended: the topic has no subscribers left
             }
         }
+    }
+
+    /** Messages were lost: every subscriber of this process learns so, at that point of its messages. */
+    public static function gap(): void
+    {
+        foreach (self::$writers as $writer) {
+            try {
+                $writer->write([\PHP_INT_MAX, \hrtime(true), self::lost()]);
+            } catch (ChannelException) {
+            }
+        }
+    }
+
+    /** The value a subscriber receives where messages were lost. */
+    public static function lost(): \stdClass
+    {
+        return self::$gap ??= new \stdClass();
     }
 
     /** Whether this process has a subscription on the topic. */
@@ -309,13 +149,12 @@ final class Topics
     }
 
     /**
-     * A subscription starts: its topic's publisher is created with the first one. The subscriber
-     * is attached before the master is waited for, so that nothing from then on is missed. Once
-     * the master has the subscription on record, no message published from then on is missed by
-     * the subscribers of other workers; a worker that does not serve yet can't be answered, and
-     * has to be trusted.
+     * A subscription starts: its topic's publisher is created with the first one.
+     *
+     * @return array{0: SubscriberInterface, 1: int} the subscriber, and the sequence number of
+     *                                               the last message published before it: it receives the later ones
      */
-    public static function subscribe(string $topic): SubscriberInterface
+    public static function subscribe(string $topic): array
     {
         if (!isset(self::$subscribers[$topic])) {
             phasync::publisher(self::$subscribers[$topic], self::$writers[$topic]);
@@ -323,50 +162,13 @@ final class Topics
         }
         ++self::$counts[$topic];
         $subscriber = self::$subscribers[$topic]->subscribe();
-        if (null === self::$toMaster) {
-            return $subscriber;
-        }
-        if (1 === self::$counts[$topic] && $ack = self::ask('+', $topic)) {
-            self::$acks[$topic] = $ack;
-        }
-        if ($ack = self::$acks[$topic] ?? null) {
-            try {
-                while (!isset($ack->bitmap)) {
-                    phasync::awaitFlag($ack);
-                }
-            } catch (\Throwable $e) {
-                self::leave($topic); // the constructor failed: nothing else will
-                throw $e;
-            }
-        }
 
-        return $subscriber;
-    }
-
-    /** The master's reply to a request, see ask(): in the order of its messages. */
-    public static function answer(string $message): void
-    {
-        $id     = \unpack('N', $message)[1];
-        $waiter = self::$waiting[$id];
-        unset(self::$waiting[$id]);
-        if ((self::$acks[$waiter->topic] ?? null) === $waiter) {
-            unset(self::$acks[$waiter->topic]);
-        }
-        $waiter->bitmap = \substr($message, 4);
-        self::$bitmaps->set($waiter->topic, $waiter->bitmap);
-        phasync::raiseFlag($waiter);
-    }
-
-    /** The master says a topic's bitmap changed. */
-    public static function forget(string $topic): void
-    {
-        self::$bitmaps->delete($topic);
+        return [$subscriber, SharedLog::shared() ? SharedLog::start(self::deliver(...), self::gap(...)) : -1]; // in this process alone, every message is 0
     }
 
     /**
-     * A subscription ended. After the last one the topic is forgotten first, so that a
-     * subscription starting meanwhile gets a publisher of its own, then its publisher is closed,
-     * which ends its service coroutine, and the master is told.
+     * A subscription ended. After the last one of a topic, its publisher is closed. The process
+     * goes on reading the log until it drains: it skips what nobody here subscribes to.
      */
     public static function leave(string $topic): void
     {
@@ -377,147 +179,11 @@ final class Topics
         $writer = self::$writers[$topic];
         unset(self::$subscribers[$topic], self::$writers[$topic], self::$counts[$topic]);
         $writer->close();
-        if (null !== self::$toMaster) {
-            self::ask('-', $topic);
-        }
     }
 
     /**
-     * Ask the master: `g` for a topic's bitmap, `+` or `-` to subscribe or unsubscribe this
-     * worker. Returns what to wait for, null when no reply comes: always for `-`, and for a
-     * worker that does not read its pipe yet.
-     */
-    private static function ask(string $op, string $topic): ?\stdClass
-    {
-        $id     = 0;
-        $waiter = null;
-        if ('-' !== $op && self::$listening) {
-            $id            = ++self::$next;
-            $waiter        = self::$waiting[$id] = new \stdClass();
-            $waiter->topic = $topic;
-        }
-        (self::$toMaster)(Inboxes::TOPIC, \pack('N', $id) . $op . $topic);
-
-        return $waiter;
-    }
-
-    private static function fetch(string $topic): string
-    {
-        $waiter = self::ask('g', $topic);
-        while (!isset($waiter->bitmap)) {
-            phasync::awaitFlag($waiter);
-        }
-
-        return $waiter->bitmap;
-    }
-
-    /**
-     * Write a datagram to a worker's inbox. A full inbox (the worker is busy) is waited for by
-     * a coroutine per inbox, which keeps the datagrams in order; the caller never waits.
-     */
-    private static function send(int $inbox, string $datagram): void
-    {
-        if (isset(self::$outbox[$inbox])) {
-            self::$outbox[$inbox]->enqueue($datagram);
-
-            return;
-        }
-        if (\strlen($datagram) === @\stream_socket_sendto(self::$peers[$inbox], $datagram)) {
-            unset(self::$dropped[$inbox]);
-
-            return;
-        }
-        \error_clear_last(); // the inbox is full
-        self::$outbox[$inbox] = new \SplQueue();
-        self::$outbox[$inbox]->enqueue($datagram);
-        // A service: the publisher's request does not wait for it, and the next full inbox starts another
-        phasync::service(self::flush(...), $inbox);
-    }
-
-    private static function flush(int $inbox): void
-    {
-        $queue  = self::$outbox[$inbox];
-        $stream = self::$peers[$inbox];
-        try {
-            while (!$queue->isEmpty()) {
-                try {
-                    phasync::writable($stream, self::SEND_WAIT);
-                } catch (TimeoutException) {
-                    self::$logger->warning('Worker inbox {inbox} is not read: dropping {n} published messages for it', ['inbox' => $inbox, 'n' => \count($queue)]);
-                    self::$dropped[$inbox] = true;
-
-                    return;
-                }
-                while (!$queue->isEmpty() && \strlen($queue->bottom()) === @\stream_socket_sendto($stream, $queue->bottom())) {
-                    $queue->dequeue();
-                    unset(self::$dropped[$inbox]);
-                }
-                \error_clear_last();
-            }
-        } finally {
-            unset(self::$outbox[$inbox]);
-        }
-    }
-
-    /**
-     * A message as it goes over the pipes between master and workers, among the single status
-     * bytes (see Cluster): the requests of the cache and of the subscriptions, and the master's
-     * replies. 'J' for a JSON message or 'P' for a raw one, the topic's length (1 byte), the
-     * message's (4 bytes, big endian), when it was sent (hrtime(), 8 bytes: the machine's
-     * monotonic clock, the same in every process), the topic, the message.
-     */
-    public static function frame(string $topic, string $message, bool $json = false): string
-    {
-        return ($json ? 'J' : 'P') . \chr(\strlen($topic)) . \pack('NJ', \strlen($message), \hrtime(true)) . $topic . $message;
-    }
-
-    /**
-     * Take the complete frames and status bytes off the front of $buffer: calls $message for
-     * each frame, with the frame itself last, and returns the status bytes. An incomplete frame
-     * stays in $buffer for the next read.
-     *
-     * @param Closure(string $topic, string $message, string $frame, bool $json, int $published): void $message
-     */
-    public static function parse(string &$buffer, Closure $message): string
-    {
-        $status = '';
-        $at     = 0;
-        $length = \strlen($buffer);
-        while ($at < $length) {
-            if ('P' !== $buffer[$at] && 'J' !== $buffer[$at]) {
-                $status .= $buffer[$at++];
-                continue;
-            }
-            if ($length - $at < 14) {
-                break;
-            }
-            $topicLength           = \ord($buffer[$at + 1]);
-            ['l' => $messageLength, 'p' => $published] = \unpack('Nl/Jp', $buffer, $at + 2);
-            $frameLength           = 14 + $topicLength + $messageLength;
-            if ($length - $at < $frameLength) {
-                break;
-            }
-            $message(\substr($buffer, $at + 14, $topicLength), \substr($buffer, $at + 14 + $topicLength, $messageLength), \substr($buffer, $at, $frameLength), 'J' === $buffer[$at], $published);
-            $at += $frameLength;
-        }
-        $buffer = \substr($buffer, $at);
-
-        return $status;
-    }
-
-    /**
-     * The process drains, but keeps its upgraded connections for a while (a recycle): only
-     * the hint of Swerve::draining() changes; subscriptions go on until drain().
-     */
-    public static function linger(): void
-    {
-        self::$draining = true;
-    }
-
-    /**
-     * The process must close its connections (shutdown, reload, or the end of a recycle's
-     * linger): every subscription ends, so that the long responses fed by them
-     * (Server-Sent Events) end too, instead of holding the drain up to its deadline, and the
+     * The process must close its connections (a shutdown or a reload): every subscription ends,
+     * so that the long responses fed by them (Server-Sent Events) end too, and the
      * Swerve::onShutdown() callbacks run. Subscriptions made from now on end at once.
      */
     public static function drain(): void
@@ -527,6 +193,7 @@ final class Topics
             $writer->close();
         }
         self::$subscribers = self::$writers = self::$counts = [];
+        SharedLog::stop();
         Shutdown::fire();
     }
 

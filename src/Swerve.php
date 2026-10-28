@@ -80,15 +80,15 @@ final class Swerve
     /**
      * Send a message to every subscriber of `$topic`, in every worker process of this swerve, this one included.
      *
-     * Returns once the message is on its way, not once delivered, and never suspends the caller,
-     * even the first time this worker publishes to `$topic`: safe to call from a `finally`,
-     * including one that runs after the coroutine was cancelled (a WebSocket handler's goodbye).
-     * Delivery is at most once, to the subscriptions that exist when the message reaches their
-     * worker: there is no history, and a worker starting later (after a reload, a recycle, a
-     * crash) sees nothing sent before. The messages of one publishing worker arrive in the order
-     * it published them, with no order between workers. A worker that does not read its inbox
-     * loses the messages sent to it after 0.1 s. Swerve embedded without its master process
-     * delivers in this process only.
+     * Returns once the message is in the log every worker shares (APCu), and never suspends the
+     * caller: safe to call from a `finally`, including one that runs after the coroutine was
+     * cancelled (a WebSocket handler's goodbye), and directly in `swerve.php`. Every message of
+     * every publisher has its place in one order, and every subscriber, in every worker, receives
+     * them in that order. A subscription receives what is published after it was made: there is
+     * no history. Delivery is at most once, and a loss is never silent: a worker that falls a
+     * whole `--pubsub-ring` behind loses messages, and its subscribers get a
+     * {@see SubscriberLagException} where they were (a warning is logged at 3/4 of the ring).
+     * Outside a swerve worker, messages stay in this process.
      *
      * Every message travels as JSON: encoded once here, decoded once in each worker, and every
      * subscriber gets the value published, shared: a string stays a string (`'{}'` too), a list an
@@ -104,7 +104,6 @@ final class Swerve
      * @param mixed  $message anything `json_encode()` takes except null; at most 128 KiB encoded
      *
      * @throws \InvalidArgumentException for a topic or message outside those sizes, a topic starting with "\0", or null (which a heartbeat subscription yields for "nothing came")
-     * @throws \LogicException           directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      * @throws \JsonException            for a value JSON can't express
      *
      * @see Swerve::subscribe       receives the messages
@@ -138,7 +137,6 @@ final class Swerve
      * @param string $bytes any bytes, including none; at most 128 KiB
      *
      * @throws \InvalidArgumentException for a topic or message outside those sizes, or a topic starting with "\0"
-     * @throws \LogicException           directly in `swerve.php`, which the worker serves after: a coroutine started there waits instead
      *
      * @see Swerve::subscribe   receives the messages, raw or not
      * @see Swerve::publish     for a value JSON can carry
@@ -159,8 +157,8 @@ final class Swerve
      * The subscription exists once this returns, not from the first iteration. It ends when its
      * last reference goes, and its loop when the process drains; see {@see Subscription}. A
      * subscriber falling more than `$maxLag` seconds behind gets a {@see SubscriberLagException}
-     * from the loop. With `$heartbeat`, the loop also gets `null` after that many seconds without
-     * a message: for a keep-alive.
+     * from the loop, and so does one whose worker lost messages. With `$heartbeat`, the loop
+     * also gets `null` after that many seconds without a message: for a keep-alive.
      *
      * ```php
      * foreach (Swerve::subscribe('chat') as $message) {
@@ -190,7 +188,7 @@ final class Swerve
         return new Subscription($topic, $maxLag, $heartbeat);
     }
 
-    /** Topics starting with "\0" are swerve's own (Inboxes::TOPIC, among others). */
+    /** Topics starting with "\0" are swerve's own. */
     private static function refuseInternal(string $topic): void
     {
         if (\str_starts_with($topic, "\0")) {

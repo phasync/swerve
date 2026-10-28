@@ -42,20 +42,9 @@ return new Swerve\RequestHandler($app->handle(...));          // the handler tha
 
 ## What works where
 
-`Swerve::cache()` and `Swerve::publish()` go through the master, and the worker reads its
-answers from the first turn of its event loop after `swerve.php` returns. A coroutine that
-needs them before that waits for it, and carries on once the worker serves. `Swerve::subscribe()` works
-at any time.
-
-| Your code runs | `cache()`, `publish()` | `subscribe()` |
-|---|---|---|
-| directly in `swerve.php`, while it loads | throw `LogicException` | work |
-| in a coroutine started there (`phasync::go()`, `phasync::service()`) | wait for the worker to serve, then work | work |
-| in a request, or in a connection of your own server | work | work |
-
-Directly in `swerve.php` waiting could never end: the worker serves after the file returns, so
-that is the one place with an immediate error. Move the call into a coroutine. This is the same
-with and without ext-phasync. A subscription made while loading receives what any worker
+`Swerve::cache()`, `Swerve::publish()` and `Swerve::subscribe()` work anywhere: directly in
+`swerve.php` while it loads, in coroutines started there, and in requests. They use APCu, which
+every worker shares from its start. A subscription made while loading receives what any worker
 publishes afterwards.
 
 ## One copy per worker

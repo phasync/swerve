@@ -541,7 +541,7 @@ test('a callback that only sends (a subscription forwarded) gets every publish, 
         native_stop($process);
     }
     ws_clean($log);
-})->with('modes')->skip(true, '0.2: cross-worker publish/subscribe is not ported yet');
+})->with('modes');
 
 test('a client that resets its connection ends the callback, without an error in the log', function (array $mode) {
     [$process, $addr, $log] = ws_start($mode);
@@ -607,7 +607,7 @@ test('a subscription loop forwards messages and ends the socket when told to', f
         native_stop($process);
     }
     ws_clean($log);
-})->with('modes')->skip(true, '0.2: cross-worker publish/subscribe is not ported yet');
+})->with('modes');
 
 test('events in, sequential code out: a message from one client reaches the other, and a published end returns the callback', function (array $mode) {
     [$process, $addr, $log] = ws_start($mode);

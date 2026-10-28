@@ -16,6 +16,7 @@ Options:
   --log=<path>           Append the log, and the workers' PHP errors, to this file instead of the terminal
   --grace=<seconds>      How long a stop waits for the requests in flight before it kills (default: 10)
   --watch                Reload when a PHP file of the application changes (for development)
+  --pubsub-ring=<n>      Messages publish/subscribe keeps for workers that fall behind (default: 8192)
   -d name=value          PHP settings go to PHP itself: php -d memory_limit=1G vendor/bin/swerve
 ```
 

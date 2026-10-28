@@ -1,8 +1,9 @@
 # Publish and subscribe
 
-Workers share no memory. `Swerve::publish()` and `Swerve::subscribe()` carry messages between
-them: a message published in any worker reaches the subscribers of its topic in every worker,
-the publishing one included.
+`Swerve::publish()` and `Swerve::subscribe()` carry messages between the workers: a message
+published in any worker reaches the subscribers of its topic in every worker, the publishing one
+included. The messages go in a log in APCu, the memory every worker shares; each worker with
+subscribers reads it, and hands each message to its subscribers of the topic.
 
 ```php
 use Swerve\Swerve;
@@ -16,20 +17,19 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 
 ## What it promises
 
-- **Order**: the messages of one publisher arrive in the order it published them, for all its
-  subscribers. There is no order between workers: the publisher writes straight into the inbox of each worker with
-  subscribers, and two subscribers may see messages from different workers in different orders,
-  as may two requests that update a row one after the other. When a message carries state (a
-  count, a document), give it a version from storage (a counter incremented in the same
-  transaction) and let clients ignore one older than what they have. For one order across all
-  subscribers, publish from a single writer: one process or request that every change goes
-  through.
-- **At most once**: to the subscriptions that exist when the message reaches their worker. There
-  is no history and no retry: a subscriber that starts later, a worker started after a reload
-  or a crash, see nothing sent before. Keep what must not be lost in storage, and use
-  publish/subscribe to tell the others it changed.
+- **One order**: every message of every publisher has its place in the log, and every subscriber,
+  in every worker, receives them in that order. Two requests that update a row one after the
+  other may still publish in the other order: when a message carries state (a count, a
+  document), give it a version from storage (a counter incremented in the same transaction) and
+  let clients ignore one older than what they have.
+- **At most once, never silently less**: a subscription receives what is published after it was
+  made; there is no history and no retry. The log is a ring of `--pubsub-ring` messages (8192 by
+  default): a worker that falls a whole ring behind (its event loop stuck in blocking code) loses
+  messages, and its subscribers get a `Swerve\SubscriberLagException` where they were. A warning
+  is logged from 3/4 of the ring. Keep what must not be lost in storage, and use publish/subscribe
+  to tell the others it changed.
 - **One machine**: swerve on several servers needs Redis, NATS or the like between them.
-- **Without the master** (swerve embedded in your own process), messages stay in that process.
+- **Outside swerve** (a test, a script), messages stay in that process.
 
 ## Subscriptions
 
@@ -46,11 +46,12 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
   wait, as every wait does then; a subscription made while draining ends at once.
   `Swerve::draining()` says whether the worker drains.
 - A message is kept once per worker, however many subscribe, until the slowest subscriber read
-  it. A subscriber that falls more than `$maxLag` seconds behind gets a
-  `Swerve\SubscriberLagException` from its loop: a client that can't keep up is
+  it. A subscriber that falls more than `$maxLag` seconds behind the publisher gets a
+  `Swerve\SubscriberLagException` from its loop, as does one whose worker lost messages: a client that can't keep up is
   better disconnected (it reconnects and catches up from storage) than keeping every message
   since.
-- A topic costs nothing in a worker without subscribers: messages to it are dropped there.
+- A worker without subscribers reads nothing; one with subscribers reads every message, and
+  skips the topics it has none for.
   Topics like `room:42` or `user:1234` are fine; a topic lives while it has subscribers.
 - Topics starting with `"\0"` are swerve's own: `publish()` and `subscribe()` refuse them.
 
@@ -60,7 +61,8 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 
 - Topics are 1 to 255 bytes, messages at most 128 KiB; larger ones throw
   `InvalidArgumentException`.
-- It returns once the message is on its way, not when it is delivered.
+- It returns once the message is in the log, not when it is delivered, and never suspends the
+  caller: also in a `finally` of a cancelled coroutine, and directly in `swerve.php`.
 - Every message travels as JSON: encoded once where it is published, decoded once in each
   worker, and every subscriber gets the value that was published, shared. A string stays a
   string (`'{}'` too), a list an array; an object (an array with keys) arrives as a read-only
@@ -77,7 +79,7 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 `Swerve::publishRaw(string $topic, string $bytes): void` sends `$bytes` unchanged: for messages
 `publish()` cannot carry, such as a binary WebSocket frame, which is not valid UTF-8 and so
 cannot be JSON. A subscriber gets exactly `$bytes`, as a plain string, never decoded. The same
-promises as `publish()` apply (order, delivery, limits); a topic may mix `publish()` and
+promises as `publish()` apply (one order, delivery, limits); a topic may mix `publish()` and
 `publishRaw()` messages, each subscriber getting each one in its own shape.
 
 ```php
@@ -113,11 +115,10 @@ started when the application loads, subscribes and drops its cached copy.
 
 ## Limits
 
-A worker's inbox holds about 200 KB. A worker that stops reading it (its event loop stuck in
-blocking code) does not hold up the publishers: after 0.1 s they drop what they could not
-deliver to it and log a warning, and it gets what is published after it reads again.
-
-A coroutine that `swerve.php` starts may publish at once: the call waits until the worker serves.
-Directly in `swerve.php` it throws `LogicException`, see [what works where](bootstrap.md#what-works-where).
+The log lives in APCu beside the cache: `--pubsub-ring` messages of up to 128 KiB each must fit
+in `apc.shm_size` (128M by default; `-d apc.shm_size=512M`) with the cache. When APCu runs out
+it empties itself, and the subscribers of every worker get a `Swerve\SubscriberLagException`.
+A publish costs an `apcu_inc()`, an `apcu_store()` and a one-byte datagram to each worker with
+subscribers; a slow subscriber holds up nobody but itself.
 
 Next: [Command line](command-line.md).

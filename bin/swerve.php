@@ -7,13 +7,14 @@
  * swerve.php, again and again (run_next()). A worker that exits is replaced. The WebSockets
  * of short-lived lifecycles (WordPress's) move to WebSocket workers, started as they are needed.
  *
- *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [--grace=SECONDS] [--watch] [swerve.php | -S [dir] [router.php]]
+ *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [--grace=SECONDS] [--watch] [--pubsub-ring=N] [swerve.php | -S [dir] [router.php]]
  */
 
 use phasync\ext;
 use Psr\Log\LogLevel;
 use Swerve\Lot\Lot;
 use Swerve\Lot\Supervisor;
+use Swerve\Util\SharedLog;
 use Swerve\Util\Logger;
 use Swerve\Util\System;
 
@@ -57,6 +58,7 @@ require $autoload;
     $log     = null;
     $grace   = 10.0;
     $watch   = false;
+    $ring    = SharedLog::DEFAULT_RING;
     $serve   = false;
     $paths   = [];
     foreach (\array_slice($argv, 1) as $arg) {
@@ -66,17 +68,21 @@ require $autoload;
             \str_starts_with($arg, '--log=')     => $log     = \substr($arg, 6),
             \str_starts_with($arg, '--grace=')   => $grace   = (float) \substr($arg, 8),
             '--watch' === $arg                   => $watch   = true,
+            \str_starts_with($arg, '--pubsub-ring=') => $ring = (int) \substr($arg, 14),
             '-S' === $arg                        => $serve   = true,
             \str_starts_with($arg, '-')          => $unknown = $arg,
             default                              => $paths[] = $arg,
         };
     }
     $fail = static function (string $message): never {
-        \fwrite(\STDERR, "swerve: $message\nusage: swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [--grace=SECONDS] [--watch] [swerve.php | -S [dir] [router.php]]\n");
+        \fwrite(\STDERR, "swerve: $message\nusage: swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [--grace=SECONDS] [--watch] [--pubsub-ring=N] [swerve.php | -S [dir] [router.php]]\n");
         exit(1);
     };
     if (isset($unknown)) {
         $fail("unknown option $unknown");
+    }
+    if ($ring < 16) {
+        $fail('--pubsub-ring is at least 16 messages');
     }
     $env = [];
     if ($serve) {
@@ -151,7 +157,7 @@ require $autoload;
         \array_push($php, ...$flags);
         // The environment, not putenv(): PHP undoes putenv() when a request ends, and the
         // workers' lifecycles are requests
-        $env += ['SWERVE_MASTER' => '1', 'SWERVE_AUTOLOAD' => \realpath($autoload), 'SWERVE_APP' => $appFile];
+        $env += ['SWERVE_PUBSUB_RING' => (string) $ring, 'SWERVE_MASTER' => '1', 'SWERVE_AUTOLOAD' => \realpath($autoload), 'SWERVE_APP' => $appFile];
         if (\extension_loaded('grpc') && false === \getenv('GRPC_ENABLE_FORK_SUPPORT')) {
             // The workers are forked: without this, grpc's threads keep a forked worker from exiting
             $env['GRPC_ENABLE_FORK_SUPPORT'] = '1';

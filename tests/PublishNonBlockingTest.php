@@ -40,7 +40,6 @@ function nb_other_worker(string $addr, int $excludePid)
 }
 
 test('publish() in a cancelled coroutine\'s finally, on a topic never published before in its worker, still reaches a subscriber in another worker', function () {
-    test()->markTestSkipped('0.2: cross-worker publish/subscribe is not ported yet');
     [$process, $addr] = swerve_start([], 4);
     try {
         [$subscriber, $subPid] = nb_subscribe($addr, 'goodbye-topic', 1);
@@ -57,7 +56,6 @@ test('publish() in a cancelled coroutine\'s finally, on a topic never published 
 });
 
 test('publishing a burst to a topic never published before in its worker queues it: a subscriber in another worker sees it in that order', function () {
-    test()->markTestSkipped('0.2: cross-worker publish/subscribe is not ported yet');
     [$process, $addr] = swerve_start([], 4);
     try {
         [$subscriber, $subPid] = nb_subscribe($addr, 'burst-topic', 5);

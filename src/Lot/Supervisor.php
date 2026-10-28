@@ -5,6 +5,7 @@ namespace Swerve\Lot;
 use phasync;
 use phasync\ext;
 use Psr\Log\LoggerInterface;
+use Swerve\Util\SharedLog;
 
 /**
  * The master's processes: a worker in each slot, and WebSocket workers as they are needed, each
@@ -302,6 +303,7 @@ final class Supervisor
             phasync::sleep(0.01);
         }
         unset($this->children[$pid]);
+        SharedLog::forget($pid);
         phasync::raiseFlag($this->exited);
 
         return \pcntl_wifexited($status) ? 'exit ' . \pcntl_wexitstatus($status) : 'signal ' . \pcntl_wtermsig($status);
