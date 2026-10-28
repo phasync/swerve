@@ -78,7 +78,8 @@ directly.
 
 ## The response head
 
-`sendResponseHeaders(int $status, array $headers = [])`, with header values a string or a list:
+`sendResponseHeaders(int $status, array $headers = [], ?string $reason = null)`, with header values a
+string or a list, and the standard reason phrase unless you give one:
 
 - A `1xx` is an interim response: sent at once, and may be repeated (`103` Early Hints).
 - `101` is sent at once and switches to the raw connection: see

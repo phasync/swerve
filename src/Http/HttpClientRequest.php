@@ -201,7 +201,7 @@ final class HttpClientRequest implements ClientRequest
         return $this->headers;
     }
 
-    public function sendResponseHeaders(int $status, array $headers = []): void
+    public function sendResponseHeaders(int $status, array $headers = [], ?string $reason = null): void
     {
         if ($this->committed) {
             throw new HeadersSentException('The response head was already sent');
@@ -209,8 +209,11 @@ final class HttpClientRequest implements ClientRequest
         if ($status < 100 || $status > 599) {
             throw new \ValueError("$status is not an HTTP status");
         }
+        if (null !== $reason && \strpbrk($reason, "\r\n")) {
+            throw new \ValueError('A reason phrase is one line');
+        }
         if ($status < 200) {
-            $head = $this->build($status, $headers) . "\r\n";
+            $head = $this->build($status, $headers, $reason) . "\r\n";
             if (101 === $status) {
                 if ('1.1' !== $this->version || !$this->done || !isset($this->headers['upgrade'])
                     || !\in_array('upgrade', \array_map('trim', \explode(',', \strtolower(\implode(',', $this->headers['connection'] ?? [])))), true)) {
@@ -228,7 +231,7 @@ final class HttpClientRequest implements ClientRequest
 
             return;
         }
-        $this->head      = $this->build($status, $headers);
+        $this->head      = $this->build($status, $headers, $reason);
         $this->status    = $status;
         $this->committed = true;
     }
@@ -592,11 +595,11 @@ final class HttpClientRequest implements ClientRequest
      *
      * @param array<string, string|list<string>> $headers
      */
-    private function build(int $status, array $headers): string
+    private function build(int $status, array $headers, ?string $reason): string
     {
         $final      = $status >= 200;
         $upgrade    = 101 === $status;
-        $head       = "HTTP/1.1 $status " . (self::REASONS[$status] ?? '') . "\r\n";
+        $head       = "HTTP/1.1 $status " . ($reason ?? self::REASONS[$status] ?? '') . "\r\n";
         $lines      = 1;
         $length     = null;
         $options    = '';

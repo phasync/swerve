@@ -73,12 +73,13 @@ interface ClientRequest extends Duplex
      * to send. Any other status is the final head: held until the body starts, and sendable once.
      *
      * @param array<string, string|list<string>> $headers
+     * @param string|null                        $reason  the reason phrase; by default the standard one for `$status`
      *
      * @throws HeadersSentException when the final head was committed already
      *
      * @example examples/ClientRequest.sendResponseHeaders/1-interim-and-final.php An interim 103 and a final 201
      */
-    public function sendResponseHeaders(int $status, array $headers = []): void;
+    public function sendResponseHeaders(int $status, array $headers = [], ?string $reason = null): void;
 
     /** Whether the final head is committed (it may still be held back until the first body bytes). */
     public function headersSent(): bool;

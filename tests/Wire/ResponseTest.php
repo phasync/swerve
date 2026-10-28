@@ -47,6 +47,11 @@ test('the status line is HTTP/1.1 with the reason phrase, also to an HTTP/1.0 re
     expect(wire_head($this->addr, "GET /nothing HTTP/1.1\r\nHost: t\r\n\r\n")[0])->toBe('HTTP/1.1 404 Not Found');
 });
 
+test('a reason phrase of the application\'s own goes out in the status line, also for a code with none (#91)', function () {
+    expect(wire_head($this->addr, "GET /status?code=399&reason=Choose+Your+Own+Adventure HTTP/1.1\r\nHost: t\r\n\r\n")[0])->toBe('HTTP/1.1 399 Choose Your Own Adventure');
+    expect(wire_head($this->addr, "GET /status?code=200&reason=Fine HTTP/1.1\r\nHost: t\r\n\r\n")[0])->toBe('HTTP/1.1 200 Fine');
+});
+
 test('Date is the current time in IMF-fixdate, once, on every kind of response', function () {
     $requests = [
         "GET /hello HTTP/1.1\r\nHost: t\r\n\r\n",

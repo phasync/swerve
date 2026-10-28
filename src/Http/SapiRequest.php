@@ -177,8 +177,8 @@ final class SapiRequest
     }
 
     /**
-     * $headers are raw lines, as headers_list() gives them. A custom reason phrase
-     * ($statusLine) is dropped: ClientRequest takes only the code.
+     * $headers are raw lines, as headers_list() gives them; $statusLine is the script's own status
+     * line (header('HTTP/1.1 399 Reason')), whose reason phrase goes out as php-fpm sends it.
      */
     public function send_headers(int $status, ?string $statusLine, array $headers): void
     {
@@ -192,7 +192,8 @@ final class SapiRequest
             $name           = $names[\strtolower($name = \trim($name))] ??= $name;
             $map[$name][]   = \ltrim($value);
         }
-        $this->client->sendResponseHeaders($status, $map);
+        $reason = null === $statusLine ? null : (\explode(' ', \trim($statusLine), 3)[2] ?? null);
+        $this->client->sendResponseHeaders($status, $map, $reason);
     }
 
     public function flush(): void

@@ -45,7 +45,7 @@ $app = new class {
 
                 return;
             case '/status':
-                $r->sendResponseHeaders((int) $query['code'], ['Content-Length' => '0']);
+                $r->sendResponseHeaders((int) $query['code'], ['Content-Length' => '0'], $query['reason'] ?? null);
 
                 return;
             // The request as the application sees it, header names in lower case
