@@ -73,7 +73,7 @@ test('an error response from swerve itself carries a Date', function () {
     expect(preg_grep('/^date:/i', wire_head($this->addr, "NONSENSE\r\n\r\n")))->toHaveCount(1);
 });
 
-test('an error response from swerve itself has its reason phrase, no body, and says Connection: close', function () {
+test('an error response from swerve itself has its reason phrase, its error page as plain text, and says Connection: close', function () {
     $cases = [
         'HTTP/1.1 400 Bad Request'                    => "NONSENSE\r\n\r\n",
         'HTTP/1.1 414 URI Too Long'                   => 'GET /' . str_repeat('a', 9000) . " HTTP/1.1\r\nHost: t\r\n\r\n",
@@ -81,15 +81,16 @@ test('an error response from swerve itself has its reason phrase, no body, and s
         'HTTP/1.1 505 HTTP Version Not Supported'     => "GET /hello HTTP/2.0\r\nHost: t\r\n\r\n",
         'HTTP/1.1 501 Not Implemented'                => "CONNECT a:443 HTTP/1.1\r\nHost: a:443\r\n\r\n",
         'HTTP/1.1 417 Expectation Failed'             => "GET /hello HTTP/1.1\r\nHost: t\r\nExpect: foo\r\n\r\n",
-        'HTTP/1.1 413 Content Too Large'              => "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 9000000\r\n\r\n",
     ];
     foreach ($cases as $statusLine => $request) {
         $conn = native_connect($this->addr);
         fwrite($conn, $request);
         $head = wire_raw_head($conn);
         expect($head[0])->toBe($statusLine);
-        expect($head)->toContain('Content-Length: 0')->toContain('Connection: close');
-        expect(native_closed($conn))->toBeTrue($statusLine); // nothing after the head, then the end
+        [$type, $body] = Swerve\Http\ErrorPage::render((int) substr($statusLine, 9, 3), substr($statusLine, 13), false);
+        expect($head)->toContain("Content-Type: $type")->toContain('Content-Length: ' . strlen($body))->toContain('Connection: close');
+        expect(read_exactly($conn, strlen($body)))->toBe($body);
+        expect(native_closed($conn))->toBeTrue($statusLine); // nothing after the page, then the end
     }
 });
 

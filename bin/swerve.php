@@ -7,7 +7,7 @@
  * swerve.php, again and again (run_next()). A worker that exits is replaced. The WebSockets
  * of short-lived lifecycles (WordPress's) move to WebSocket workers, started as they are needed.
  *
- *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php]
+ *     swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php | -S [dir] [router.php]]
  */
 
 use phasync\ext;
@@ -41,24 +41,53 @@ require $autoload;
     $http    = '127.0.0.1:8080';
     $workers = System::getCPUCount();
     $log     = null;
-    $app     = './swerve.php';
+    $serve   = false;
+    $paths   = [];
     foreach (\array_slice($argv, 1) as $arg) {
         match (true) {
             \str_starts_with($arg, '--http=')    => $http    = \substr($arg, 7),
             \str_starts_with($arg, '--workers=') => $workers = (int) \substr($arg, 10),
             \str_starts_with($arg, '--log=')     => $log     = \substr($arg, 6),
+            '-S' === $arg                        => $serve   = true,
             \str_starts_with($arg, '-')          => $unknown = $arg,
-            default                              => $app     = $arg,
+            default                              => $paths[] = $arg,
         };
     }
+    $fail = static function (string $message): never {
+        \fwrite(\STDERR, "swerve: $message\nusage: swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php | -S [dir] [router.php]]\n");
+        exit(1);
+    };
     if (isset($unknown)) {
-        \fwrite(\STDERR, "swerve: unknown option $unknown\nusage: swerve [--http=127.0.0.1:8080|unix:/path] [--workers=N] [--log=FILE] [swerve.php]\n");
-        exit(1);
+        $fail("unknown option $unknown");
     }
-    $appFile = \realpath($app);
-    if (false === $appFile) {
-        \fwrite(\STDERR, "swerve: $app not found\n");
-        exit(1);
+    $env = [];
+    if ($serve) {
+        // php -S's way: the files of a directory, its PHP files run, and the rest to the router
+        // (by default the directory's index.php; without one, a 404)
+        if (\count($paths) > 2) {
+            $fail('-S takes a directory and a router, and no swerve.php');
+        }
+        $dir = \realpath($paths[0] ?? '.');
+        if (false === $dir || !\is_dir($dir)) {
+            $fail(($paths[0] ?? '.') . ' is not a directory');
+        }
+        $router = isset($paths[1]) ? \realpath($paths[1]) : (\is_file("$dir/index.php") ? "$dir/index.php" : null);
+        if (false === $router || null !== $router && !\is_file($router)) {
+            $fail("{$paths[1]} not found");
+        }
+        $appFile = \realpath(__DIR__ . '/../inc/serve.php');
+        $workDir = $dir;
+        $env     = ['SWERVE_DIR' => $dir, 'SWERVE_ROUTER' => $router ?? ''];
+    } else {
+        if (\count($paths) > 1) {
+            $fail('one swerve.php at most');
+        }
+        $app     = $paths[0] ?? './swerve.php';
+        $appFile = \realpath($app);
+        if (false === $appFile) {
+            $fail("$app not found");
+        }
+        $workDir = \dirname($appFile);
     }
     // The workers are forked from this process, so the settings PHP reads only as it starts are
     // this process's: it starts itself over with them, once. A long-running server, like Node.js:
@@ -104,7 +133,7 @@ require $autoload;
         \array_push($php, ...$flags);
         // The environment, not putenv(): PHP undoes putenv() when a request ends, and the
         // workers' lifecycles are requests
-        $env = ['SWERVE_MASTER' => '1', 'SWERVE_AUTOLOAD' => \realpath($autoload), 'SWERVE_APP' => $appFile];
+        $env += ['SWERVE_MASTER' => '1', 'SWERVE_AUTOLOAD' => \realpath($autoload), 'SWERVE_APP' => $appFile];
         // Descriptors 3 and 4 are the children's channels (see below): taken here, so the PHP
         // that starts opens its own files (the script, opcache's lock) above them
         $null = \fopen('/dev/null', 'r');
@@ -160,7 +189,7 @@ require $autoload;
 
     // Fork a process that runs $script with $descriptors' descriptors (fd 3 on), then $supervise
     // here; once the process is gone, another
-    $spawn = static function (string $name, string $script, \Closure $descriptors, \Closure $supervise) use ($logger, $out, $appFile, &$pids, $stop): void {
+    $spawn = static function (string $name, string $script, \Closure $descriptors, \Closure $supervise) use ($logger, $out, $workDir, &$pids, $stop): void {
         try {
             while (true) {
                 $started = \microtime(true);
@@ -178,7 +207,7 @@ require $autoload;
                     ext\dup2(\fopen('/dev/null', 'r'), 0);
                     ext\dup2($out, 1);
                     ext\dup2($out, 2);
-                    \chdir(\dirname($appFile));
+                    \chdir($workDir);
                     ext\run_next($script);
                     exit(0);
                 }

@@ -696,17 +696,21 @@ final class HttpConnection
     }
 
     /**
-     * Answer a refused request or a failed handler: one best-effort write that never waits,
-     * then a lingering close.
+     * Answer a refused request or a failed handler with $status and its error page, in one
+     * best-effort write that never waits, and close. $request, when the head was read, says
+     * whether the page is HTML and whether it has a body (not for HEAD). With $linger, the close
+     * waits a moment for the client's end, so that the answer isn't destroyed by a reset; a
+     * stopping worker doesn't wait.
      */
-    /**
-     * Answer $status and close. With $linger, the close waits a moment for the client's end, so
-     * that the answer isn't destroyed by a reset; a stopping worker doesn't wait.
-     */
-    public function refuse(int $status, string $reason, bool $linger = true): void
+    public function refuse(int $status, string $reason, bool $linger = true, ?HttpClientRequest $request = null): void
     {
+        [$type, $body] = ErrorPage::render($status, $reason, null !== $request && ErrorPage::acceptsHtml($request->getRequestHeaders()['accept'] ?? []));
+        $length        = \strlen($body);
+        if ('HEAD' === $request?->getMethod()) {
+            $body = '';
+        }
         try {
-            $this->io->write("HTTP/1.1 $status $reason\r\nContent-Length: 0\r\nConnection: close\r\nDate: " . self::date() . "\r\nServer: Swerve\r\n\r\n", 0.0);
+            $this->io->write("HTTP/1.1 $status $reason\r\nContent-Type: $type\r\nContent-Length: $length\r\nConnection: close\r\nDate: " . self::date() . "\r\nServer: Swerve\r\n\r\n$body", 0.0);
         } catch (IOException|TimeoutException) {
         }
         $this->linger = $linger;

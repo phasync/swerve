@@ -7,6 +7,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
 use Serializor\Codec;
+use Swerve\Http\ErrorPage;
 use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\Http\SapiRequest;
@@ -344,19 +345,23 @@ final class Swerve
      * written it, and with another connection when this one goes idle after files only. The
      * first other request goes to $handler.
      *
-     * @param ?string         $staticPath the directory of static files (as {@see StaticFiles}); null: none
-     * @param string|\Closure $handler a script's path: run as a fresh main script, its variables
-     *                                 globals, echo and header() the response; a closure without
-     *                                 parameters: likewise; a closure taking a
-     *                                 ServerRequestInterface: returns a ResponseInterface, also
-     *                                 under sapi(), its request made from the superglobals and
-     *                                 php://input as under php-fpm
+     * @param ?string              $staticPath the directory of static files (as {@see StaticFiles}); null: none
+     * @param string|\Closure|null $handler    a script's path: run as a fresh main script, its
+     *                                         variables globals, echo and header() the response,
+     *                                         for every request that names no PHP file under its
+     *                                         directory; null: such a request gets 404, and
+     *                                         $staticPath's PHP files still run (`swerve -S` on a
+     *                                         directory without index.php); a closure without
+     *                                         parameters: likewise; a closure taking a
+     *                                         ServerRequestInterface: returns a ResponseInterface,
+     *                                         also under sapi(), its request made from the
+     *                                         superglobals and php://input as under php-fpm
      *
      * @return ?\Fiber the coroutine serving the request; null once the worker stops
      *
      * @throws \LogicException when called inside a request
      */
-    public static function accept(?string $staticPath, string|\Closure $handler): Accepted
+    public static function accept(?string $staticPath, string|\Closure|null $handler): Accepted
     {
         if ('swerve' === \php_sapi_name()) {
             throw new \LogicException('Swerve::accept() is called by the worker\'s swerve.php, not inside a request');
@@ -459,17 +464,22 @@ final class Swerve
      *
      * @return \Closure(ClientRequest): void
      */
-    private static function handler(string|\Closure $handler, ?string $root): \Closure
+    private static function handler(string|\Closure|null $handler, ?string $root): \Closure
     {
-        if (\is_string($handler)) {
-            $script = \realpath($handler);
-            if (false === $script || !\is_file($script)) {
-                throw new \ValueError("Swerve::accept(): the script $handler does not exist");
+        if (!$handler instanceof \Closure) {
+            $fallback = null;
+            if (null !== $handler) {
+                $script = \realpath($handler);
+                if (false === $script || !\is_file($script)) {
+                    throw new \ValueError("Swerve::accept(): the script $handler does not exist");
+                }
+                $root     ??= \dirname($script);
+                $fallback   = [$script, \str_starts_with($script, "$root/") ? \substr($script, \strlen($root)) : '/' . \basename($script), null];
+            } elseif (null === $root) {
+                throw new \ValueError('Swerve::accept(): without a handler, $staticPath names the directory to serve');
             }
-            $root ??= \dirname($script);
-            $name   = \str_starts_with($script, "$root/") ? \substr($script, \strlen($root)) : '/' . \basename($script);
 
-            return self::sapi($root, static fn (ClientRequest $client) => self::route($client, $root) ?? [$script, $name, null], static function (ClientRequest $client, string $file): void {
+            return self::sapi($root, static fn (ClientRequest $client) => self::route($client, $root) ?? $fallback, static function (ClientRequest $client, string $file): void {
                 \chdir(\dirname($file));
                 \phasync\ext\include_global($file);
             });
@@ -548,7 +558,13 @@ final class Swerve
     private static function sapi(string $root, \Closure $route, \Closure $code): \Closure
     {
         return static function (ClientRequest $client) use ($root, $route, $code): void {
-            [$file, $name, $info] = $route($client);
+            $routed = $route($client);
+            if (null === $routed) {
+                ErrorPage::send($client, 404);
+
+                return;
+            }
+            [$file, $name, $info] = $routed;
             $server               = self::serverVariables($client, $root, $file, $name, $info);
             $upgrade              = SapiRequest::run($client, $server, static fn () => $code($client, $file));
             if (null !== $upgrade) {

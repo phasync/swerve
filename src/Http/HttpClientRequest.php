@@ -33,7 +33,7 @@ final class HttpClientRequest implements ClientRequest
     private const CHUNKED = 3;
     private const CLOSE   = 4; // HTTP/1.0 without a length: the body ends at the close
 
-    private const REASONS = [
+    public const REASONS = [
         100 => 'Continue', 101 => 'Switching Protocols', 102 => 'Processing', 103 => 'Early Hints',
         200 => 'OK', 201 => 'Created', 202 => 'Accepted', 203 => 'Non-Authoritative Information', 204 => 'No Content',
         205 => 'Reset Content', 206 => 'Partial Content', 207 => 'Multi-Status', 208 => 'Already Reported', 226 => 'IM Used',
@@ -443,7 +443,7 @@ final class HttpClientRequest implements ClientRequest
         } catch (HttpError $e) {
             $status = $e->getCode();
             if (!$this->wire && null === $this->gone) {
-                $c->refuse($status, $e->getMessage());
+                $c->refuse($status, $e->getMessage(), request: $this);
             }
         } catch (UpgradeException $e) {
             // The client's request was no upgrade: answered as the upgrade would have refused it
@@ -458,14 +458,14 @@ final class HttpClientRequest implements ClientRequest
         } catch (ShutdownException) {
             // The worker stops: not a failure. A response not begun is answered 503, in full
             if (!$this->wire && null === $this->gone) {
-                phasync::shielded(fn () => $c->refuse(503, 'Service Unavailable', linger: false));
+                phasync::shielded(fn () => $c->refuse(503, 'Service Unavailable', linger: false, request: $this));
             }
             $status = $this->wire ? $this->status : 503;
         } catch (\Throwable $e) {
             if (null === $this->gone) {
                 $c->logger->error('{request} failed: {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);
                 if (!$this->wire) {
-                    $c->refuse(500, 'Internal Server Error');
+                    $c->refuse(500, 'Internal Server Error', request: $this);
                 }
             }
             $status = $this->wire ? $this->status : 500;

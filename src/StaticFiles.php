@@ -2,6 +2,8 @@
 
 namespace Swerve;
 
+use Swerve\Http\ErrorPage;
+
 /**
  * Serves the files of a directory, and passes every other request on to the application's handler.
  *
@@ -150,8 +152,7 @@ final class StaticFiles
         }
         $fp = false !== $stat ? @\fopen($file, 'r') : false;
         if (false === $fp) {
-            $request->sendResponseHeaders(403);
-            $request->end();
+            ErrorPage::send($request, 403);
 
             return;
         }

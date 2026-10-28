@@ -1,38 +1,20 @@
 # Command line
 
 ```
-Usage: swerve [options] [file]
+Usage: swerve [options] [swerve.php]
+       swerve [options] -S [dir] [router.php]
 
 Application:
-  [file]                           With the swerve adapter: swerve.php, a PHP file returning a Swerve\RequestHandler, which runs once per request with a ClientRequest (default: ./swerve.php). With another adapter: given to it (a router script, say, as for php -S)
-  -t, --docroot=<dir>              The document root, given to the adapter (one serving plain PHP files, say, as php -S does); not for the swerve adapter, see --public
-  --adapter=<name>                 The adapter that provides the entry point: an installed one by name, or swerve for swerve.php (see README, Adapters); without it, the application's composer.json, the only installed adapter, else swerve
+  [swerve.php]           The application's runner, which calls Swerve::accept() (default: ./swerve.php)
+  -S [dir] [router.php]  Serve a directory as php -S does: its files, its PHP files run, every
+                         other request to the router (default: dir's index.php; without one, 404).
+                         dir defaults to the current directory. Not with a swerve.php
 
-Serving:
-  --http=<address>                 Serve HTTP here: 8080 (this machine only), :8080 (every interface), host:port, [ipv6]:port or unix:/path; repeat for several (default: 127.0.0.1:8080)
-  --public=<dir>                   HTTP: serve the files in this directory (CSS, JavaScript, images), and pass the rest to the application
-  -w, --workers=<n>                Worker processes; auto is one per CPU core (default: auto)
-
-Extension:
-  --ext                            Load ext-phasync (bundled with phasync); swerve stops if it cannot
-
-Development:
-  --watch                          Restart all workers when a PHP file of the application changes
-
-Logging (to the terminal, or with --log to a file):
-  -v, --verbose                    Log more: -v also what swerve does (workers starting, draining), -vv also debug
-  -q, --quiet                      Log nothing to the terminal (--log still logs to its file)
-  --no-access-log                  No line per request
-  --log=<path>                     Append the log, and PHP errors, to this file instead
-
-Limits:
-  --grace=<seconds>                Seconds workers get to clean up on shutdown and reload before SIGKILL (default: 30)
-  --watchdog=<seconds>             Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
-  --cache-size=<size>              The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G (default: 64M)
-
-Information:
-  -h, --help                       This help
-  --version                        The versions of swerve, PHP, phasync and ext-phasync
+Options:
+  --http=<address>       Serve HTTP here: host:port, or unix:/path (default: 127.0.0.1:8080)
+  --workers=<n>          Worker processes (default: one per CPU core)
+  --log=<path>           Append the log, and the workers' PHP errors, to this file instead of the terminal
+  -d name=value          PHP settings go to PHP itself: php -d memory_limit=1G vendor/bin/swerve
 ```
 
 - Options and the application file may come in any order. An option's value is attached
