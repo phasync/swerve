@@ -76,9 +76,6 @@ final class HttpConnection
      */
     public const DISCARD_TIMEOUT = 5.0;
 
-    /** The default largest request body (413), see $maxBodySize. */
-    public const MAX_BODY = 8388608;
-
     /** Control characters, which a header value may not contain, but horizontal tab (RFC 9110 5.5). */
     public const CTL = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f";
 
@@ -172,15 +169,12 @@ final class HttpConnection
     /**
      * @param \Closure(\Swerve\ClientRequest): void $handler     the application's; may be replaced between requests
      * @param ?Logger                               $access      the access log, if on
-     * @param int                                   $maxBodySize a larger request body gets 413, by its Content-Length before
-     *                                                           the application runs, or when a chunk would exceed it
      */
     public function __construct(
         public readonly Duplex $io,
         public \Closure $handler,
         public readonly LoggerInterface $logger,
         public readonly ?Logger $access,
-        public readonly int $maxBodySize = self::MAX_BODY,
     ) {
     }
 
@@ -669,8 +663,6 @@ final class HttpConnection
             if (0 !== \strcasecmp($te, 'chunked')) {
                 throw new HttpError('Not Implemented', 501);
             }
-        } elseif (null !== $length && $length > $this->maxBodySize) {
-            throw new HttpError('Content Too Large', 413);
         }
         // close wins, in either version (RFC 9112 9.3); HTTP/1.0 persists only when asked to
         if ('' === $connection) {

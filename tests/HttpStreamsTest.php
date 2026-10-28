@@ -343,7 +343,7 @@ test('101 answering a request that is not an HTTP/1.1 upgrade request gets 500',
  */
 
 test('a 101 goes out at once, then both directions are the raw connection, beyond the HTTP limits', function () {
-    [$master, $addr] = native_start(args: ['--max-body=1000'], workers: 1);
+    [$master, $addr] = native_start(workers: 1);
     try {
         $conn  = native_connect($addr);
         $start = microtime(true);
@@ -357,7 +357,7 @@ test('a 101 goes out at once, then both directions are the raw connection, beyon
         fwrite($conn, 'hello');
         expect(read_exactly($conn, 5))->toBe('hello');
 
-        $data         = random_bytes(3 * 102400); // far past --max-body
+        $data         = random_bytes(3 * 102400);
         [$received]   = duplex($conn, $data, strlen($data));
         expect($received === $data)->toBeTrue();
 
@@ -374,7 +374,7 @@ test('a 101 goes out at once, then both directions are the raw connection, beyon
     } finally {
         native_stop($master);
     }
-})->skip(true, '0.2: --max-body is not implemented yet');
+});
 
 test('a tunnel outlives the HTTP timeouts', function () {
     [$master, $addr] = native_start(workers: 1);

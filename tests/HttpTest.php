@@ -522,28 +522,15 @@ test('a flood of idle connections neither kills a worker nor drops the connectio
     }
 });
 
-test('a request body larger than the limit gets 413, by its Content-Length or its chunks', function () {
+test('swerve sets no limit on a request body: the application reads it as a stream and decides', function () {
     $conn = native_connect($this->addr);
-    fwrite($conn, "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 100000000\r\n\r\n");
-    expect(native_read_response($conn)['status'] ?? null)->toBe(413);
-    expect(native_closed($conn))->toBeTrue();
+    fwrite($conn, "POST /hello HTTP/1.1\r\nHost: t\r\nContent-Length: 100000000\r\n\r\n");
+    expect(native_read_response($conn)['status'] ?? null)->toBe(200);
 
     $conn = native_connect($this->addr);
-    fwrite($conn, "POST /echo HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n8000\r\n" . str_repeat('x', 0x8000) . "\r\n" . dechex(8 * 1024 * 1024) . "\r\n");
-    expect(native_read_response($conn)['status'] ?? null)->toBe(413);
-    expect(native_closed($conn))->toBeTrue();
-
-    [$master, $addr] = native_start('app.php', ['--max-body=10']);
-    try {
-        foreach (['0123456789' => 200, '0123456789a' => 413] as $body => $status) {
-            $conn = native_connect($addr);
-            fwrite($conn, "POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: " . strlen($body) . "\r\n\r\n$body");
-            expect(native_read_response($conn)['status'])->toBe($status);
-        }
-    } finally {
-        native_stop($master);
-    }
-})->skip(true, '0.2: --max-body is not implemented yet');
+    fwrite($conn, "POST /hello HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n" . dechex(64 * 1024 * 1024) . "\r\n");
+    expect(native_read_response($conn)['status'] ?? null)->toBe(200);
+});
 
 test('skipping an unread request body has a deadline, however slowly the client sends it', function () {
     $conn = native_connect($this->addr);

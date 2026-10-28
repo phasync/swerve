@@ -59,7 +59,9 @@ while ('' !== ($piece = $request->read())) {
 
 - `read()` returns `''` only at the end of the body. It throws `phasync\IOException` when the
   client vanished in the middle.
-- Bodies larger than `--max-body` (8 MiB by default) get `413`.
+- Swerve sets no limit on a body's size: you read it as it arrives, and can refuse a request by
+  its `Content-Length` or stop reading once you have had enough. A classic application's PHP
+  applies `post_max_size` and `upload_max_filesize`, as php-fpm does.
 - A client may keep your `read()` waiting 10 s, plus a second for each KiB it sends; past that,
   `read()` throws `phasync\TimeoutException`, so a client trickling a byte at a time can't hold your
   handler for long.
@@ -144,7 +146,6 @@ Limits, all answered with the proper status:
 |---|---|
 | request line | 8 KiB (414) |
 | request head (line and headers) | 64 KiB and 100 headers (431), within 10 s (408) |
-| body | `--max-body`, 8 MiB (413) |
 | each wait while reading a body or writing a response | 60 s |
 
 A worker serves at most 512 connections at once without ext-phasync (see

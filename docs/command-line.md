@@ -26,7 +26,6 @@ Logging (to the terminal, or with --log to a file):
   --log=<path>                     Append the log, and PHP errors, to this file instead
 
 Limits:
-  --max-body=<bytes>               HTTP: the largest request body in bytes (413), 0 for no limit (default: 8388608)
   --grace=<seconds>                Seconds workers get to clean up on shutdown and reload before SIGKILL (default: 30)
   --watchdog=<seconds>             Replace a worker whose event loop is stuck this long (CPU work that never yields counts); at least 1, 0 = off (default: 30)
   --cache-size=<size>              The most Swerve::cache() holds, shared by the workers in the master: bytes, K, M or G (default: 64M)
@@ -50,7 +49,7 @@ Information:
   stop. Anyone may connect: limit access with the permissions of the directory it is in.
 - `--adapter` picks what provides the entry point when a package such as a framework adapter is installed, see
   [Adapters](../README.md#adapters). A `swerve.php` argument cannot be combined with an adapter other than `swerve`.
-- `--public` and `--max-body` apply to HTTP, which is all swerve serves; a proxy in front (nginx,
+- `--public` applies to HTTP, which is all swerve serves; a proxy in front (nginx,
   HAProxy, Caddy) speaks HTTP to it.
 
 ## Exit codes

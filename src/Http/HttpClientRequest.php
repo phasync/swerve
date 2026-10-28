@@ -568,9 +568,6 @@ final class HttpClientRequest implements ClientRequest
             throw new HttpError('Bad Request', 400);
         }
         $this->remaining = \hexdec(\substr($line, 0, $digits));
-        if ($this->remaining > $c->maxBodySize - $this->position) {
-            throw new HttpError('Content Too Large', 413);
-        }
         if (0 === $this->remaining) {
             $total = 0;
             $count = 0;
