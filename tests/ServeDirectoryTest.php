@@ -120,3 +120,21 @@ test('-S takes a directory and a router at most, and no swerve.php', function ()
     $process = swerve_spawn(['--http=' . free_address(), '-S', $dir, "$dir/router.php", "$dir/sub/x.php"], null, out: [2 => ['pipe', 'w']]);
     expect(proc_close($process))->toBe(1);
 });
+
+test('swerve -S serves one request per run, as php-fpm: requests at once never share a script\'s globals', function () {
+    $dir = serve_site();
+    file_put_contents("$dir/g.php", '<?php $id = $_GET["id"]; usleep(2000); echo $id === $_GET["id"] ? "same" : "mixed";');
+    [$process, $addr] = serve_start($dir);
+    try {
+        $conns = [];
+        for ($i = 0; $i < 16; ++$i) {
+            $conns[$i] = native_connect($addr);
+            fwrite($conns[$i], "GET /g.php?id=$i HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+        }
+        foreach ($conns as $conn) {
+            expect(native_read_response($conn)['body'] ?? null)->toBe('same');
+        }
+    } finally {
+        native_stop($process);
+    }
+});
