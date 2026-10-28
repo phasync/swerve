@@ -11,8 +11,7 @@
  */
 
 use Example\MemcachedServer;
-use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 
 require_once __DIR__ . '/MemcachedServer.php';
 
@@ -20,11 +19,11 @@ $port      = (int) (\getenv('MEMCACHED_PORT') ?: 11211);
 $memcached = new MemcachedServer($port);
 $memcached->start();
 
-return new RequestHandler(static function (ClientRequest $request) use ($memcached, $port) {
-    $text = "memcached protocol on port $port\n";
+while (Swerve::accept(null, static function () use ($memcached, $port): void {
+    \header('Content-Type: text/plain');
+    echo "memcached protocol on port $port\n";
     foreach ($memcached->stats() as $name => $value) {
-        $text .= "$name $value\n";
+        echo "$name $value\n";
     }
-    $request->sendResponseHeaders(200, ['Content-Type' => 'text/plain']);
-    $request->write($text);
-});
+})) {
+}
