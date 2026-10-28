@@ -1,27 +1,31 @@
 <?php
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
 // Binary WebSocket frames, forwarded to every worker's subscribers: publish() would fail to
 // encode them as JSON, since a binary frame is not valid UTF-8.
-$app = new RequestHandler(function (ClientRequest $request) {
-    WebSocket::from($request, function (WebSocket $ws) {
-        $ws->onMessage->listen(function (string $data, bool $binary) {
-            if ($binary) {
-                Swerve::publishRaw('frames', $data);      // to this and every other worker
+$app = static function () {
+    Swerve::upgrade(static function (ClientRequest $request) {
+        WebSocket::from($request, function (WebSocket $ws) {
+            $ws->onMessage->listen(function (string $data, bool $binary) {
+                if ($binary) {
+                    Swerve::publishRaw('frames', $data);      // to this and every other worker
+                }
+            });
+            foreach (Swerve::subscribe('frames') as $frame) { // what this and every other connection sent
+                $ws->sendBinary($frame);
             }
         });
-        foreach (Swerve::subscribe('frames') as $frame) { // what this and every other connection sent
-            $ws->sendBinary($frame);
-        }
     });
-});
+};
 
-if (debug_backtrace()) {
-    return $app;   // swerve loads this file: it is the application's swerve.php
+if (debug_backtrace()) {   // swerve runs this file: it is the application's swerve.php
+    while (Swerve::accept(null, $app)) {
+    }
+
+    return;
 }
 
 // Run directly: serve the application, send one binary frame, and print what comes back

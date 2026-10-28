@@ -1,24 +1,28 @@
 <?php
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
-$app = new RequestHandler(function (ClientRequest $request) {
-    WebSocket::from($request, function (WebSocket $ws) {
-        // When the worker must close its connections: say why, in the protocol
-        Swerve::onShutdown(fn () => phasync::shielded(fn () => $ws->end(1001, 'server restarting')));
+$app = static function () {
+    Swerve::upgrade(static function (ClientRequest $request) {
+        WebSocket::from($request, function (WebSocket $ws) {
+            // When the worker must close its connections: say why, in the protocol
+            Swerve::onShutdown(fn () => phasync::shielded(fn () => $ws->end(1001, 'server restarting')));
 
-        $ws->send('welcome');
-        foreach ($ws as $message) {
-            $ws->send($message);
-        }
+            $ws->send('welcome');
+            foreach ($ws as $message) {
+                $ws->send($message);
+            }
+        });
     });
-});
+};
 
-if (debug_backtrace()) {
-    return $app;   // swerve loads this file: it is the application's swerve.php
+if (debug_backtrace()) {   // swerve runs this file: it is the application's swerve.php
+    while (Swerve::accept(null, $app)) {
+    }
+
+    return;
 }
 
 // Run directly: serve the application with swerve, and talk to it as a browser would

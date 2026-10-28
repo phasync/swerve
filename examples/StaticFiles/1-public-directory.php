@@ -1,18 +1,19 @@
 <?php
 
-use Swerve\ClientRequest;
-use Swerve\RequestHandler;
-use Swerve\StaticFiles;
+use Swerve\Swerve;
 
 // Files below public/ are served; every other request reaches the application
-$files = new StaticFiles(__DIR__ . '/public');
-$app   = new RequestHandler($files->wrap(function (ClientRequest $request) {
-    $request->sendResponseHeaders(404, ['content-type' => 'text/plain']);
-    $request->write("No page at {$request->getTarget()}\n");
-}));
+$app = static function () {
+    \http_response_code(404);
+    \header('Content-Type: text/plain');
+    echo "No page at {$_SERVER['REQUEST_URI']}\n";
+};
 
-if (debug_backtrace()) {
-    return $app;   // swerve loads this file: it is the application's swerve.php
+if (debug_backtrace()) {   // swerve runs this file: it is the application's swerve.php
+    while (Swerve::accept(__DIR__ . '/public', $app)) {
+    }
+
+    return;
 }
 
 // Run directly: serve the application with swerve, and send it requests

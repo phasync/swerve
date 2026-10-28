@@ -1,16 +1,21 @@
 <?php
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 
-$app = new RequestHandler(function (ClientRequest $request) {
-    $name = $request->getRequestHeaders()['x-name'][0] ?? 'world';
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-    $request->write("Hello, $name: {$request->getMethod()} {$request->getTarget()}\n");
-});
+$app = static function () {
+    Swerve::upgrade(static function (ClientRequest $request) {
+        $name = $request->getRequestHeaders()['x-name'][0] ?? 'world';
+        $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
+        $request->write("Hello, $name: {$request->getMethod()} {$request->getTarget()}\n");
+    });
+};
 
-if (debug_backtrace()) {
-    return $app;   // swerve loads this file: it is the application's swerve.php
+if (debug_backtrace()) {   // swerve runs this file: it is the application's swerve.php
+    while (Swerve::accept(null, $app)) {
+    }
+
+    return;
 }
 
 // Run directly: serve the application with swerve, and send it a request

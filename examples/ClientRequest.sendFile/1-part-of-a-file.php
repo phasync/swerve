@@ -1,20 +1,25 @@
 <?php
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 
-$app = new RequestHandler(function (ClientRequest $request) {
-    $file = fopen('php://temp', 'w+');
-    fwrite($file, "0123456789abcdefghij");
+$app = static function () {
+    Swerve::upgrade(static function (ClientRequest $request) {
+        $file = fopen('php://temp', 'w+');
+        fwrite($file, "0123456789abcdefghij");
 
-    // No content-length is computed: give one with the head, or the body is chunked
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain', 'content-length' => '6']);
-    $request->sendFile($file, 10, 6);    // 6 bytes from offset 10
-    fclose($file);
-});
+        // No content-length is computed: give one with the head, or the body is chunked
+        $request->sendResponseHeaders(200, ['content-type' => 'text/plain', 'content-length' => '6']);
+        $request->sendFile($file, 10, 6);    // 6 bytes from offset 10
+        fclose($file);
+    });
+};
 
-if (debug_backtrace()) {
-    return $app;   // swerve loads this file: it is the application's swerve.php
+if (debug_backtrace()) {   // swerve runs this file: it is the application's swerve.php
+    while (Swerve::accept(null, $app)) {
+    }
+
+    return;
 }
 
 // Run directly: serve the application with swerve, and send it requests

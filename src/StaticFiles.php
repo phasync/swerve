@@ -30,6 +30,7 @@ use Swerve\Http\ErrorPage;
  * @topic request-handlers
  *
  * @example examples/StaticFiles/1-public-directory.php Files, and the application for the rest
+ * @example examples/StaticFiles/2-ranges-and-revalidation.php Ranges, revalidation, and no PHP sources
  */
 final class StaticFiles
 {
@@ -85,7 +86,7 @@ final class StaticFiles
      *
      * @return \Closure(ClientRequest): void
      *
-     * @example examples/StaticFiles.wrap/1-ranges-and-revalidation.php Ranges, revalidation, and no PHP sources
+     * @internal accept() wraps its handler so
      */
     public function wrap(\Closure $app): \Closure
     {

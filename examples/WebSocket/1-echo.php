@@ -1,22 +1,27 @@
 <?php
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 use Swerve\WebSocket;
 
-$app = new RequestHandler(function (ClientRequest $request) {
-    WebSocket::from($request, function (WebSocket $ws) {
-        foreach ($ws as $message) {             // ends when the connection closes
-            if ('bye' === $message) {
-                return;                          // returning closes the connection (1000)
+$app = static function () {
+    Swerve::upgrade(static function (ClientRequest $request) {
+        WebSocket::from($request, function (WebSocket $ws) {
+            foreach ($ws as $message) {             // ends when the connection closes
+                if ('bye' === $message) {
+                    return;                          // returning closes the connection (1000)
+                }
+                $ws->send("echo: $message");
             }
-            $ws->send("echo: $message");
-        }
+        });
     });
-});
+};
 
-if (debug_backtrace()) {
-    return $app;   // swerve loads this file: it is the application's swerve.php
+if (debug_backtrace()) {   // swerve runs this file: it is the application's swerve.php
+    while (Swerve::accept(null, $app)) {
+    }
+
+    return;
 }
 
 // Run directly: serve the application with swerve, and talk to it as a browser would

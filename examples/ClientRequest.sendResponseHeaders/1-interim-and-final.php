@@ -1,19 +1,24 @@
 <?php
 
 use Swerve\ClientRequest;
-use Swerve\RequestHandler;
+use Swerve\Swerve;
 
-$app = new RequestHandler(function (ClientRequest $request) {
-    // A 1xx goes out at once: here 103 Early Hints, while the page is still being made
-    $request->sendResponseHeaders(103, ['link' => '</style.css>; rel=preload; as=style']);
+$app = static function () {
+    Swerve::upgrade(static function (ClientRequest $request) {
+        // A 1xx goes out at once: here 103 Early Hints, while the page is still being made
+        $request->sendResponseHeaders(103, ['link' => '</style.css>; rel=preload; as=style']);
 
-    // The final head waits for the first body bytes, and goes out with them
-    $request->sendResponseHeaders(201, ['content-type' => 'application/json', 'location' => '/items/7']);
-    $request->write('{"id":7}');
-});
+        // The final head waits for the first body bytes, and goes out with them
+        $request->sendResponseHeaders(201, ['content-type' => 'application/json', 'location' => '/items/7']);
+        $request->write('{"id":7}');
+    });
+};
 
-if (debug_backtrace()) {
-    return $app;   // swerve loads this file: it is the application's swerve.php
+if (debug_backtrace()) {   // swerve runs this file: it is the application's swerve.php
+    while (Swerve::accept(null, $app)) {
+    }
+
+    return;
 }
 
 // Run directly: serve the application with swerve, and send it requests

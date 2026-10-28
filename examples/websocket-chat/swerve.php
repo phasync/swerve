@@ -5,24 +5,22 @@
  * receives everyone's. Messages go through Swerve::publish(), so connections in different
  * workers share the room.
  *
- *     vendor/bin/swerve --public=examples/websocket-chat/public examples/websocket-chat/swerve.php
+ *     vendor/bin/swerve examples/websocket-chat/swerve.php
  */
 
-use Swerve\ClientRequest;
-use Swerve\RequestHandler;
 use Swerve\SubscriberLagException;
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
-return new RequestHandler(static function (ClientRequest $request) {
-    if ('/chat' !== \strtok($request->getTarget(), '?')) {
-        $request->sendResponseHeaders(404, ['Content-Type' => 'text/plain']);
-        $request->write('Not found');
+while (Swerve::accept(__DIR__ . '/public', static function (): void {
+    if ('/chat' !== \strtok($_SERVER['REQUEST_URI'], '?')) {
+        \http_response_code(404);
+        \header('Content-Type: text/plain');
+        echo 'Not found';
 
         return;
     }
-
-    WebSocket::from($request, static function (WebSocket $ws) {
+    Swerve::upgrade(static function (WebSocket $ws): void {
         // What this browser sends goes to the room
         $ws->onMessage->listen(static function (string $message) {
             $data = \json_decode($message, true);
@@ -43,4 +41,5 @@ return new RequestHandler(static function (ClientRequest $request) {
             $ws->end(1008); // too far behind; the browser reconnects
         }
     });
-});
+})) {
+}

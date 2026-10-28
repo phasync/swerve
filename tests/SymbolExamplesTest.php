@@ -25,11 +25,6 @@ function run_symbol_example(string $file): array
 }
 
 test('example runs, and prints the same twice', function (string $file) {
-    if (str_contains(file_get_contents($file), "serve.php'")) {
-        // These use examples/serve.php, which starts a real bin/swerve.php with the 0.1 contract
-        // (RequestHandler, --grace/-q, no extension loaded): not ported to 0.2 yet
-        test()->markTestSkipped('0.2: examples/serve.php uses the 0.1 RequestHandler contract, not ported yet');
-    }
     [$exit, $output] = run_symbol_example($file);
 
     expect($exit)->toBe(0, $output);

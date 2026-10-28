@@ -101,7 +101,7 @@ function swerve_start(string $app): array
     $addr  = \stream_socket_get_name($probe, false);
     \fclose($probe);
     $swerve = \proc_open(
-        [\PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', '--grace=2', '-q', $app],
+        [\PHP_BINARY, __DIR__ . '/../bin/swerve.php', "--http=$addr", '--workers=1', '--grace=2', $app],
         [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
         $pipes,
     );

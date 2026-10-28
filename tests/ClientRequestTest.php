@@ -296,13 +296,3 @@ test('the request is described as it was sent', function () {
     expect($seen)->toBe(['POST', '/a%20b?x=1', '1.1', 'http', ['host' => ['t'], 'x-multi' => ['1', '2'], 'content-length' => ['0']]]);
 });
 
-test('an application that returns a bare closure, or a RequestHandler of a callable that is no closure, stops the master with exit code 2', function (string $fixture, string $message) {
-    [$process, , $log] = swerve_start(fixture: $fixture, wait: false);
-    [$code]            = swerve_wait($process, 3);
-
-    expect($code)->toBe(2);
-    expect(file_get_contents($log))->toContain($message);
-})->with([
-    'a closure'          => ['bad-closure.php', 'must return a Swerve\RequestHandler'],
-    'a callable object'  => ['bad-callable.php', 'must be of type Closure'],
-])->skip(true, '0.2: swerve.php no longer returns a RequestHandler (Swerve::accept() is called directly), so there is nothing to validate here');
