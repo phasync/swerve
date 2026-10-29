@@ -100,7 +100,12 @@ final class Container implements ContainerInterface
         if (\PHP_INT_MAX !== $limit && (!\extension_loaded('apcu') || !\apcu_enabled())) {
             throw new \LogicException("A limit needs APCu (pecl install apcu); swerve's master enables it for the CLI");
         }
-        $this->services[$id] = [$factory(...), $limit, $lifetime, self::PREFIX . \md5($id)];
+        $this->services[$id] = [$factory(...), $limit, $lifetime, $key = self::PREFIX . \md5($id)];
+        if (\PHP_INT_MAX !== $limit) {
+            // Here, before accept(): a coroutine a request starts belongs to that request (sapi()),
+            // and the listener would keep the request it started in alive
+            $this->listen($key);
+        }
     }
 
     /** Whether `$id` was added. */
