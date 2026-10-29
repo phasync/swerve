@@ -338,8 +338,8 @@ foreach (Swerve::subscribe('chat') as $message) {
 }
 ```
 
-- Messages travel serialized: strings and bytes, arrays, enums, and objects of `stdClass` (each
-  subscriber gets a copy of its own; other classes throw in `publish()`). Every message of every publisher has its place in one order, in a log the
+- Messages travel serialized: strings and bytes, arrays, enums and objects (each subscriber gets
+  a copy of its own; the autoloader finds the classes). Every message of every publisher has its place in one order, in a log the
   workers share in APCu, and every subscriber in every worker receives them in that order.
 - Delivery is at most once, to the subscriptions that exist when a message is published. There
   is no history. Swerve is one machine; across machines, use Redis, NATS or the like.

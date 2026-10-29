@@ -27,9 +27,6 @@ final class Topics
     /** Largest message. */
     public const MAX_MESSAGE = 1 << 17;
 
-    /** How messages are unserialized: objects of stdClass only (enums always come through). */
-    public const UNSERIALIZE = ['allowed_classes' => [\stdClass::class]];
-
     /** The process stops: the early hint of Swerve::draining(). */
     public static bool $draining = false;
     /** The process must now close its connections: subscriptions have ended, see drain(). */
@@ -45,11 +42,7 @@ final class Topics
     /** What a subscriber receives in place of the messages a gap lost. */
     private static ?\stdClass $gap = null;
 
-    /**
-     * What publish() sends: $message serialized, after the checks of the topic and the message.
-     * One holding objects is unserialized here as the workers will, so an object of another class
-     * than stdClass fails in the publisher, before it is in the log.
-     */
+    /** What publish() sends: $message serialized, after the checks of the topic and the message. */
     public static function encode(string $topic, mixed $message): string
     {
         if (null === $message) {
@@ -61,35 +54,28 @@ final class Topics
             throw new \InvalidArgumentException('A message must be serializable: ' . $e->getMessage(), 0, $e);
         }
         self::checkSizes($topic, $message);
-        if (\preg_match('/[OC]:\d+:"/', $message) && self::foreign(\unserialize($message, self::UNSERIALIZE))) {
-            throw new \InvalidArgumentException('A message may hold objects of stdClass only (and enums): publish arrays, or serialize the object yourself and publish the string');
-        }
-
         return $message;
     }
 
-    /** Whether $value holds an object unserialize() could not rebuild under UNSERIALIZE. */
-    private static function foreign(mixed $value, array &$seen = []): bool
+    /**
+     * $message unserialized, with a class the autoloader can't find an Error, as for code: not a
+     * __PHP_Incomplete_Class that fails later. Only for this call: the application's own
+     * unserialize() keeps PHP's way.
+     */
+    public static function unserialize(string $message): mixed
     {
-        if ($value instanceof \__PHP_Incomplete_Class) {
-            return true;
+        $before = \ini_set('unserialize_callback_func', self::class . '::missing');
+        try {
+            return \unserialize($message);
+        } finally {
+            \ini_set('unserialize_callback_func', (string) $before);
         }
-        if ($value instanceof \stdClass) {
-            if (isset($seen[\spl_object_id($value)])) {
-                return false; // a reference to one already looked at
-            }
-            $seen[\spl_object_id($value)] = true;
-            $value                         = \get_object_vars($value);
-        }
-        if (\is_array($value)) {
-            foreach ($value as $item) {
-                if (self::foreign($item, $seen)) {
-                    return true;
-                }
-            }
-        }
+    }
 
-        return false;
+    /** @internal unserialize_callback_func: a class the autoloader could not find */
+    public static function missing(string $class): never
+    {
+        throw new \Error("Class \"$class\" not found: a message holds it, and the autoloader of this worker can't find it");
     }
 
     private static function checkSizes(string $topic, string $message): void
@@ -120,10 +106,10 @@ final class Topics
     /**
      * Message $seq, published at $published (hrtime()), for this process's subscribers of $topic,
      * if any. A value without objects is unserialized here, once, and shared: scalars and arrays
-     * are copies anyway. One that may hold objects (`O:` or `C:` in its serialized form; a string
-     * merely containing those costs only the copies) goes on serialized, and each subscriber
-     * unserializes its own copy: none sees another's changes. Objects are stdClass only
-     * (UNSERIALIZE), as encode() made sure.
+     * are copies anyway. One that may hold objects or enums (`O:`, `C:` or `E:` in its serialized
+     * form; a string merely containing those costs only the copies) goes on serialized, and each
+     * subscriber unserializes its own copy: none sees another's changes, and a class this worker's
+     * autoloader can't find is an Error in the subscriber's loop, not in the log's reader.
      *
      * The write suspends until the topic's publisher has taken the message. If the last
      * subscriber leaves meanwhile, or the process drains, the publisher is closed and the write
@@ -133,8 +119,8 @@ final class Topics
     {
         if (isset(self::$writers[$topic])) {
             try {
-                $shared = !\preg_match('/[OC]:\d+:"/', $message);
-                self::$writers[$topic]->write([$seq, $published, $shared ? \unserialize($message, self::UNSERIALIZE) : null, $shared ? null : $message]);
+                $shared = !\preg_match('/[OCE]:\d+:"/', $message);
+                self::$writers[$topic]->write([$seq, $published, $shared ? \unserialize($message) : null, $shared ? null : $message]);
             } catch (ChannelException) {
                 // Closed while the write was suspended: the topic has no subscribers left
             }

@@ -64,12 +64,12 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 - It returns once the message is in the log, not when it is delivered, and never suspends the
   caller: also in a `finally` of a cancelled coroutine, and directly in `swerve.php`.
 - A message travels serialized (`serialize()`): strings and bytes (a binary WebSocket frame),
-  numbers, arrays, enums, and objects of `stdClass`. Every subscriber gets the value that was
-  published: one without objects is unserialized once per worker and shared, one holding
-  objects arrives as a copy of its own for each subscriber, so none sees another's changes.
+  numbers, arrays, enums and objects. Every subscriber gets the value that was published: one
+  without objects is unserialized once per worker and shared, one holding objects arrives as a
+  copy of its own for each subscriber, so none sees another's changes. The autoloader finds the
+  classes; one a subscriber's worker can't find is an `Error` from that subscriber's loop.
   `publish()` throws for `null` (a subscription with a heartbeat yields `null` for "nothing
-  came"), a closure, and an object of any other class: it unserializes the message as the
-  workers will before it publishes.
+  came") and for what `serialize()` refuses, such as a closure.
 - Messages go to the subscribers in the workers, never to a browser by themselves. Publish
   values as they are (`Swerve::publish('game', ['kill', $playerId])`), so 10,000 subscribers don't
   each decode a string. When subscribers pass a message on unchanged to their

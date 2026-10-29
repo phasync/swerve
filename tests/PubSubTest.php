@@ -397,9 +397,22 @@ test('without a master, a message arrives as the value published: bytes, arrays,
     expect([$first->n, $second->n])->toBe([2, 1]); // the other's copy is its own
     expect(fn () => Swerve::publish('local-values', null))->toThrow(InvalidArgumentException::class);
     expect(fn () => Swerve::publish('local-values', static fn () => 1))->toThrow(InvalidArgumentException::class, 'must be serializable');
-    // Only stdClass: what a worker would rebuild as __PHP_Incomplete_Class fails here, also nested
-    expect(fn () => Swerve::publish('local-values', new ArrayObject([1])))->toThrow(InvalidArgumentException::class, 'stdClass only');
-    expect(fn () => Swerve::publish('local-values', ['deep' => (object) ['x' => new ArrayObject()]]))->toThrow(InvalidArgumentException::class, 'stdClass only');
+    // Any class, found by the autoloader; one it can't find is an Error in the subscriber's loop
+    expect(phasync::run(static function () {
+        $s = Swerve::subscribe('local-classes');
+        Swerve::publish('local-classes', new ArrayObject([1, 2]));
+        foreach ($s as $m) {
+            return $m->getArrayCopy();
+        }
+    }))->toBe([1, 2]);
+    expect(fn () => phasync::run(static function () {
+        $s = Swerve::subscribe('local-missing');
+        \Swerve\Util\Topics::deliver(1, \hrtime(true), 'local-missing', 'O:12:"NoSuchClass1":0:{}');
+        foreach ($s as $m) {
+            return $m;
+        }
+    }))->toThrow(Error::class, 'Class "NoSuchClass1" not found');
+    expect(ini_get('unserialize_callback_func'))->toBe(''); // the application's unserialize() is as PHP made it
     // A string that merely looks like an object is a string
     expect(phasync::run(static function () {
         $s = Swerve::subscribe('local-strings');

@@ -90,10 +90,11 @@ final class Swerve
      * {@see SubscriberLagException} where they were (a warning is logged at 3/4 of the ring).
      * Outside a swerve worker, messages stay in this process.
      *
-     * A message travels serialized (`serialize()`): any bytes, arrays, enums, and objects of
-     * stdClass. A subscriber gets the value published: scalars and arrays unserialized once per
-     * worker, and a value holding objects as a copy of its own for each subscriber, so none sees
-     * another's changes.
+     * A message travels serialized (`serialize()`): any bytes, arrays, enums and objects. A
+     * subscriber gets the value published: scalars and arrays unserialized once per worker, and a
+     * value holding objects as a copy of its own for each subscriber, so none sees another's
+     * changes. The autoloader finds the classes: one the subscriber's worker can't find is an
+     * `Error` from the subscriber's loop.
      *
      * ```php
      * Swerve::publish('game', ['kill', $playerId]);
@@ -101,9 +102,9 @@ final class Swerve
      * ```
      *
      * @param string $topic   1 to 255 bytes
-     * @param mixed  $message a string, number, bool, array, enum or stdClass, not null; at most 128 KiB serialized
+     * @param mixed  $message anything `serialize()` takes except null; at most 128 KiB serialized
      *
-     * @throws \InvalidArgumentException for a topic or message outside those sizes, a topic starting with "\0", null (which a heartbeat subscription yields for "nothing came"), a value that can't be serialized (a closure), or an object of another class than stdClass
+     * @throws \InvalidArgumentException for a topic or message outside those sizes, a topic starting with "\0", null (which a heartbeat subscription yields for "nothing came"), or a value that can't be serialized (a closure)
      *
      * @see Swerve::subscribe       receives the messages
      *

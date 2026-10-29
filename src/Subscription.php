@@ -103,7 +103,7 @@ final class Subscription implements \IteratorAggregate
             if ($lag > $this->maxLag) {
                 throw new SubscriberLagException(\sprintf('A subscriber of "%s" fell %.1f s behind, more than its %.1f s', $this->topic, $lag, $this->maxLag));
             }
-            yield null === $copy ? $message : \unserialize($copy, Topics::UNSERIALIZE); // with objects: a copy of its own
+            yield null === $copy ? $message : Topics::unserialize($copy); // with objects: a copy of its own
         }
     }
 
