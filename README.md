@@ -66,10 +66,11 @@ it needs ext-phasync, which waits with epoll.
    request-scoped state in a `WeakMap` keyed by `Scope::getCurrent()`: each request is a `Scope`
    of its own. See
    [How swerve runs your application](docs/how-it-runs.md).
-3. **Return a `Swerve\RequestHandler`** from `swerve.php`. A framework gets an adapter that turns
-   the `ClientRequest` into its own request and response.
-4. **Load ext-phasync** in production (it ships inside phasync: start swerve with `--ext`, or `pie install phasync/ext-phasync`). Blocking calls in
-   libraries you did not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) then wait as a
+3. **Call `Swerve::accept()`** in `swerve.php`, or serve a directory with `swerve -S` as
+   `php -S` does. A framework gets an adapter.
+4. **ext-phasync** ships inside phasync, and `vendor/bin/swerve` loads it by itself (one installed
+   with `pie install phasync/ext-phasync` is used as it is). Blocking calls in libraries you did
+   not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) wait as a
    coroutine instead of stalling the worker, and a worker can hold far more than 1,024
    connections.
 

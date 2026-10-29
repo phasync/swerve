@@ -6,12 +6,9 @@
 composer require phasync/swerve
 ```
 
-Recommended, with PHP 8.3 or later: the phasync extension, which ships with phasync. Start swerve
-with `--ext`, or install it with `pie install phasync/ext-phasync`. See [Production](production.md#ext-phasync) for what it changes.
-
-```bash
-vendor/bin/swerve --ext --version   # swerve 0.1.0 (PHP 8.5.11, phasync 2.0.0, ext-phasync 2.0.0)
-```
+Swerve runs on the phasync extension, which ships with phasync: `vendor/bin/swerve` loads it by
+itself, or uses one installed with `pie install phasync/ext-phasync`. See
+[Production](production.md#ext-phasync) for what it does.
 
 ## A first application
 

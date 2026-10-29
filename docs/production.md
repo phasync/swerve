@@ -2,31 +2,21 @@
 
 ## ext-phasync
 
-ext-phasync is an optional PHP extension that ships inside [phasync](https://github.com/phasync/phasync),
-with prebuilt binaries for PHP 8.3 to 8.5 on Linux and macOS. Swerve loads it when you start it with
-`--ext`, and uses one installed with `pie install phasync/ext-phasync` as it is:
+ext-phasync is the PHP extension Swerve runs on. It ships inside
+[phasync](https://github.com/phasync/phasync), with prebuilt binaries for PHP 8.3 to 8.5 on Linux
+and macOS: `vendor/bin/swerve` loads the one for your PHP by itself, and uses one installed with
+`pie install phasync/ext-phasync` as it is. When neither fits (an extension phasync can't use),
+swerve says why and exits with code 1.
 
-```bash
-vendor/bin/swerve --ext          # swerve stops if it cannot load it
-vendor/bin/swerve --version      # ... ext-phasync 2.0.0
-```
+What it does:
 
-Swerve runs without it, which is fine for development; the master logs a notice at start, saying how
-to enable it, when it is not loaded.
-
-With it:
-
-- A worker waits on its sockets with epoll, and is not limited to 512 connections
-  (PHP's own `stream_select()` fails for file descriptors of 1024 and up, so without it a worker keeps to half that; see sizing below).
-  At 50,000 connections a hello-world server served 2 to 4 times as many requests as without it,
-  depending on the number of workers. Up to 512 connections per worker, PHP's own
-  `stream_select()` is as fast or a little faster.
+- A worker waits on its sockets with epoll, and is not limited by `stream_select()`, which fails for
+  file descriptors of 1024 and up.
 - Code that is not written for phasync cooperates: inside a coroutine, sockets and TLS, MySQL through
   mysqli or PDO, `curl_exec()` and Guzzle, pipes, file and DNS functions, `sleep()` and `usleep()` let other
   requests run instead of blocking the worker. CPU-bound code still blocks. See
   [the rule](how-it-runs.md#the-rule-never-block-a-worker).
 
-Your application behaves the same with and without it; it only waits better.
 
 ## PHP settings swerve overrides
 
