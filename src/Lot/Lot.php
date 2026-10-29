@@ -19,6 +19,10 @@ use Psr\Log\LoggerInterface;
  * {@see Lot::shutdown()} the listener closes, connections without a request are closed, and
  * every worker's ask is answered with 'S' once no request waits in line.
  *
+ * A process holds at most {@see Lot::connectionLimit()} connections. At the limit the master
+ * closes the oldest connection still waiting for its request before it accepts another, and
+ * accepts none while every one it holds has a request in line.
+ *
  * Messages with the workers are packets on a SEQPACKET socket pair, one letter each, a
  * connection riding along as SCM_RIGHTS: see {@see LotClient}.
  *
@@ -31,6 +35,28 @@ final class Lot
 
     /** Seconds a kept-alive connection may wait for its next request (as in Node). */
     private const KEPT_ALIVE_TIMEOUT = 5.0;
+
+    /**
+     * File descriptors a process keeps below its connection limit for everything else: the
+     * listener, the workers' channels and logs, and in a worker the application's own files and
+     * connections.
+     */
+    private const RESERVED_FDS = 64;
+
+    /** At most once a minute: under a flood every accept would log it. */
+    private const SHORT_LOG_EVERY = 60.0;
+
+    /** See connectionLimit(). */
+    private readonly int $max;
+
+    /** Connections closed to make room since the last warning of it. */
+    private int $reclaimed = 0;
+
+    /** When the last warning that the limit was reached was logged. */
+    private float $shortLogged = 0;
+
+    /** Raised when a connection leaves the master: handed on, or closed. */
+    private \stdClass $room;
 
     /** @var \SplQueue<resource> connections with a request waiting, oldest first */
     private \SplQueue $ready;
@@ -63,6 +89,8 @@ final class Lot
         $this->asking   = new \SplQueue();
         $this->stopping = new \WeakMap();
         $this->onReady  = new \WeakMap();
+        $this->room     = new \stdClass();
+        $this->max      = self::connectionLimit();
         \stream_set_blocking($listener, false);
         // A response leaves in more than one write: without TCP_NODELAY, Nagle holds the last
         // one until the client's delayed ACK (40 ms) on every kept-alive request. Linux gives
@@ -79,16 +107,65 @@ final class Lot
         while (true) {
             try {
                 phasync::readable($this->listener);
+                // Every connection waiting, not one per wakeup
+                while ($this->makeRoom() && false !== $conn = @\stream_socket_accept($this->listener, 0)) {
+                    \stream_set_blocking($conn, false);
+                    phasync::go(fn () => $this->wait($conn, self::NEW_TIMEOUT));
+                }
             } catch (CancelledException) {
                 \fclose($this->listener);
 
                 return;
             }
-            // Every connection waiting, not one per wakeup
-            while (false !== $conn = @\stream_socket_accept($this->listener, 0)) {
-                \stream_set_blocking($conn, false);
-                phasync::go(fn () => $this->wait($conn, self::NEW_TIMEOUT));
-            }
+        }
+    }
+
+    /**
+     * The open-file limit less RESERVED_FDS: the connections a process (the master, or a worker)
+     * holds at most. Past the open-file limit it could accept or receive none, and nothing would
+     * make room.
+     */
+    public static function connectionLimit(): int
+    {
+        $limit = \posix_getrlimit()['soft openfiles'];
+
+        return 'unlimited' === $limit ? \PHP_INT_MAX : (int) $limit - self::RESERVED_FDS;
+    }
+
+    /**
+     * Below the limit: true at once. At it, close the oldest connection waiting for its request
+     * (wait() closes it) and return true; when every connection held has its request in line,
+     * wait until one is handed on and return false: the listener is looked at again.
+     */
+    private function makeRoom(): bool
+    {
+        if (\count($this->waiting) + $this->ready->count() < $this->max) {
+            return true;
+        }
+        $id = \array_key_first($this->waiting);
+        if (null !== $id) {
+            phasync::cancel($this->waiting[$id]);
+            unset($this->waiting[$id]); // closed once its coroutine runs; it holds no slot from now
+            ++$this->reclaimed;
+        }
+        $this->warnShort('At the limit of {max} connections in the master; {n} waiting for their request closed to make room since the last warning; raise the open-file limit (ulimit -n)');
+        if (null === $id) {
+            phasync::awaitFlag($this->room);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /** Log that the limit was reached, at most once every SHORT_LOG_EVERY seconds. */
+    private function warnShort(string $message): void
+    {
+        $now = \microtime(true);
+        if ($now - $this->shortLogged >= self::SHORT_LOG_EVERY) {
+            $this->shortLogged = $now;
+            $this->logger->warning($message, ['max' => $this->max, 'n' => $this->reclaimed]);
+            $this->reclaimed = 0;
         }
     }
 
@@ -173,6 +250,7 @@ final class Lot
             return;
         } finally {
             unset($this->waiting[(int) $conn]);
+            phasync::raiseFlag($this->room);
         }
         if ('' === \stream_socket_recvfrom($conn, 1, \STREAM_PEEK)) {
             \fclose($conn); // readable because the client closed it
@@ -267,5 +345,6 @@ final class Lot
             return;
         }
         \fclose($conn);
+        phasync::raiseFlag($this->room);
     }
 }

@@ -709,9 +709,10 @@ test('file descriptors the application holds while streaming never make a connec
 });
 
 test('at the connection limit, idle connections are closed to make room for new ones', function () {
-    [$master, $addr] = native_start('app.php', [], 1);
+    // An open-file limit of 256: a process holds at most 192 connections (Lot::connectionLimit())
+    [$master, $addr] = native_start('app.php', [], 1, [], [], ['prlimit', '--nofile=256']);
     try {
-        // More kept-alive connections than a worker serves at once (512), each idle after a request
+        // More kept-alive connections than a worker holds, each idle after a request
         $conns  = [];
         $bodies = [];
         for ($i = 0; $i < 1000; ++$i) {
@@ -852,9 +853,9 @@ test('a client leaving mid-body makes the read throw an IOException', function (
 });
 
 test('at the connection limit, connections already answered (lingering, or skipping an unread body) are closed first', function () {
-    [$master, $addr] = native_start('app.php', [], 1);
+    [$master, $addr] = native_start('app.php', [], 1, [], [], ['prlimit', '--nofile=256']);
     try {
-        // More than a worker serves at once (512), each answered: skipping a body that never
+        // More than a worker holds (192 at this open-file limit), each answered: skipping a body that never
         // comes (5 s), or lingering after Connection: close (2 s), and never closed by the client
         foreach (["POST /hello HTTP/1.1\r\nHost: t\r\nContent-Length: 1000\r\n\r\n", "GET /hello HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n"] as $request) {
             $conns = [];
@@ -875,7 +876,7 @@ test('at the connection limit, connections already answered (lingering, or skipp
 });
 
 test('at the connection limit, connections waiting for a request body are closed to make room', function () {
-    [$master, $addr] = native_start('app.php', [], 1);
+    [$master, $addr] = native_start('app.php', [], 1, [], [], ['prlimit', '--nofile=256']);
     try {
         $conns = [];
         for ($i = 0; $i < 1000; ++$i) {

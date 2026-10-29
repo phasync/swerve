@@ -125,13 +125,14 @@ function free_address(): string
  * and wait until it answers.
  *
  * @param string[] $args more command line arguments
+ * @param string[] $wrap a command that execs PHP, as for swerve_spawn()
  *
  * @return array{0: resource, 1: string} the process and its address
  */
-function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2, array $php = [], array $env = []): array
+function native_start(string $fixture = 'app.php', array $args = [], int $workers = 2, array $php = [], array $env = [], array $wrap = []): array
 {
     $addr     = free_address();
-    $process  = swerve_spawn(["--http=$addr", "--workers=$workers", ...$args], $fixture, $php, $env);
+    $process  = swerve_spawn(["--http=$addr", "--workers=$workers", ...$args], $fixture, $php, $env, [], null, $wrap);
     $deadline = microtime(true) + 10;
     while (null === http_get($addr, '/hello')) {
         if (microtime(true) > $deadline) {

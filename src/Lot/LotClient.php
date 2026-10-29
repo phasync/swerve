@@ -93,6 +93,18 @@ final class LotClient
     /** The service receiving the master's answers, while one runs. */
     private ?\Fiber $reader = null;
 
+    /** See Lot::connectionLimit(). */
+    private readonly int $max;
+
+    /** @var array<int, true> kept-alive connections closed to make room, by resource id, see reclaim() */
+    private array $reclaimed = [];
+
+    /** Connections closed to make room since the last warning of it. */
+    private int $reclaimedCount = 0;
+
+    /** When the last warning that the limit was reached was logged. */
+    private float $shortLogged = 0;
+
     /** Why this worker stops, once the master said so. */
     private ?StopReason $stopping = null;
 
@@ -118,6 +130,7 @@ final class LotClient
         $this->channel = $channel;
         $this->socket  = $socket;
         $this->started = new \WeakMap();
+        $this->max     = Lot::connectionLimit();
     }
 
     /**
@@ -235,6 +248,11 @@ final class LotClient
 
                     return true;
                 }
+                if (!$this->asking && \count($this->connections) + \count($this->stash) >= $this->max && !$this->reclaim()) {
+                    phasync::awaitFlag($this); // a connection ends, or one served here has its next request
+
+                    continue;
+                }
                 // The reader first: a service runs at once, and one started after the 'N' could
                 // take the answer, and raise the flag, before this waits for it
                 $this->reader ??= phasync::service($this->read(...));
@@ -291,6 +309,7 @@ final class LotClient
             // when the connection went on in another coroutine (detached), which has it now
             if (($this->connections[$id][1] ?? null) === $fiber) {
                 unset($this->connections[$id]);
+                phasync::raiseFlag($this); // room for an accept() at the limit
             }
         }
     }
@@ -374,7 +393,12 @@ final class LotClient
             try {
                 phasync::readable($stream, self::KEEP_ALIVE_TIMEOUT);
             } catch (CancelledException) {
-                return; // the lifecycle ends: shutdown() hands it back
+                if (isset($this->reclaimed[$id])) {
+                    unset($this->reclaimed[$id], $this->idle[$id]);
+                    \fclose($stream);
+                }
+
+                return; // else the lifecycle ends: shutdown() hands it back
             } catch (IOException|TimeoutException) {
                 unset($this->idle[$id]);
                 \fclose($stream);
@@ -403,6 +427,50 @@ final class LotClient
             $offer->returnToPool();
             $open = null;
         }
+    }
+
+    /**
+     * At the limit, close a connection that waits on its client, as nginx reuses its idle
+     * keep-alive connections when it runs short: else a client holding connections, which costs
+     * it almost nothing, locks everyone else out. The first found of: those answered already
+     * (lingering before the close, or skipping an unread body), those reading a request head,
+     * the kept-alive ones, and last those waiting for more of a request body. Upgraded
+     * connections are never closed to make room. False when none waits on its client.
+     */
+    private function reclaim(): bool
+    {
+        $closed = false;
+        foreach ([HttpConnection::ANSWERED, HttpConnection::NEW, HttpConnection::KEPT_ALIVE, HttpConnection::BODY] as $state) {
+            if (HttpConnection::KEPT_ALIVE === $state) {
+                foreach ($this->idle as $id => $_) {
+                    if (!isset($this->reclaimed[$id])) {
+                        $this->reclaimed[$id] = true;
+                        phasync::cancel($this->connections[$id][1]); // its coroutine closes it
+                        $closed = true;
+                        break 2;
+                    }
+                }
+
+                continue;
+            }
+            foreach ($this->connections as [$http]) {
+                if ($http->reclaim($state)) {
+                    $closed = true;
+                    break 2;
+                }
+            }
+        }
+        if ($closed) {
+            ++$this->reclaimedCount;
+        }
+        $now = \microtime(true);
+        if ($now - $this->shortLogged >= 60) {
+            $this->shortLogged = $now;
+            Swerve::log()->warning('At the limit of {max} connections in a worker; {n} waiting on their clients closed to make room since the last warning; raise the open-file limit (ulimit -n) or add workers', ['max' => $this->max, 'n' => $this->reclaimedCount]);
+            $this->reclaimedCount = 0;
+        }
+
+        return $closed;
     }
 
     /**
@@ -469,6 +537,9 @@ final class LotClient
         $this->stopping = $reason;
         phasync::raiseFlag($this);
         foreach ($this->idle as $id => $conn) {
+            if (isset($this->reclaimed[$id])) {
+                continue; // closed already
+            }
             phasync::cancel($this->connections[$id][1]);
             $this->giveBack($conn, 'B');
         }
