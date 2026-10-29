@@ -166,7 +166,7 @@ $app = new class {
             case '/websocket-feed':
                 WebSocket::from($r, static function (WebSocket $ws) {
                     foreach (Swerve::subscribe('feed') as $message) {
-                        if ($message instanceof \Swerve\Util\SealedObject && ($message->end ?? false)) {
+                        if (\is_array($message) && ($message['end'] ?? false)) {
                             return;
                         }
                         $ws->send(\is_string($message) ? $message : \json_encode($message));

@@ -202,7 +202,7 @@ final class Container implements ContainerInterface
     public static function released(string $key): void
     {
         if (SharedLog::shared()) {
-            Topics::publishRaw("\0$key", '');
+            Topics::publish("\0$key", true);
         } elseif (isset(self::$instance->flags[$key])) {
             self::$instance->heard($key);
         }

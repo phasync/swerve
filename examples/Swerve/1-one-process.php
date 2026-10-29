@@ -8,7 +8,7 @@ phasync::run(function () {
     Swerve::publish('chat', ['user' => 'ann', 'text' => 'hi']);
 
     foreach ($chat as $message) {
-        echo "$message->user: $message->text\n";
+        echo "{$message['user']}: {$message['text']}\n";
         break;
     }
 

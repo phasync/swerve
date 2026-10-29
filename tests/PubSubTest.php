@@ -366,37 +366,65 @@ test('a message reaches every subscriber in every worker as the value published:
     expect(log_count($log, '/(error|critical)/'))->toBe(0, file_get_contents($log));
 });
 
-test('without a master, a message is delivered as JSON would deliver it, strings as strings; null is refused', function () {
-    $received = phasync::run(static function () {
-        $subscription = Swerve::subscribe('local-structured');
-        Swerve::publish('local-structured', ['a' => 1.0, 'o' => (object) ['x' => 1]]);
-        foreach ($subscription as $message) {
-            return $message;
-        }
-    });
-    expect($received->a)->toBe(1.0); // an array with keys is a JSON object, as from another worker
-    expect($received->o->x)->toBe(1);
-    $strings = phasync::run(static function () {
-        $subscription = Swerve::subscribe('local-strings');
-        Swerve::publish('local-strings', '{}');
-        Swerve::publish('local-strings', '"quoted"');
+test('without a master, a message arrives as the value published: bytes, arrays, and objects, a copy for each subscriber; null and closures are refused', function () {
+    $bytes = \implode('', \array_map('chr', \range(0, 255))); // every byte value once
+    [$got, $first, $second] = phasync::run(static function () use ($bytes) {
+        $a = Swerve::subscribe('local-values');
+        $b = Swerve::subscribe('local-values');
+        Swerve::publish('local-values', $bytes);
+        Swerve::publish('local-values', ['a' => 1.0, 'list' => [1, 2]]);
+        Swerve::publish('local-values', (object) ['n' => 1]);
         $got = [];
-        foreach ($subscription as $message) {
+        foreach ($a as $message) {
             $got[] = $message;
-            if (2 === \count($got)) {
-                return $got;
+            if (3 === \count($got)) {
+                break;
             }
         }
-    });
-    expect($strings)->toBe(['{}', '"quoted"']); // a string stays exactly that string
-    expect(fn () => Swerve::publish('local-structured', null))->toThrow(InvalidArgumentException::class);
+        $got[2]->n = 2; // one subscriber changes its copy
+        $other = [];
+        foreach ($b as $message) {
+            $other[] = $message;
+            if (3 === \count($other)) {
+                break;
+            }
+        }
 
-    // What a worker could not decode fails in the publisher: 512 levels encode, but don't decode
-    $deep = 'x';
-    for ($i = 0; $i < 512; ++$i) {
-        $deep = [$deep];
+        return [$got, $got[2], $other[2]];
+    });
+    expect($got[0])->toBe($bytes);
+    expect($got[1])->toBe(['a' => 1.0, 'list' => [1, 2]]);
+    expect([$first->n, $second->n])->toBe([2, 1]); // the other's copy is its own
+    expect(fn () => Swerve::publish('local-values', null))->toThrow(InvalidArgumentException::class);
+    expect(fn () => Swerve::publish('local-values', static fn () => 1))->toThrow(InvalidArgumentException::class, 'must be serializable');
+    // Only stdClass: what a worker would rebuild as __PHP_Incomplete_Class fails here, also nested
+    expect(fn () => Swerve::publish('local-values', new ArrayObject([1])))->toThrow(InvalidArgumentException::class, 'stdClass only');
+    expect(fn () => Swerve::publish('local-values', ['deep' => (object) ['x' => new ArrayObject()]]))->toThrow(InvalidArgumentException::class, 'stdClass only');
+    // A string that merely looks like an object is a string
+    expect(phasync::run(static function () {
+        $s = Swerve::subscribe('local-strings');
+        Swerve::publish('local-strings', 'O:11:"ArrayObject":0:{}');
+        foreach ($s as $m) {
+            return $m;
+        }
+    }))->toBe('O:11:"ArrayObject":0:{}');
+});
+
+test('in a cluster, bytes published in one worker reach a subscriber in another worker unchanged, invalid UTF-8 included', function () {
+    [$process, $addr] = swerve_start([], 4);
+    try {
+        $bytes = \implode('', \array_map('chr', \range(0, 255)));
+        $conn  = native_connect($addr);
+        \fwrite($conn, "GET /subscribe?topic=bytes&n=1&hex=1 HTTP/1.1\r\nHost: t\r\n\r\n");
+        native_read_head($conn);
+        native_read_chunk($conn); // "ready <pid>"
+
+        expect(probe($addr, '/publish-bytes?topic=bytes&m=' . \bin2hex($bytes)))->toBe('published');
+
+        \preg_match('/^data: ([0-9a-f]*)\n\n$/', (string) native_read_chunk($conn), $m);
+        expect(\hex2bin($m[1]))->toBe($bytes);
+    } finally {
+        native_stop($process);
     }
-    expect(fn () => Swerve::publish('local-structured', $deep))->toThrow(JsonException::class);
-    expect(fn () => Swerve::publish('local-structured', "\xFF"))->toThrow(JsonException::class); // invalid UTF-8
 });
 

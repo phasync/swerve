@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Swerve::publish()/publishRaw() never suspend the caller: the first publish to a topic in a
+ * Swerve::publish() never suspends the caller: the first publish to a topic in a
  * worker used to wait for the master's subscriber bitmap (Topics::bitmap()), so a publish in a
  * cancelled coroutine's finally (a WebSocket handler saying goodbye) threw CancelledException at
  * that wait, and the message was silently lost. See PubSubTest for publish()/subscribe() itself.

@@ -90,24 +90,22 @@ final class Swerve
      * {@see SubscriberLagException} where they were (a warning is logged at 3/4 of the ring).
      * Outside a swerve worker, messages stay in this process.
      *
-     * Every message travels as JSON: encoded once here, decoded once in each worker, and every
-     * subscriber gets the value published, shared: a string stays a string (`'{}'` too), a list an
-     * array, and an object (an array with keys) a read-only {@see Swerve\Util\SealedObject}:
-     * `$message->end`.
+     * A message travels serialized (`serialize()`): any bytes, arrays, enums, and objects of
+     * stdClass. A subscriber gets the value published: scalars and arrays unserialized once per
+     * worker, and a value holding objects as a copy of its own for each subscriber, so none sees
+     * another's changes.
      *
      * ```php
      * Swerve::publish('game', ['kill', $playerId]);
-     * Swerve::publish('game', ['type' => 'score', 'player' => $playerId, 'points' => 10]);
+     * Swerve::publish('frames', $binaryWebSocketFrame);   // bytes stay bytes
      * ```
      *
      * @param string $topic   1 to 255 bytes
-     * @param mixed  $message anything `json_encode()` takes except null; at most 128 KiB encoded
+     * @param mixed  $message a string, number, bool, array, enum or stdClass, not null; at most 128 KiB serialized
      *
-     * @throws \InvalidArgumentException for a topic or message outside those sizes, a topic starting with "\0", or null (which a heartbeat subscription yields for "nothing came")
-     * @throws \JsonException            for a value JSON can't express
+     * @throws \InvalidArgumentException for a topic or message outside those sizes, a topic starting with "\0", null (which a heartbeat subscription yields for "nothing came"), a value that can't be serialized (a closure), or an object of another class than stdClass
      *
      * @see Swerve::subscribe       receives the messages
-     * @see Swerve::publishRaw      bytes that are not JSON, such as a binary WebSocket frame
      *
      * @topic coordination-across-workers
      *
@@ -117,38 +115,6 @@ final class Swerve
     {
         self::refuseInternal($topic);
         Topics::publish($topic, $message);
-    }
-
-    /**
-     * Send `$bytes` unchanged to every subscriber of `$topic`, in every worker process of this swerve, this one included.
-     *
-     * For messages {@see Swerve::publish()} cannot carry: bytes that are not valid UTF-8, such as
-     * a binary WebSocket frame, which `publish()` would fail to encode as JSON. A subscriber gets
-     * exactly `$bytes`, as a plain string, never decoded. The same delivery guarantees as
-     * `publish()` apply (order, at-most-once, never suspends the caller, and the rest); see its
-     * docblock. A topic may mix `publish()` and `publishRaw()` messages: each subscriber gets
-     * each one in its own shape.
-     *
-     * ```php
-     * Swerve::publishRaw('frames', $binaryWebSocketFrame);
-     * ```
-     *
-     * @param string $topic 1 to 255 bytes
-     * @param string $bytes any bytes, including none; at most 128 KiB
-     *
-     * @throws \InvalidArgumentException for a topic or message outside those sizes, or a topic starting with "\0"
-     *
-     * @see Swerve::subscribe   receives the messages, raw or not
-     * @see Swerve::publish     for a value JSON can carry
-     *
-     * @topic coordination-across-workers
-     *
-     * @example examples/Swerve.publishRaw/1-websocket-frames.php A WebSocket handler forwards binary frames to the other workers
-     */
-    public static function publishRaw(string $topic, string $bytes): void
-    {
-        self::refuseInternal($topic);
-        Topics::publishRaw($topic, $bytes);
     }
 
     /**
@@ -162,7 +128,7 @@ final class Swerve
      *
      * ```php
      * foreach (Swerve::subscribe('chat') as $message) {
-     *     echo $message->text, "\n";   // an object arrives as a read-only SealedObject
+     *     echo $message["text"], "\n";   // the value published
      * }
      * ```
      *

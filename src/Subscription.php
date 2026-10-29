@@ -76,7 +76,7 @@ final class Subscription implements \IteratorAggregate
      * }
      * ```
      *
-     * @return \Generator<int, mixed> each message as published (a JSON message decoded; an object as a SealedObject), or null for a heartbeat
+     * @return \Generator<int, mixed> each message as published (an object a copy of its own), or null for a heartbeat
      *
      * @throws SubscriberLagException when the next message was published more than `$maxLag` seconds ago, or messages were lost
      */
@@ -92,7 +92,7 @@ final class Subscription implements \IteratorAggregate
             if ($eof) {
                 return;
             }
-            [$seq, $published, $message] = $item;
+            [$seq, $published, $message, $copy] = $item;
             if ($seq <= $this->after) {
                 continue; // published before this subscription; its worker reads on for older ones
             }
@@ -103,7 +103,7 @@ final class Subscription implements \IteratorAggregate
             if ($lag > $this->maxLag) {
                 throw new SubscriberLagException(\sprintf('A subscriber of "%s" fell %.1f s behind, more than its %.1f s', $this->topic, $lag, $this->maxLag));
             }
-            yield $message;
+            yield null === $copy ? $message : \unserialize($copy, Topics::UNSERIALIZE); // with objects: a copy of its own
         }
     }
 

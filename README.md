@@ -338,29 +338,18 @@ foreach (Swerve::subscribe('chat') as $message) {
 }
 ```
 
-- Messages travel as JSON, decoded once per worker and shared by its subscribers: a subscriber
-  gets the value published (`Swerve::publish('game', ['kill', $id])` an array, `'{}'` a string,
-  `['end' => true]` a read-only object: `$message->end`).
-- The master keeps, per topic, which workers have subscribers; a publishing worker writes the
-  message straight into their inboxes. One worker's messages arrive in the order it published
-  them; there is no order between workers. Without the master (swerve embedded in your own
-  process), they are delivered in that process.
-- Delivery is at most once, to the subscriptions that exist when a message reaches their
-  worker. There is no history: a worker started after a reload or a crash sees
-  nothing sent before it. Swerve is one machine; across machines, use Redis, NATS or the like.
+- Messages travel serialized: strings and bytes, arrays, enums, and objects of `stdClass` (each
+  subscriber gets a copy of its own; other classes throw in `publish()`). Every message of every publisher has its place in one order, in a log the
+  workers share in APCu, and every subscriber in every worker receives them in that order.
+- Delivery is at most once, to the subscriptions that exist when a message is published. There
+  is no history. Swerve is one machine; across machines, use Redis, NATS or the like.
 - A subscription ends when its last reference goes: a `break`, the variable going out of scope,
-  the request's coroutine ending. A topic costs nothing in a worker without subscribers.
-- For one order across all subscribers, publish from a single writer: one process or request
-  that every change goes through.
-- A message is kept once per worker, however many subscribe, until the slowest subscriber
-  read it. One falling more than `maxLag` seconds behind (30 by default,
-  `Swerve::subscribe('prices', maxLag: 5)`) gets a `SubscriberLagException` from its loop.
-- Topics are 1 to 255 bytes, messages at most 128 KiB. A worker that does not read its
-  inbox (its event loop stuck) loses the messages sent to it after 0.1 s, with a warning in the
-  log; it does not hold up the publishers.
-- `Swerve::publishRaw('frames', $bytes)` sends `$bytes` unchanged, for messages `publish()`
-  cannot carry (bytes that are not valid UTF-8, such as a binary WebSocket frame). Its
-  subscribers get exactly `$bytes`; a topic may mix `publish()` and `publishRaw()` messages.
+  the request's coroutine ending.
+- A subscriber falling more than `maxLag` seconds behind (30 by default) gets a
+  `SubscriberLagException` from its loop, and so does one whose worker fell a whole
+  `--pubsub-ring` (8192 messages) behind. Nothing is lost silently.
+- Topics are 1 to 255 bytes, messages at most 128 KiB serialized. `publish()` never waits.
+  [Publish and subscribe](docs/publish-subscribe.md) has the rest.
 
 ## Shared cache
 

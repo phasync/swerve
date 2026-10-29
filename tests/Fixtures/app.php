@@ -729,7 +729,7 @@ $app = new class($version) {
                 }
                 try {
                     foreach ($subscription as $message) {
-                        // ?hex=1: the message as hex, so arbitrary bytes from publishRaw() survive the SSE framing
+                        // ?hex=1: the message as hex, so arbitrary bytes survive the SSE framing
                         $r->write('data: ' . (isset($query['hex']) ? \bin2hex($message) : (\is_string($message) ? $message : 'json ' . \json_encode($message))) . "\n\n");
                         if (++$i >= (int) $query['n']) {
                             break;
@@ -776,9 +776,9 @@ $app = new class($version) {
                 fx_send($r, 200, [], 'published');
 
                 return;
-            // ?m= as hex: Swerve::publishRaw(), for bytes a query string can't carry directly
-            case '/publish-raw':
-                Swerve::publishRaw($query['topic'], \hex2bin($query['m']));
+            // ?m= as hex: bytes a query string can't carry directly
+            case '/publish-bytes':
+                Swerve::publish($query['topic'], \hex2bin($query['m']));
                 fx_send($r, 200, [], 'published');
 
                 return;

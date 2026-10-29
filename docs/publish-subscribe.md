@@ -8,7 +8,7 @@ subscribers reads it, and hands each message to its subscribers of the topic.
 ```php
 use Swerve\Swerve;
 
-Swerve::publish('room:lobby', json_encode(['user' => 'ann', 'text' => 'hi']));
+Swerve::publish('room:lobby', ['user' => 'ann', 'text' => 'hi']);
 
 foreach (Swerve::subscribe('room:lobby') as $message) {
     // every message published to room:lobby from the moment subscribe() returned
@@ -57,34 +57,24 @@ foreach (Swerve::subscribe('room:lobby') as $message) {
 
 ## Publishing
 
-`Swerve::publish(string $topic, string $message): void`
+`Swerve::publish(string $topic, mixed $message): void`
 
 - Topics are 1 to 255 bytes, messages at most 128 KiB; larger ones throw
   `InvalidArgumentException`.
 - It returns once the message is in the log, not when it is delivered, and never suspends the
   caller: also in a `finally` of a cancelled coroutine, and directly in `swerve.php`.
-- Every message travels as JSON: encoded once where it is published, decoded once in each
-  worker, and every subscriber gets the value that was published, shared. A string stays a
-  string (`'{}'` too), a list an array; an object (an array with keys) arrives as a read-only
-  `Swerve\Util\SealedObject`: read `$message->end`, and no subscriber can change what the others see. `null` is
-  refused: a subscription with a heartbeat yields `null` for "nothing came".
+- A message travels serialized (`serialize()`): strings and bytes (a binary WebSocket frame),
+  numbers, arrays, enums, and objects of `stdClass`. Every subscriber gets the value that was
+  published: one without objects is unserialized once per worker and shared, one holding
+  objects arrives as a copy of its own for each subscriber, so none sees another's changes.
+  `publish()` throws for `null` (a subscription with a heartbeat yields `null` for "nothing
+  came"), a closure, and an object of any other class: it unserializes the message as the
+  workers will before it publishes.
 - Messages go to the subscribers in the workers, never to a browser by themselves. Publish
   values as they are (`Swerve::publish('game', ['kill', $playerId])`), so 10,000 subscribers don't
   each decode a string. When subscribers pass a message on unchanged to their
   SSE clients, publish the string those clients should get: it is encoded once, by the publisher,
-  not by every subscriber.
-
-## Binary messages
-
-`Swerve::publishRaw(string $topic, string $bytes): void` sends `$bytes` unchanged: for messages
-`publish()` cannot carry, such as a binary WebSocket frame, which is not valid UTF-8 and so
-cannot be JSON. A subscriber gets exactly `$bytes`, as a plain string, never decoded. The same
-promises as `publish()` apply (one order, delivery, limits); a topic may mix `publish()` and
-`publishRaw()` messages, each subscriber getting each one in its own shape.
-
-```php
-Swerve::publishRaw('frames', $binaryWebSocketFrame);
-```
+  not by every subscriber. Objects cost a copy per subscriber: publish arrays to many.
 
 ## Patterns
 

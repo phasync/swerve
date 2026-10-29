@@ -27,6 +27,9 @@ final class Topics
     /** Largest message. */
     public const MAX_MESSAGE = 1 << 17;
 
+    /** How messages are unserialized: objects of stdClass only (enums always come through). */
+    public const UNSERIALIZE = ['allowed_classes' => [\stdClass::class]];
+
     /** The process stops: the early hint of Swerve::draining(). */
     public static bool $draining = false;
     /** The process must now close its connections: subscriptions have ended, see drain(). */
@@ -43,33 +46,50 @@ final class Topics
     private static ?\stdClass $gap = null;
 
     /**
-     * What publish() sends: $message as JSON, after the checks of
-     * the topic and the message.
+     * What publish() sends: $message serialized, after the checks of the topic and the message.
+     * One holding objects is unserialized here as the workers will, so an object of another class
+     * than stdClass fails in the publisher, before it is in the log.
      */
     public static function encode(string $topic, mixed $message): string
     {
         if (null === $message) {
             throw new \InvalidArgumentException('null is no message: a subscription with a heartbeat yields null when none came');
         }
-        // Always JSON, strings too: what a subscriber gets is the value published ('{}' stays a
-        // string), decoded once per worker
-        // Depth 511: json_decode() at its default 512 fails on the 512 levels json_encode() accepts,
-        // so what the workers could not decode fails here, in the publisher
-        $message = \json_encode($message, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION, 511);
+        try {
+            $message = \serialize($message);
+        } catch (\Exception $e) {
+            throw new \InvalidArgumentException('A message must be serializable: ' . $e->getMessage(), 0, $e);
+        }
         self::checkSizes($topic, $message);
+        if (\preg_match('/[OC]:\d+:"/', $message) && self::foreign(\unserialize($message, self::UNSERIALIZE))) {
+            throw new \InvalidArgumentException('A message may hold objects of stdClass only (and enums): publish arrays, or serialize the object yourself and publish the string');
+        }
 
         return $message;
     }
 
-    /**
-     * What publishRaw() sends: $bytes unchanged, marked with a leading "\0" so deliver() hands it
-     * back as a plain string instead of decoding it as JSON (no JSON text starts with "\0").
-     */
-    public static function encodeRaw(string $topic, string $bytes): string
+    /** Whether $value holds an object unserialize() could not rebuild under UNSERIALIZE. */
+    private static function foreign(mixed $value, array &$seen = []): bool
     {
-        self::checkSizes($topic, $bytes);
+        if ($value instanceof \__PHP_Incomplete_Class) {
+            return true;
+        }
+        if ($value instanceof \stdClass) {
+            if (isset($seen[\spl_object_id($value)])) {
+                return false; // a reference to one already looked at
+            }
+            $seen[\spl_object_id($value)] = true;
+            $value                         = \get_object_vars($value);
+        }
+        if (\is_array($value)) {
+            foreach ($value as $item) {
+                if (self::foreign($item, $seen)) {
+                    return true;
+                }
+            }
+        }
 
-        return "\0" . $bytes;
+        return false;
     }
 
     private static function checkSizes(string $topic, string $message): void
@@ -87,11 +107,6 @@ final class Topics
         self::publishEncoded($topic, self::encode($topic, $message));
     }
 
-    public static function publishRaw(string $topic, string $bytes): void
-    {
-        self::publishEncoded($topic, self::encodeRaw($topic, $bytes));
-    }
-
     /** Never waits: a publish from a coroutine already cancelled (a goodbye in a finally) still goes out. */
     private static function publishEncoded(string $topic, string $message): void
     {
@@ -104,10 +119,11 @@ final class Topics
 
     /**
      * Message $seq, published at $published (hrtime()), for this process's subscribers of $topic,
-     * if any: decoded here, once for all of them. A message from publishRaw() is marked with a
-     * leading "\0" (no JSON text starts with it): the rest goes to subscribers unchanged, as a
-     * plain string. Otherwise it is JSON, as publish() sent it. They share the value (an object
-     * is a SealedObject, which nobody can change).
+     * if any. A value without objects is unserialized here, once, and shared: scalars and arrays
+     * are copies anyway. One that may hold objects (`O:` or `C:` in its serialized form; a string
+     * merely containing those costs only the copies) goes on serialized, and each subscriber
+     * unserializes its own copy: none sees another's changes. Objects are stdClass only
+     * (UNSERIALIZE), as encode() made sure.
      *
      * The write suspends until the topic's publisher has taken the message. If the last
      * subscriber leaves meanwhile, or the process drains, the publisher is closed and the write
@@ -117,8 +133,8 @@ final class Topics
     {
         if (isset(self::$writers[$topic])) {
             try {
-                $value = "\0" === ($message[0] ?? '') ? \substr($message, 1) : SealedObject::seal(\json_decode($message, false, 512, \JSON_THROW_ON_ERROR));
-                self::$writers[$topic]->write([$seq, $published, $value]);
+                $shared = !\preg_match('/[OC]:\d+:"/', $message);
+                self::$writers[$topic]->write([$seq, $published, $shared ? \unserialize($message, self::UNSERIALIZE) : null, $shared ? null : $message]);
             } catch (ChannelException) {
                 // Closed while the write was suspended: the topic has no subscribers left
             }
@@ -130,7 +146,7 @@ final class Topics
     {
         foreach (self::$writers as $writer) {
             try {
-                $writer->write([\PHP_INT_MAX, \hrtime(true), self::lost()]);
+                $writer->write([\PHP_INT_MAX, \hrtime(true), self::lost(), null]);
             } catch (ChannelException) {
             }
         }

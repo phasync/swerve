@@ -158,7 +158,7 @@ wire. `send()` throws `ValueError` for text that is not UTF-8; use `sendBinary()
 
   Cleanup that must still run belongs in a `finally`, as it does for any cancellation; anything in it that may
   itself wait (an I/O call, a lock) should be wrapped in `phasync::shielded(fn () => ...)`, so the cancellation
-  does not cut it short too. `Swerve::publish()`/`publishRaw()` no longer need that wrapping: neither suspends
+  does not cut it short too. `Swerve::publish()` no longer needs that wrapping: it never suspends
   the caller, so one in a `finally` is sent even when the coroutine running it was already cancelled.
 
   ```php
