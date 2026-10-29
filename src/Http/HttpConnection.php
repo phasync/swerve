@@ -63,8 +63,6 @@ final class HttpConnection
     /** Seconds to keep reading (and discarding) before closing, see serve(). */
     private const LINGER_TIMEOUT = 2.0;
 
-    /** While draining, how long a new connection may take to start its request, see drain(). */
-    private const DRAIN_NEW_WAIT = 1.0;
 
     /** An unread request body rest up to this is skipped to keep the connection; a larger one closes it. */
     public const DISCARD_LIMIT = 65536;
@@ -144,12 +142,6 @@ final class HttpConnection
      * once upgraded.
      */
     public int $reclaimable = 0;
-
-    /**
-     * The server is draining: this connection closes after its current request, see drain().
-     * An upgraded connection's input then ends.
-     */
-    public bool $draining = false;
 
     /** A 101 was sent: the connection carries the application's protocol, to which no HTTP limit or timeout applies. */
     public bool $upgraded = false;
@@ -255,13 +247,9 @@ final class HttpConnection
                 if ($keepAlive && \strlen($this->buffer) !== $this->offset && 0 === ++$pipelined % self::BURST) {
                     phasync::sleep();
                 }
-            } while ($keepAlive && !$this->draining && !$one);
+            } while ($keepAlive && !$one);
             // Only what this worker has read is lost by a handover: the kernel's bytes go with the socket
-            $idle = $one && $keepAlive && !$this->draining;
-            if ($keepAlive && !$idle) {
-                // Drained after the response said keep-alive: close as if it had said close
-                $this->linger = true;
-            }
+            $idle = $one && $keepAlive;
         } catch (HttpError $e) {
             $this->refuse($e->getCode(), $e->getMessage());
         } catch (ShutdownException) {
@@ -284,9 +272,8 @@ final class HttpConnection
     public function detached(bool $keepAlive): bool
     {
         $this->keptAlive = $keepAlive;
-        $idle            = $keepAlive && !$this->draining;
+        $idle            = $keepAlive;
         if (!$idle) {
-            $this->linger = $this->linger || $keepAlive; // drained after the response said keep-alive
             $this->end();
         }
 
@@ -355,43 +342,6 @@ final class HttpConnection
         $this->current = null;
         $request->detach();
         ($this->onDetach)($keepAlive);
-    }
-
-    /**
-     * Stop keeping the connection alive, for a draining worker. A request in flight is
-     * answered with `Connection: close`. An idle kept-alive connection is closed now: a client
-     * must expect that of a kept-alive connection, and retries. A new connection that sent
-     * nothing yet gets DRAIN_NEW_WAIT to send its request first, since its client has no
-     * reason to expect the close. Idle means nothing received: a request in the kernel's
-     * buffer, not yet read, arrived before the drain, and is answered.
-     *
-     * Returns whether the connection is upgraded (101). An upgraded connection is left as it
-     * is: the worker's stop ends its application with a WorkerStoppingException, and swerve
-     * closes it then (a WebSocket with 1001, or 1012 on a reload).
-     */
-    public function drain(bool $linger = false): bool
-    {
-        if ($this->upgraded) {
-            return true;
-        }
-        $this->draining = true;
-        if (self::KEPT_ALIVE === $this->reclaimable && $this->nothingReceived()) {
-            $this->reclaim(self::KEPT_ALIVE);
-        } elseif (self::NEW === $this->reclaimable) {
-            phasync::go(function () {
-                phasync::sleep(self::DRAIN_NEW_WAIT);
-                if (self::NEW === $this->reclaimable && $this->nothingReceived()) {
-                    $this->reclaim(self::NEW);
-                }
-            });
-        }
-
-        return false;
-    }
-
-    private function nothingReceived(): bool
-    {
-        return \strlen($this->buffer) === $this->offset && !$this->io->pending();
     }
 
     /**

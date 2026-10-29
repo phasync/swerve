@@ -782,12 +782,8 @@ final class HttpClientRequest implements ClientRequest
             $this->framing   = self::CLOSE;
             $this->keepAlive = false; // HTTP/1.0 and unknown size: the body ends at the close
         }
-        // The connection stays open only if the request body is read to its end or may be skipped,
-        // and the server isn't draining
+        // The connection stays open only if the request body is read to its end or may be skipped
         if (!$this->done && ($this->continue || (0 === $this->position && !$this->discardable(HttpConnection::DISCARD_LIMIT)))) {
-            $this->keepAlive = false;
-        }
-        if ($this->connection->draining) {
             $this->keepAlive = false;
         }
         $connection = $this->options . ($this->keepAlive ? ('1.0' === $this->version ? ', keep-alive' : '') : ', close');

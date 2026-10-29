@@ -143,9 +143,9 @@ test('end() does not let a second canceller of the same read crash it: phasync::
 
         expect($ws)->not->toBeNull(); // the callback ran up to its sleep(); pump() is now blocked in need()
 
-        // A drain cancelling the same wait at the same moment: it gets there first, so $this->reading
-        // already has an exception on its way when end() tries to cancel it too (swerve's
-        // Http\HttpConnection::drain() and WebSocket::end() target the same fiber this way).
+        // A shutdown cancelling the same wait at the same moment: it gets there first, so $this->reading
+        // already has an exception on its way when end() tries to cancel it too (a worker's stop,
+        // phasync::shutdown(), and WebSocket::end() target the same fiber this way).
         phasync::throw($runFiber, new phasync\CancelledException('simulated drain'));
 
         // Without the fix, this throws: phasync::throw() refuses a fiber that already has one queued.
