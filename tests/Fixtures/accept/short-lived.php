@@ -38,6 +38,36 @@ phasync::await(Swerve::accept(null, function () {
 
         return;
     }
+    // Code of this file, which is no autoloaded code: the WebSocket worker does not have it
+    if ('/ws-function' === $_SERVER['REQUEST_URI']) {
+        if (!function_exists('sl_not_autoloaded')) {
+            function sl_not_autoloaded(): string
+            {
+                return 'here';
+            }
+        }
+        Swerve::upgrade(static function (WebSocket $ws): void {
+            foreach ($ws as $message) {
+                $ws->send(sl_not_autoloaded());
+            }
+        });
+
+        return;
+    }
+    if ('/ws-class' === $_SERVER['REQUEST_URI']) {
+        if (!class_exists('SlNotAutoloaded', false)) {
+            final class SlNotAutoloaded
+            {
+                public string $name = 'local';
+            }
+        }
+        $local = new SlNotAutoloaded();
+        Swerve::upgrade(static function (WebSocket $ws) use ($local): void {
+            $ws->send($local->name);
+        });
+
+        return;
+    }
     if ('/ws-resource' === $_SERVER['REQUEST_URI']) {
         $file = fopen(__FILE__, 'r');
         try {

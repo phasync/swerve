@@ -61,12 +61,19 @@ final class WebSocketWorker
         $channel = \fopen('php://fd/' . self::FD, 'r+');
         $socket  = \socket_import_stream($channel);
         $codec   = new Codec();
+        // A class the autoload can't give fails the move at once, by its name, instead of
+        // arriving as a __PHP_Incomplete_Class that fails later, somewhere in the closure
+        \ini_set('unserialize_callback_func', self::class . '::missing');
         while (null !== $packet = self::next($channel, $socket)) {
             [$bytes, $conn] = $packet;
             if ('W' !== $bytes[0] || null === $conn) {
                 throw new \UnexpectedValueException("A worker sent '$bytes[0]' to the WebSocket worker");
             }
-            [$closure, $state, $extensions] = $codec->unserialize(\substr($bytes, 1));
+            try {
+                [$closure, $state, $extensions] = $codec->unserialize(\substr($bytes, 1));
+            } catch (\Throwable $e) {
+                self::broken('A WebSocket could not move to the WebSocket worker: {exception}', $e);
+            }
             $stream  = \socket_export_stream($conn);
             \stream_set_blocking($stream, false);
             // In a Scope of its own, seeded with the request's state, and a frame of its own:
@@ -79,12 +86,49 @@ final class WebSocketWorker
                 } catch (ShutdownException) {
                     // the worker stops: the WebSocket said goodbye
                 } catch (\Throwable $e) {
+                    if ('' !== self::hint($e)) {
+                        self::broken('A WebSocket failed: {exception}', $e);
+                    }
                     Swerve::log()->error('A WebSocket failed: {exception}', ['exception' => $e]);
                 } finally {
                     $connection->close();
                 }
             })));
         }
+    }
+
+    /**
+     * A moved closure can't run here: the application is deployed broken (code it needs is not in
+     * its Composer autoload). Fatal: logged as critical, and this worker exits with the sockets it
+     * serves; the master starts another for the next WebSocket that moves.
+     */
+    private static function broken(string $message, \Throwable $e): never
+    {
+        Swerve::log()->critical($message . self::hint($e), ['exception' => $e]);
+        exit(70); // EX_SOFTWARE
+    }
+
+    /** @internal unserialize_callback_func: a class nothing could load */
+    public static function missing(string $class): never
+    {
+        throw new \Error("Class \"$class\" not found");
+    }
+
+    /**
+     * What to do about a class or function this process does not have: it has what the
+     * application's Composer autoload gives it, and nothing else of the application.
+     */
+    private static function hint(\Throwable $e): string
+    {
+        for ($cause = $e; null !== $cause; $cause = $cause->getPrevious()) {
+            if (\preg_match('/^(Class|Interface|Trait|Enum) "[^"]+" not found|^Call to undefined function /', $cause->getMessage())) {
+                return '. A WebSocket moved to the WebSocket worker has the application\'s Composer autoload'
+                    . ' (vendor/autoload.php: its classes, and the files of composer.json\'s autoload.files) and what its'
+                    . ' closure captured, nothing else: add what it needs to composer.json\'s autoload';
+            }
+        }
+
+        return '';
     }
 
     /**

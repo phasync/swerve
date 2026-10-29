@@ -392,3 +392,20 @@ it('starts a WebSocket worker when the first WebSocket moves, and another when t
         ->and($children())->toBe(4)
         ->and(ws_read($first)[1])->toBe("block from $busy");
 });
+
+it('a moved WebSocket that needs code the application does not autoload is fatal: logged, and the WebSocket worker exits; the next starts another', function (string $path) {
+    [, $addr, $log] = accept_start('short-lived.php', 1);
+    $ws = ws_connect($addr, $path);
+    ws_send($ws, 0x1, 'hi');
+    do {
+        $frame = ws_read($ws); // a 1011, if the callback got to run
+    } while (null !== $frame);
+    log_wait($log, '/critical .*has the application\'s Composer autoload/s', 5);
+    // The next WebSocket that moves gets a new WebSocket worker
+    $ws = ws_connect($addr, '/ws');
+    ws_send($ws, 0x1, 'hi');
+    expect(ws_read($ws)[1])->toStartWith('echo hi from ');
+})->with([
+    'a function of swerve.php'                  => '/ws-function',
+    'a captured object of a class of swerve.php' => '/ws-class',
+]);

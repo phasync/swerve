@@ -373,7 +373,11 @@ final class Swerve
      * serves one request per lifecycle), and its connections with it. A WebSocket opened there
      * moves on to one of swerve's WebSocket workers, started as they are needed: its `101` is sent
      * here, and the closure, serialized with phasync/serializor along with what it captures, runs
-     * in that process, which has the application's autoloader and nothing else of it.
+     * in that process. It has the application's Composer autoload (vendor/autoload.php: its
+     * classes, and the files listed in composer.json's `autoload.files`) and nothing else of the
+     * application: a class or function the closure needs must come from there. One that doesn't
+     * is fatal, a deployment broken: a critical error in the log says what was missing, and the
+     * WebSocket worker exits with its sockets (the next WebSocket that moves starts another).
      *
      * Either way the closure runs in a Scope of its own, seeded with the request's state as it was
      * at this call: $_GET, $_POST, $_COOKIE, $_FILES, $_REQUEST, $_SERVER, $_SESSION (the data; the
