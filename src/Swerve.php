@@ -354,11 +354,35 @@ final class Swerve
             self::$accepting = true;
             self::$server    = \array_diff_key($_SERVER, ['argv' => 0, 'argc' => 0]);
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
+            require_once __DIR__ . '/Util/finish_request.php';
         }
 
         $files = null === $staticPath ? null : self::$staticFiles[$staticPath] ??= new StaticFiles($staticPath);
 
         return LotClient::get()->accept(self::handler($handler, $files?->root), $files);
+    }
+
+    /**
+     * Complete the response now and let the request's code run on, as php-fpm's
+     * `fastcgi_finish_request()`: what the output buffers hold is sent, the response ends, and the
+     * connection goes on with the client's next request (or closes) while the code finishes its
+     * work. From then on its output goes nowhere and `connection_aborted()` is true.
+     *
+     * In a worker, `fastcgi_finish_request()` and `litespeed_finish_request()` call it, so
+     * frameworks that use them (Symfony's and Laravel's terminate step) finish early unchanged. A
+     * response also completes by itself once its body reached its `Content-Length`.
+     *
+     * ```php
+     * echo json_encode(['queued' => true]);
+     * Swerve::finishRequest();     // the client has its answer
+     * sendTheMails();              // the request runs on, in its Scope
+     * ```
+     *
+     * @return bool false outside a request, after upgrade(), or when the response was complete already
+     */
+    public static function finishRequest(): bool
+    {
+        return SapiRequest::finish();
     }
 
     /**

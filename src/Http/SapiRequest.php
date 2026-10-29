@@ -37,6 +37,9 @@ final class SapiRequest
      */
     private bool $upgraded;
 
+    /** finish() completed the response (or its body reached its content-length): output goes nowhere. */
+    private bool $finished;
+
     /** upgrade()'s closure and the request's state() it runs with, for the connection once the request ended. */
     private ?array $upgrade;
 
@@ -55,7 +58,7 @@ final class SapiRequest
         $sapi           = self::popInstance() ?? new self();
         $sapi->client   = $client;
         $sapi->server   = $server;
-        $sapi->gone     = $sapi->upgraded = false;
+        $sapi->gone     = $sapi->upgraded = $sapi->finished = false;
         $sapi->upgrade  = null;
         $scope          = \Scope::getCurrent();
         self::$requests ??= new \WeakMap();
@@ -121,6 +124,26 @@ final class SapiRequest
     }
 
     /**
+     * Complete the response of the request running in this scope, while its code runs on (see
+     * {@see \Swerve\Swerve::finishRequest()}). False outside a request, after upgrade(), or when
+     * it was complete already.
+     */
+    public static function finish(): bool
+    {
+        $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
+        if (null === $sapi || $sapi->upgraded || $sapi->gone || $sapi->finished || !$sapi->client instanceof HttpClientRequest) {
+            return false;
+        }
+        // As php-fpm's fastcgi_finish_request(): what the output buffers hold goes out first
+        while (\ob_get_level() > 0 && \ob_end_flush()) {
+        }
+        \flush();
+        $sapi->finished = true; // what the code writes from now on goes nowhere, and connection_aborted() is true
+
+        return $sapi->client->finish();
+    }
+
+    /**
      * The current scope's state, to seed() a new Scope with: a new Scope starts empty (the Scope
      * RFC), and the creator gives it what it should have.
      */
@@ -156,10 +179,16 @@ final class SapiRequest
         if ($this->upgraded) {
             throw new \LogicException('Output after Swerve::upgrade(): the connection left the request');
         }
+        if ($this->finished) {
+            return true; // dropped, as php-fpm does after fastcgi_finish_request(): not a client that left mid-response
+        }
         if (!$this->gone) {
             try {
                 $this->client->write($data);
             } catch (IOException|TimeoutException) {
+                if ($this->client instanceof HttpClientRequest && $this->client->isComplete()) {
+                    return $this->finished = true; // its content-length was reached: as after finish()
+                }
                 $this->gone = true; // the extension then makes connection_aborted() true
             }
         }
@@ -223,6 +252,6 @@ final class SapiRequest
     public function connection_aborted(): bool
     {
         // After upgrade() the connection is gone from the request, as if its client had left
-        return $this->upgraded || $this->client->isClosed();
+        return $this->upgraded || $this->gone || $this->finished || $this->client->isClosed();
     }
 }

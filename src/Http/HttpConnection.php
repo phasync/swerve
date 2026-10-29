@@ -167,6 +167,16 @@ final class HttpConnection
     private ?HttpClientRequest $current = null;
 
     /**
+     * Takes the connection on when a request's response is complete while coroutines it started
+     * still run: called with whether the connection is kept alive, it carries on in a coroutine
+     * of its own (see detached()), and the request's coroutine stays behind with them (#98). Null:
+     * the connection waits for them.
+     *
+     * @var ?\Closure(bool): void
+     */
+    public ?\Closure $onDetach = null;
+
+    /**
      * @param \Closure(\Swerve\ClientRequest): void $handler     the application's; may be replaced between requests
      * @param ?Logger                               $access      the access log, if on
      */
@@ -192,11 +202,13 @@ final class HttpConnection
     /**
      * Serve the connection's requests until it closes. With $one, serve a single request: then
      * true when the connection is kept alive (left open, see pending() for its next request);
-     * otherwise it is closed.
+     * false when it is closed; null when the request detached and onDetach took the connection
+     * on, returned once the request's coroutines have ended.
      */
-    public function serve(bool $one = false): bool
+    public function serve(bool $one = false): ?bool
     {
-        $idle = false;
+        $idle     = false;
+        $detached = false;
         try {
             $first     = !$this->keptAlive;
             $pipelined = 0;
@@ -212,7 +224,27 @@ final class HttpConnection
                 // state (a locale) as the event loop moves between requests. And a frame of its own
                 // (a nested run(), which costs no coroutine): it runs in this connection's coroutine.
                 $this->current = $request;
-                $keepAlive     = (new \Scope())->run(fn (HttpClientRequest $request) => phasync::run($this->runRequest(...), $request), $request);
+                try {
+                    $keepAlive = (new \Scope())->run(fn (HttpClientRequest $request) => phasync::run($this->runRequest(...), $request), $request);
+                } catch (\Throwable $e) {
+                    if (!$request->detached) {
+                        throw $e;
+                    }
+                    // Its coroutines failed or were stopped after the connection went on: not the connection's
+                    $detached = true;
+                    if (!$e instanceof ShutdownException) {
+                        $this->logger->error('A coroutine of {request} failed: {exception}', ['request' => $request->getMethod() . ' ' . $request->getTarget(), 'exception' => $e]);
+                    }
+
+                    return null;
+                }
+                if (null === $keepAlive) {
+                    // The connection went on without the request (onDetach): its coroutines have ended now
+                    $detached = true;
+                    $request->recycle();
+
+                    return null;
+                }
                 $this->current   = null;
                 $this->keptAlive = $keepAlive;
                 $request->recycle();
@@ -237,25 +269,8 @@ final class HttpConnection
         } catch (\Throwable $e) {
             $this->logger->error('A connection failed: {exception}', ['exception' => $e]);
         } finally {
-            // swerve's own ending of the connection: shielded, so it completes while the worker stops
-            if (!$idle) {
-                phasync::shielded(function () {
-                    if ($this->linger && !self::$exiting) {
-                        $this->io->end();
-                        $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
-                        $this->reclaimable = self::ANSWERED;
-                        try {
-                            while ('' !== $this->io->read(self::READ_SIZE, \max(0.0, $deadline - \microtime(true))) && \microtime(true) < $deadline) {
-                            }
-                        } catch (IOException|TimeoutException) {
-                        }
-                    }
-                    $this->reclaimable = 0;
-                    // While PHP shuts down nothing can be raised or woken: the descriptor goes with the process
-                    if (!self::$exiting) {
-                        $this->io->close();
-                    }
-                });
+            if (!$idle && !$detached) {
+                $this->end();
             }
         }
 
@@ -263,14 +278,83 @@ final class HttpConnection
     }
 
     /**
+     * A connection whose request detached (onDetach), as serve(one: true) goes on after the
+     * request: true when it is kept alive, otherwise it is closed.
+     */
+    public function detached(bool $keepAlive): bool
+    {
+        $this->keptAlive = $keepAlive;
+        $idle            = $keepAlive && !$this->draining;
+        if (!$idle) {
+            $this->linger = $this->linger || $keepAlive; // drained after the response said keep-alive
+            $this->end();
+        }
+
+        return $idle;
+    }
+
+    /** swerve's own ending of the connection: shielded, so it completes while the worker stops. */
+    private function end(): void
+    {
+        phasync::shielded(function () {
+            if ($this->linger && !self::$exiting) {
+                $this->io->end();
+                $deadline          = \microtime(true) + self::LINGER_TIMEOUT;
+                $this->reclaimable = self::ANSWERED;
+                try {
+                    while ('' !== $this->io->read(self::READ_SIZE, \max(0.0, $deadline - \microtime(true))) && \microtime(true) < $deadline) {
+                    }
+                } catch (IOException|TimeoutException) {
+                }
+            }
+            $this->reclaimable = 0;
+            // While PHP shuts down nothing can be raised or woken: the descriptor goes with the process
+            if (!self::$exiting) {
+                $this->io->close();
+            }
+        });
+    }
+
+    /**
      * A request, in its scope and frame (see serve()). A coroutine of the request that fails
      * with nobody awaiting it is logged, and the request goes on.
      */
-    private function runRequest(HttpClientRequest $request): bool
+    private function runRequest(HttpClientRequest $request): ?bool
     {
         phasync::frame()->setExceptionHandler(fn (\Throwable $e) => $this->logger->error('A coroutine of {request} failed: {exception}', ['request' => $request->getMethod() . ' ' . $request->getTarget(), 'exception' => $e]));
+        $keepAlive = $request->run();
+        if ($request->detached) {
+            return null; // finished before the handler returned: the connection went on then
+        }
+        if (null !== $this->onDetach && !$this->upgraded && \count(phasync::frame()) > 1) {
+            // The response is complete and coroutines of the request still run: the connection
+            // leaves the request, which keeps its Scope until they end (#98)
+            $this->detach($request, $keepAlive);
 
-        return $request->run();
+            return null;
+        }
+
+        return $keepAlive;
+    }
+
+    /**
+     * $request's response is complete while its handler runs on (HttpClientRequest::finish()):
+     * the connection goes on without it, when onDetach takes it on.
+     *
+     * @internal HttpClientRequest
+     */
+    public function finished(HttpClientRequest $request, bool $keepAlive): void
+    {
+        if (null !== $this->onDetach && !$this->upgraded && $this->current === $request) {
+            $this->detach($request, $keepAlive);
+        }
+    }
+
+    private function detach(HttpClientRequest $request, bool $keepAlive): void
+    {
+        $this->current = null;
+        $request->detach();
+        ($this->onDetach)($keepAlive);
     }
 
     /**

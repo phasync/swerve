@@ -262,27 +262,53 @@ final class LotClient
      */
     private function connection($stream, Accepted $request): void
     {
+        $this->serving($stream, new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null), $request);
+    }
+
+    /**
+     * The connection of a request whose coroutines still run after its response (#98): it goes on
+     * here, in a coroutine of its own, as after any other request.
+     *
+     * @param resource $stream
+     */
+    private function detached($stream, HttpConnection $http, Accepted $request, bool $keepAlive, bool $application, int $served): void
+    {
+        $this->serving($stream, $http, $request, $keepAlive, $application, $served);
+    }
+
+    /**
+     * @param resource $stream
+     */
+    private function serving($stream, HttpConnection $http, Accepted $request, ?bool $keepAlive = null, bool $application = false, int $served = 0): void
+    {
         $id                     = (int) $stream;
-        $http                   = new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
-        $this->connections[$id] = [$http, \Fiber::getCurrent()];
+        $fiber                  = \Fiber::getCurrent();
+        $this->connections[$id] = [$http, $fiber];
         try {
-            $this->serveConnection($stream, $http, $request);
+            $this->serveConnection($stream, $http, $request, null === $keepAlive ? null : $http->detached($keepAlive), $application, $served);
         } finally {
-            // Not when exit() ends the lifecycle (it runs no finally): shutdown() finds it then
-            unset($this->connections[$id]);
+            // Not when exit() ends the lifecycle (it runs no finally): shutdown() finds it then. Nor
+            // when the connection went on in another coroutine (detached), which has it now
+            if (($this->connections[$id][1] ?? null) === $fiber) {
+                unset($this->connections[$id]);
+            }
         }
     }
 
     /**
      * @param resource $stream
      */
-    private function serveConnection($stream, HttpConnection $http, Accepted $request): void
+    private function serveConnection($stream, HttpConnection $http, Accepted $request, ?bool $open, bool $application, int $served): void
     {
-        $id     = (int) $stream;
-        $served = 0;
-        $for    = null;
+        $id             = (int) $stream;
+        $for            = null;
+        $http->onDetach = function (bool $keepAlive) use ($stream, $http, &$request, &$application, &$served): void {
+            // A service runs in the root Scope: not a coroutine of the request, though it starts it
+            phasync::service($this->detached(...), $stream, $http, $request, $keepAlive, $application, $served);
+        };
         while (true) {
-            if ($for !== $request) {
+            // $open given: went on from a request that detached (its response is complete)
+            if (null === $open && $for !== $request) {
                 // The application's handler, which notes that the request was not a file
                 $handler       = static function (ClientRequest $client) use ($request, &$application): void {
                     $application = true;
@@ -301,14 +327,20 @@ final class LotClient
                 $http->handler = null === $request->files ? $handler : $request->files->wrap($handler);
                 $for           = $request;
             }
-            $application = false;
-            $open        = $http->serve(one: true);
+            if (null === $open) {
+                $application = false;
+                $open        = $http->serve(one: true);
+                if (null === $open) {
+                    return; // the request detached: the connection went on in another coroutine
+                }
+            }
             unset($this->busy[$id]);
             if (!$application) {
                 // A static file doesn't use up the accept(): it goes on with this connection's next
                 // request if the client has written it, else with another connection
                 if ($open && ++$served < self::KEEP_LIMIT && $http->pending()) {
                     $this->busy[$id] = $stream;
+                    $open            = null;
 
                     continue;
                 }
@@ -334,6 +366,7 @@ final class LotClient
                 }
                 $request = $offer->request;
                 $offer->returnToPool();
+                $open = null;
 
                 continue;
             }
@@ -368,6 +401,7 @@ final class LotClient
             }
             $request = $offer->request;
             $offer->returnToPool();
+            $open = null;
         }
     }
 

@@ -458,7 +458,7 @@ test('a response body is never sent beyond its declared length, and a short one 
     $conn = native_connect($this->addr);
     fwrite($conn, "GET /applength?cl=10&actual=3 HTTP/1.1\r\nHost: t\r\n\r\nGET /hello HTTP/1.1\r\nHost: t\r\n\r\n");
     expect(native_read_response($conn)['body'])->toBe("piece 000\n");
-    expect(native_closed($conn))->toBeTrue(); // the second write was a bug of the handler's: the connection is aborted
+    expect(native_read_response($conn)['body'])->toBe('Hello'); // the response was complete at its length: the handler's second write throws, the connection goes on
 });
 
 test('a client closing mid-response does not disturb the server', function () {

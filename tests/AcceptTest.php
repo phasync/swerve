@@ -409,3 +409,54 @@ it('a moved WebSocket that needs code the application does not autoload is fatal
     'a function of swerve.php'                  => '/ws-function',
     'a captured object of a class of swerve.php' => '/ws-class',
 ]);
+
+it('ends a response with Connection: close although a coroutine of the request runs on (#98)', function () {
+    [, $addr] = accept_start('background.php', 1);
+    $file     = temp_path();
+    $conn     = native_connect($addr);
+    $start    = microtime(true);
+    $response = accept_request($conn, '/background?file=' . urlencode($file), "Connection: close\r\n");
+    expect($response['body'])->toBe('started')
+        ->and(native_closed($conn))->toBeTrue()
+        ->and(microtime(true) - $start)->toBeLessThan(0.25); // the coroutine sleeps 0.3 s
+});
+
+it('serves the next request on a kept-alive connection while a coroutine of the last one runs on, whose output goes nowhere and whose client is gone (#98)', function () {
+    [, $addr] = accept_start('background.php', 1);
+    $file     = temp_path();
+    $conn     = native_connect($addr);
+    $start    = microtime(true);
+    expect(accept_request($conn, '/background?file=' . urlencode($file))['body'])->toBe('started')
+        ->and(accept_request($conn, '/hello')['body'])->toBe("hello\n")
+        ->and(microtime(true) - $start)->toBeLessThan(0.25); // the coroutine sleeps 0.3 s
+    usleep(400_000);
+    expect(accept_request($conn, '/hello', "Connection: close\r\n")['body'])->toBe("hello\n") // nothing stray
+        ->and(native_closed($conn))->toBeTrue();
+    $deadline = microtime(true) + 2;
+    while ('' === file_get_contents($file)) {
+        expect(microtime(true))->toBeLessThan($deadline);
+        usleep(20_000);
+    }
+    expect(file_get_contents($file))->toBe('aborted'); // connection_aborted(): the client is gone for it
+});
+
+foreach (['fastcgi_finish_request()' => '/finish', 'a body of its Content-Length' => '/length'] as $what => $route) {
+    it("completes a response at $what while the request runs on (#98)", function () use ($route) {
+        [, $addr] = accept_start('background.php', 1);
+        $file     = temp_path();
+        $conn     = native_connect($addr);
+        $start    = microtime(true);
+        $response = accept_request($conn, "$route?file=" . urlencode($file));
+        expect($response['body'])->toBe('early')
+            ->and($response['headers']['x-early'] ?? null)->toBe('yes')
+            ->and(accept_request($conn, '/hello')['body'])->toBe("hello\n")
+            ->and(microtime(true) - $start)->toBeLessThan(0.25); // the request sleeps 0.3 s after
+        $deadline = microtime(true) + 2;
+        while ('' === file_get_contents($file)) {
+            expect(microtime(true))->toBeLessThan($deadline);
+            usleep(20_000);
+        }
+        expect(file_get_contents($file))->toBe('aborted ' . ('/finish' === $route ? 'true' : 'NULL') . ' false')
+            ->and(accept_request($conn, '/hello', "Connection: close\r\n")['body'])->toBe("hello\n"); // nothing stray
+    });
+}

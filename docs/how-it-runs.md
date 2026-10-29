@@ -36,10 +36,23 @@ The handler runs in the connection's own coroutine, once per request, in a `Scop
 which the coroutines the request starts share: request-scoped state belongs in a `WeakMap` keyed
 by `Scope::getCurrent()`, and is freed with the request. The request is also a nested
 `phasync::run()`, whose frame (`phasync::frame()`) its coroutines join: a coroutine that fails
-with nobody awaiting it is logged with the request, and the request goes on. The connection reads its next request once the handler has returned
-and the coroutines it started have ended, but the client has the whole response before that, so work
-after the response (`phasync::finally()`, a `go()`) costs it nothing. Work that must outlive the
-request belongs in `phasync::service()`.
+with nobody awaiting it is logged with the request, and the request goes on.
+
+Once the response is complete, the connection goes on without the request: it closes
+(`Connection: close`) or takes the client's next request, while the request's code and the
+coroutines it started run on in its `Scope` until they end. A response is complete when the
+handler has returned, when its body has reached the `Content-Length` it declared, or at
+`Swerve::finishRequest()`, which `fastcgi_finish_request()` and `litespeed_finish_request()` call
+in a worker (Symfony's and Laravel's terminate step uses them). From then on the client is gone
+for that code: `connection_aborted()` is true, and what it writes is dropped.
+
+```php
+echo json_encode(['queued' => true]);
+fastcgi_finish_request();   // the client has its answer; the connection serves its next request
+sendTheMails();
+```
+
+Work that must outlive the worker's next reload belongs in a queue.
 
 ## The rule: never block a worker
 

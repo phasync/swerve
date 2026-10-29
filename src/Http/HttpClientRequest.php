@@ -129,6 +129,8 @@ final class HttpClientRequest implements ClientRequest
         $r->gone       = null;
         $r->reusable   = false;
         $r->onHandOff  = null;
+        $r->detached   = false;
+        $r->concluded  = null;
 
         return $r;
     }
@@ -148,6 +150,12 @@ final class HttpClientRequest implements ClientRequest
      */
     public ?\Closure $onHandOff = null;
 
+    /** See detach(). */
+    public bool $detached = false;
+
+    /** conclude()'s answer once finish() completed the response while the handler runs on; else null. */
+    private ?bool $concluded = null;
+
     /** @internal the request ended, its connection goes on to upgrade()'s closure */
     public function handedOff(): void
     {
@@ -159,6 +167,16 @@ final class HttpClientRequest implements ClientRequest
     {
         $this->gone  = new IOException('The connection moved on to another process');
         $this->ended = true; // ending it here would shut it down for the other process too
+    }
+
+    /**
+     * The response is complete and the connection goes on without the request (#98): what its
+     * coroutines still write is dropped, reads end, and connection_aborted() is true.
+     */
+    public function detach(): void
+    {
+        $this->detached = true;
+        $this->gone ??= new IOException('The response is complete: the connection went on without the request');
     }
 
     /** The exchange is over: back to the pool if reusable() said nothing references it. */
@@ -255,6 +273,9 @@ final class HttpClientRequest implements ClientRequest
         if ('' === $bytes) {
             return;
         }
+        if (null !== $this->concluded) {
+            throw new IOException('The response is complete', 0, $this->gone);
+        }
         if ($this->raw) {
             $this->put($bytes, $timeout);
 
@@ -271,6 +292,12 @@ final class HttpClientRequest implements ClientRequest
                     throw new \LogicException("The response body is longer than its content-length {$this->declared}");
                 }
                 $this->left -= \strlen($bytes);
+                if (0 === $this->left) {
+                    $this->emit($bytes, $timeout);
+                    $this->finish(); // all of its declared length: the response is complete
+
+                    return;
+                }
                 break;
             case self::DISCARD:
                 $bytes = '';
@@ -307,6 +334,9 @@ final class HttpClientRequest implements ClientRequest
 
     public function end(?array $trailers = null): void
     {
+        if (null !== $this->concluded && null === $trailers) {
+            return; // finish() ended it already
+        }
         if ($this->ended) {
             throw new \LogicException('The response has already ended');
         }
@@ -465,9 +495,10 @@ final class HttpClientRequest implements ClientRequest
             }
             $status = $this->wire ? $this->status : 503;
         } catch (\Throwable $e) {
-            if (null === $this->gone) {
+            if (null === $this->gone || $this->detached) {
+                // Also after the response was finished: the code that ran on failed
                 $c->logger->error('{request} failed: {exception}', ['request' => "$this->method $this->target", 'exception' => $e]);
-                if (!$this->wire) {
+                if (!$this->wire && null === $this->gone) {
                     $c->refuse(500, 'Internal Server Error', request: $this);
                 }
             }
@@ -487,6 +518,9 @@ final class HttpClientRequest implements ClientRequest
      */
     public function complete(): bool
     {
+        if (null !== $this->concluded) {
+            return $this->concluded;
+        }
         if (null !== $this->error) {
             throw $this->error; // the handler swallowed a malformed body: answer it, and close
         }
@@ -495,6 +529,29 @@ final class HttpClientRequest implements ClientRequest
         }
 
         return $this->conclude();
+    }
+
+    /**
+     * Complete the response now, while the handler runs on (Swerve::finishRequest(), or a body
+     * that reached its content-length): it ends, and the connection goes on without the request
+     * (HttpConnection::finished()). False when it had ended already.
+     */
+    public function finish(): bool
+    {
+        if (null !== $this->concluded || $this->ended || $this->finished) {
+            return false;
+        }
+        $keepAlive       = $this->complete();
+        $this->concluded = $keepAlive;
+        $this->connection->finished($this, $keepAlive);
+
+        return true;
+    }
+
+    /** Whether finish() completed the response while the handler runs on. */
+    public function isComplete(): bool
+    {
+        return null !== $this->concluded;
     }
 
     /** After the handler: whether the connection can serve another request. */
