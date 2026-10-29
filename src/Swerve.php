@@ -582,8 +582,8 @@ final class Swerve
                 return;
             }
             [$file, $name, $info] = $routed;
-            $server               = self::serverVariables($client, $root, $file, $name, $info);
-            $upgrade              = SapiRequest::run($client, $server, static fn () => $code($client, $file));
+            // $_SERVER's source not in a local: an upgraded connection runs on in this frame
+            $upgrade = SapiRequest::run($client, self::serverVariables($client, $root, $file, $name, $info), static fn () => $code($client, $file));
             if (null !== $upgrade) {
                 // In a Scope of its own, seeded with the request's state as it was at upgrade(), and
                 // a frame of its own as a request has: onScopeChange() hooks see it enter
