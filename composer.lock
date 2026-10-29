@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "bc749f361b1637c586b7b94381c3176a",
+    "content-hash": "9bd38eb23038b848493d483dfbbf7314",
     "packages": [
         {
             "name": "fiber-interop/scope",

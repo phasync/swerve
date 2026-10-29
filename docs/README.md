@@ -18,7 +18,8 @@ Read in this order when you build an application on swerve:
    [WebSockets and Server-Sent Events](websocket.md) is the contract of `Swerve\WebSocket` and
    `Swerve\ServerSentEvents`: handshake, close codes, ordering, backpressure, limits.
 6. [Publish and subscribe](publish-subscribe.md): messages between the workers; and the
-   [shared cache](../README.md#shared-cache), `Swerve::cache()` and [one worker at a time](../README.md#one-worker-at-a-time).
+   [shared cache](../README.md#shared-cache), `Swerve::cache()`, [limiting a resource across workers](../README.md#limiting-a-resource-across-workers),
+   `Swerve::container()`, and [one worker at a time](../README.md#one-worker-at-a-time).
 7. [Command line](command-line.md): every option.
 8. [Production](production.md): sizing, ext-phasync, systemd, Docker, nginx and TLS,
    reloads, limits.

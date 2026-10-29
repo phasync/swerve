@@ -224,6 +224,25 @@ final class Swerve
     }
 
     /**
+     * The container that limits how many instances of a service exist across every worker: a
+     * PSR-11 container for frameworks, beside their own, for the resources a server shares (the
+     * database's connections). See {@see Container}.
+     *
+     * ```php
+     * Swerve::container()->add(\PDO::class, fn () => new \PDO($dsn, $user, $password), limit: 151);
+     * $db = Swerve::container()->get(\PDO::class);   // this request's, waiting while 151 are out
+     * ```
+     *
+     * @return Container the same container on every call
+     *
+     * @topic resource-management
+     */
+    public static function container(): Container
+    {
+        return Container::instance();
+    }
+
+    /**
      * Whether this worker drains: it is shutting down, reloading or being recycled.
      *
      * An early hint: it turns true when the drain begins, also for a recycled worker, which then

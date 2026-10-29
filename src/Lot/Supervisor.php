@@ -5,6 +5,7 @@ namespace Swerve\Lot;
 use phasync;
 use phasync\ext;
 use Psr\Log\LoggerInterface;
+use Swerve\Container;
 use Swerve\Util\SharedLog;
 
 /**
@@ -304,6 +305,7 @@ final class Supervisor
         }
         unset($this->children[$pid]);
         SharedLog::forget($pid);
+        Container::forget($pid);
         phasync::raiseFlag($this->exited);
 
         return \pcntl_wifexited($status) ? 'exit ' . \pcntl_wexitstatus($status) : 'signal ' . \pcntl_wtermsig($status);

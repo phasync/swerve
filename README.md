@@ -364,8 +364,8 @@ foreach (Swerve::subscribe('chat') as $message) {
 
 ## Shared cache
 
-`Swerve::cache()` is a PSR-16 cache every worker shares, held by the master: sessions, rate
-limits, results that are costly to make.
+`Swerve::cache()` is a PSR-16 cache every worker shares, held in APCu: sessions, rate limits,
+results that are costly to make.
 
 ```php
 $cache = Swerve::cache();
@@ -373,16 +373,37 @@ $user  = $cache->get("user.$id") ?? load_user($id);
 $cache->set("user.$id", $user, 60);
 ```
 
-- Each worker keeps what it read in a local layer (8 MiB), so a repeated read costs about a
-  microsecond. A write goes to the master, which tells every worker to forget those keys; a
-  worker never keeps a value older than the last write it was told of. A trip to the master
-  costs about 0.1 ms, and only the calling coroutine waits.
-- The master evicts the least recently used entries past `--cache-size` (64 MiB). It keeps
-  values serialized and never loads your classes. A reload restarts swerve, so it empties
-  them too.
-- A coroutine that `swerve.php` starts may use it at once: the call waits until the worker serves. Directly in
-  `swerve.php` it throws ([details](docs/bootstrap.md#what-works-where)). Without the master (swerve
-  embedded in your own process), the cache is the process's own.
+- A get, set or delete is one APCu call into memory the workers share: no trip to another
+  process, and a write is seen by every worker at once.
+- Values are PHP values, serialized by APCu (objects too). They last as long as the master: a
+  reload keeps them, a restart empties them.
+- It shares `apc.shm_size` (256M by default, taking memory only as it fills) with
+  publish/subscribe. When it is full, APCu empties itself: its eviction is not LRU.
+- It works anywhere: in `swerve.php`, in coroutines started there, and in requests. Outside
+  swerve (a test, a script) it needs `apc.enable_cli=1`.
+
+## Limiting a resource across workers
+
+`Swerve::container()` is a PSR-11 container for frameworks, beside their own, whose job is to
+cap how many instances of a service exist at once in all workers together: MySQL accepts 151
+connections by default, however many workers there are.
+
+```php
+// swerve.php, before accept(): every worker adds the same services
+Swerve::container()->add(\PDO::class, fn () => new \PDO($dsn, $user, $password), limit: 151);
+
+$db = Swerve::container()->get(\PDO::class);            // this request's; waits while 151 are out
+$db = Swerve::container()->tryGet(\PDO::class, $ok);    // null, $ok false, instead of waiting
+```
+
+- `add($id, $factory, $limit = PHP_INT_MAX, $lifetime = Lifetime::Scoped)`. A `Scoped` instance
+  is shared by a request and the coroutines it starts, and given back when the request has
+  ended; `Transient` is a new one per `get()`, given back when it is garbage; `Singleton` is one
+  per worker. Adding an id twice throws.
+- An instance holds its slot until it is garbage: something that keeps it for good (a static)
+  keeps the slot. A worker that dies gives its slots back.
+- The counts live in APCu: if APCu empties itself, they start over, and more than the limit may
+  be out until the instances out then are gone.
 
 ### One worker at a time
 
