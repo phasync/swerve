@@ -120,3 +120,13 @@ test('a TTL of one second expires, and an entry set again without one lives on',
 test('Swerve::cache() is the one shared instance', function () {
     expect(Swerve\Swerve::cache())->toBe(Cache::instance())->toBeInstanceOf(Psr\SimpleCache\CacheInterface::class);
 });
+
+test('clear() empties the cache, and nothing else of swerve\'s in APCu: the pub/sub log and the container\'s counts stay (#100)', function () {
+    apcu_store('swerve:log:head', 41);
+    apcu_store('swerve:container:' . md5('x') . ':n', 3);
+    Cache::instance()->set('k', 'v');
+    expect(Cache::instance()->clear())->toBeTrue();
+    expect(Cache::instance()->has('k'))->toBeFalse();
+    expect([apcu_fetch('swerve:log:head'), apcu_fetch('swerve:container:' . md5('x') . ':n')])->toBe([41, 3]);
+    apcu_delete(['swerve:log:head', 'swerve:container:' . md5('x') . ':n']);
+});

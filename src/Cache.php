@@ -22,8 +22,8 @@ use Psr\SimpleCache\CacheInterface;
  * it expunges is not chosen by age of use. Its size is `-d apc.shm_size=...` (bin/swerve.php
  * sets it; a bigger cache needs a bigger one).
  *
- * Every key lives under a `swerve:` prefix, so {@see Cache::clear()} empties swerve's entries,
- * not another application's sharing the same APCu segment.
+ * Every key lives under a `swerve:cache:` prefix, so {@see Cache::clear()} empties the cache's entries,
+ * not pub/sub's log, the container's counts, or another application's in the same APCu segment.
  *
  * It needs APCu, enabled for the CLI: without it, {@see Swerve::cache()} and {@see Cache::instance()}
  * throw a `LogicException` -- swerve's master arranges this itself, so this is only seen when the
@@ -45,7 +45,7 @@ use Psr\SimpleCache\CacheInterface;
 final class Cache implements CacheInterface
 {
     /** Every key lives under this prefix in APCu, so clear() touches only swerve's entries. */
-    private const PREFIX = 'swerve:';
+    private const PREFIX = 'swerve:cache:';
 
     private static ?self $instance = null;
 
