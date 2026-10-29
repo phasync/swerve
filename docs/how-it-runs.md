@@ -32,19 +32,29 @@ phasync::go(function () {
 });
 ```
 
-The handler runs in the connection's own coroutine, once per request, in a `Scope` of its own,
-which the coroutines the request starts share: request-scoped state belongs in a `WeakMap` keyed
-by `Scope::getCurrent()`, and is freed with the request. The request is also a nested
-`phasync::run()`, whose frame (`phasync::frame()`) its coroutines join: a coroutine that fails
-with nobody awaiting it is logged with the request, and the request goes on.
+Each connection has a coroutine of its own for its I/O, which answers static files itself.
+Your handler runs in a request coroutine taken from a pool (so starting one costs nothing per
+request), in a `Scope` of its own, which the coroutines the request starts share:
+request-scoped state belongs in a `WeakMap` keyed by `Scope::getCurrent()`, and is freed with
+the request. The request is also a nested `phasync::run()`, whose frame (`phasync::frame()`) its
+coroutines join: a coroutine that fails with nobody awaiting it is logged with the request, and
+the request goes on.
 
 Once the response is complete, the connection goes on without the request: it closes
 (`Connection: close`) or takes the client's next request, while the request's code and the
-coroutines it started run on in its `Scope` until they end. A response is complete when the
-handler has returned, when its body has reached the `Content-Length` it declared, or at
+coroutines it started run on (tail work) in its coroutine and `Scope` until they end. A response
+is complete when its body has reached the `Content-Length` it declared, at
 `Swerve::finishRequest()`, which `fastcgi_finish_request()` and `litespeed_finish_request()` call
-in a worker (Symfony's and Laravel's terminate step uses them). From then on the client is gone
-for that code: `connection_aborted()` is true, and what it writes is dropped.
+in a worker (Symfony's and Laravel's terminate step uses them), or when the handler returns. From
+then on the client is gone for that code: `connection_aborted()` is true, and what it writes is
+dropped. The request is done (what `Swerve::accept()` returned is ready) once its tail work has
+ended too, so your `swerve.php` decides what waits for it: one `accept()` per run, or awaiting each
+request, serves the next only after it; a `while (Swerve::accept(...))` loop serves the next at
+once, the connection's next request too.
+
+After `Swerve::upgrade()`, the connection's coroutine runs the closure once the handler returned,
+in a `Scope` of its own seeded with the request's state, as it would in a WebSocket worker; the
+request is freed while the WebSocket stays open.
 
 ```php
 echo json_encode(['queued' => true]);

@@ -40,7 +40,7 @@ function static_get(StaticFiles $files, string $target, array $headers = [], str
     foreach ($headers as $name => $value) {
         $request .= "$name: $value\r\n";
     }
-    $raw                 = implode('', native_serve_packets($files->wrap($app), "$request\r\n"));
+    $raw                 = implode('', native_serve_packets(static fn (ClientRequest $r) => ($files->route($r) ?? $app)($r), "$request\r\n"));
     [$head, $body]       = explode("\r\n\r\n", $raw, 2);
     $lines               = explode("\r\n", $head);
     $status              = (int) substr(array_shift($lines), 9, 3);

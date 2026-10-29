@@ -13,7 +13,8 @@ use Swerve\HeadersSentException;
 
 /**
  * One HTTP exchange on an {@see HttpConnection}: the request body to read, and the response
- * to frame and write. The connection's coroutine runs the handler on it (run()).
+ * to frame and write. A handler runs on it with run(): the connection's coroutine runs a static
+ * file's, a pooled coroutine the application's (see HttpConnection::serve()).
  *
  * The final response head is built when sendResponseHeaders() commits it, and held until the
  * body starts: it goes out in front of the first body bytes in one write, so a small response
@@ -87,6 +88,9 @@ final class HttpClientRequest implements ClientRequest
     /** Whoever had this exchange keeps no reference after it, see reusable(). */
     private bool $reusable;
 
+    /** The coroutines that hold this exchange, see hold(). */
+    private int $holders;
+
     private function __construct()
     {
     }
@@ -128,9 +132,13 @@ final class HttpClientRequest implements ClientRequest
         $r->raw        = false;
         $r->gone       = null;
         $r->reusable   = false;
-        $r->onHandOff  = null;
+        $r->holders    = 1;
+        $r->onEnd      = null;
+        $r->upgrade    = null;
+        $r->responded  = null;
         $r->detached   = false;
         $r->concluded  = null;
+        $r->start      = 0;
 
         return $r;
     }
@@ -144,11 +152,19 @@ final class HttpClientRequest implements ClientRequest
         $this->reusable = true;
     }
 
+    /** Told when the request ended: its handler, and the coroutines it started (tail work). */
+    public ?\Closure $onEnd = null;
+
     /**
-     * Told when the request ended and its connection went on to Swerve::upgrade()'s closure:
-     * whoever waits for the request need not wait for the connection.
+     * Set by the handler to take the connection once it returned: the connection's coroutine
+     * then runs it with run(), in a Scope of the closure's own (Swerve::upgrade()).
+     *
+     * @var ?\Closure(\Swerve\ClientRequest): void
      */
-    public ?\Closure $onHandOff = null;
+    public ?\Closure $upgrade = null;
+
+    /** The response ended: whether the connection is kept alive; null until then. */
+    public ?bool $responded = null;
 
     /** See detach(). */
     public bool $detached = false;
@@ -156,11 +172,8 @@ final class HttpClientRequest implements ClientRequest
     /** conclude()'s answer once finish() completed the response while the handler runs on; else null. */
     private ?bool $concluded = null;
 
-    /** @internal the request ended, its connection goes on to upgrade()'s closure */
-    public function handedOff(): void
-    {
-        ($this->onHandOff)?->__invoke();
-    }
+    /** When the first run() began (hrtime), for the access log. */
+    private int $start = 0;
 
     /** @internal the connection went on to another process: ended here without closing it for the client */
     public function moved(): void
@@ -170,8 +183,8 @@ final class HttpClientRequest implements ClientRequest
     }
 
     /**
-     * The response is complete and the connection goes on without the request (#98): what its
-     * coroutines still write is dropped, reads end, and connection_aborted() is true.
+     * The response is complete and the connection goes on without the request: what its code
+     * still writes (tail work) is dropped, and connection_aborted() is true.
      */
     public function detach(): void
     {
@@ -179,10 +192,19 @@ final class HttpClientRequest implements ClientRequest
         $this->gone ??= new IOException('The response is complete: the connection went on without the request');
     }
 
-    /** The exchange is over: back to the pool if reusable() said nothing references it. */
+    /** One more coroutine holds the exchange: each lets go with recycle(). */
+    public function hold(): void
+    {
+        ++$this->holders;
+    }
+
+    /**
+     * Let go of the exchange: once nobody holds it, back to the pool if reusable() said nothing
+     * references it.
+     */
     public function recycle(): void
     {
-        if ($this->reusable) {
+        if (0 === --$this->holders && $this->reusable) {
             $this->returnToPool();
         }
     }
@@ -460,17 +482,21 @@ final class HttpClientRequest implements ClientRequest
     }
 
     /**
-     * Run the handler and finish the exchange: end the response if the handler did not, and
-     * skip the request body's unread rest, or close. Returns whether the connection stays open.
+     * Run $handler and finish the exchange: end the response if the handler did not, and skip
+     * the request body's unread rest, or close. Returns whether the connection stays open. A
+     * handler that set $upgrade leaves the exchange open, for run() with that closure.
      */
-    public function run(): bool
+    public function run(\Closure $handler): bool
     {
-        $c         = $this->connection;
-        $start     = \hrtime(true);
-        $keepAlive = false;
-        $status    = 500;
+        $c           = $this->connection;
+        $this->start = $this->start ?: \hrtime(true);
+        $keepAlive   = false;
+        $status      = 500;
         try {
-            ($c->handler)($this);
+            $handler($this);
+            if (null !== $this->upgrade) {
+                return false;
+            }
             $keepAlive = $this->complete();
             $status    = $this->status;
         } catch (HttpError $e) {
@@ -504,11 +530,14 @@ final class HttpClientRequest implements ClientRequest
             }
             $status = $this->wire ? $this->status : 500;
         } finally {
-            $this->finished = $this->ended = true;
-            $c->access?->request($this->method, $this->target, $status, (\hrtime(true) - $start) / 1e9);
+            if (null === $this->upgrade) {
+                $this->finished = $this->ended = true;
+                $c->access?->request($this->method, $this->target, $status, (\hrtime(true) - $this->start) / 1e9);
+            }
         }
 
-        return $keepAlive;
+        // A failure after finish() completed the response leaves the connection as that said
+        return $this->concluded ?? $keepAlive;
     }
 
     /**
@@ -533,7 +562,7 @@ final class HttpClientRequest implements ClientRequest
 
     /**
      * Complete the response now, while the handler runs on (Swerve::finishRequest(), or a body
-     * that reached its content-length): it ends, and the connection goes on without the request
+     * that reached its content-length): it ends, and the connection goes on to its next request
      * (HttpConnection::finished()). False when it had ended already.
      */
     public function finish(): bool

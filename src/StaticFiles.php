@@ -79,50 +79,43 @@ final class StaticFiles
     }
 
     /**
-     * A handler that answers the requests naming a file from the directory, and calls `$app` for
-     * every other.
+     * The handler that answers $request from the directory, when it names a file there (or a
+     * directory with an index.html); null when the application answers it.
      *
-     * @param \Closure(ClientRequest): void $app the application's handler
+     * @return ?\Closure(ClientRequest): void
      *
-     * @return \Closure(ClientRequest): void
-     *
-     * @internal accept() wraps its handler so
+     * @internal the connection asks before it runs the application
      */
-    public function wrap(\Closure $app): \Closure
+    public function route(ClientRequest $request): ?\Closure
     {
-        return function (ClientRequest $request) use ($app): void {
-            $method = $request->getMethod();
-            $target = $request->getTarget();
-            $path   = \rawurldecode((string) \parse_url($target, \PHP_URL_PATH));
-            if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)|\.(?:php\d?|phps|phtml|phar|inc)$#i', $path)) {
-                $app($request);
-
-                return;
+        $method = $request->getMethod();
+        $target = $request->getTarget();
+        $path   = \rawurldecode((string) \parse_url($target, \PHP_URL_PATH));
+        if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)|\.(?:php\d?|phps|phtml|phar|inc)$#i', $path)) {
+            return null;
+        }
+        \clearstatcache(true, $this->root . $path);
+        $file = \realpath($this->root . $path);
+        if (false === $file || ($file !== $this->root && !\str_starts_with($file, $this->root . '/'))) {
+            return null;
+        }
+        if (\is_dir($file)) {
+            if (!\is_file("$file/index.html")) {
+                return null;
             }
-            \clearstatcache(true, $this->root . $path);
-            $file = \realpath($this->root . $path);
-            if (false === $file || ($file !== $this->root && !\str_starts_with($file, $this->root . '/'))) {
-                $app($request);
+            if (!\str_ends_with($path, '/')) {
+                $query    = \parse_url($target, \PHP_URL_QUERY);
+                $location = \parse_url($target, \PHP_URL_PATH) . '/' . (null !== $query && '' !== $query ? "?$query" : '');
 
-                return;
-            }
-            if (\is_dir($file)) {
-                if (!\is_file("$file/index.html")) {
-                    $app($request);
-
-                    return;
-                }
-                if (!\str_ends_with($path, '/')) {
-                    $query = \parse_url($target, \PHP_URL_QUERY);
-                    $request->sendResponseHeaders(301, ['Location' => \parse_url($target, \PHP_URL_PATH) . '/' . (null !== $query && '' !== $query ? "?$query" : '')]);
+                return static function (ClientRequest $request) use ($location): void {
+                    $request->sendResponseHeaders(301, ['Location' => $location]);
                     $request->end();
-
-                    return;
-                }
-                $file .= '/index.html';
+                };
             }
-            $this->serve($request, $file);
-        };
+            $file .= '/index.html';
+        }
+
+        return fn (ClientRequest $request) => $this->serve($request, $file);
     }
 
     private function serve(ClientRequest $request, string $file): void

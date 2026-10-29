@@ -35,6 +35,7 @@ function streams_logger(): Psr\Log\AbstractLogger
 function serve_in_process(Closure $handler, Closure $client, ?Psr\Log\LoggerInterface $logger = null, bool $tcp = false): mixed
 {
     return phasync::run(function () use ($handler, $client, $logger, $tcp) {
+        [$handler, $ended] = awaited_handler($handler);
         if ($tcp) {
             $listener = stream_socket_server('tcp://127.0.0.1:0');
             $conn     = stream_socket_client('tcp://' . stream_socket_get_name($listener, false));
@@ -47,10 +48,13 @@ function serve_in_process(Closure $handler, Closure $client, ?Psr\Log\LoggerInte
         stream_set_blocking($conn, false);
         phasync::go((new HttpConnection(new phasync\Net\StreamDuplex($server, '127.0.0.1:1'), $handler, $logger ?? new Psr\Log\NullLogger(), null))->serve(...));
         try {
-            return $client($conn);
+            $result = $client($conn);
         } finally {
             fclose($conn);
         }
+        $ended(); // the requests' own work too
+
+        return $result;
     });
 }
 

@@ -9,6 +9,9 @@ use Swerve\WebSocket;
 final class Seen
 {
     public static string $note = '';
+
+    /** @var ?WeakReference<Scope> the Scope of the request that upgraded to /ws-scope */
+    public static ?WeakReference $request = null;
 }
 
 // Swerve::upgrade(): the connection goes on to a closure once the request ended
@@ -58,6 +61,16 @@ while (Swerve::accept(null, function () {
             Swerve::upgrade(static function (ServerSentEvents $sse): void {
                 $sse->send('one');
                 $sse->send('two');
+            });
+
+            return;
+        case '/ws-scope':
+            Seen::$request = WeakReference::create(Scope::getCurrent());
+            Swerve::upgrade(static function (WebSocket $ws): void {
+                foreach ($ws as $message) {
+                    gc_collect_cycles();
+                    $ws->send(json_encode([Scope::getCurrent() === Seen::$request->get(), null === Seen::$request->get()]));
+                }
             });
 
             return;

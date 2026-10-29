@@ -271,44 +271,23 @@ final class LotClient
      * A connection's coroutine, for as long as the connection is in this worker. It serves
      * static files for as long as the client has its next request written, and the first other
      * request with the accept()'s application; static files don't use up the accept(), which
-     * goes on with another connection when this one goes idle or closes after files only. After
-     * the application's response it waits for the next request, and serves that too when an
-     * accept() waits for one; else the connection goes back to the master with its request
-     * waiting.
+     * goes on with another connection when this one goes idle or closes after files only. Once
+     * the application's response ended (its request may run on, see RequestPool) it waits for
+     * the next request, and serves that too when an accept() waits for one; else the connection
+     * goes back to the master with its request waiting.
      *
      * @param resource $stream
      */
     private function connection($stream, Accepted $request): void
     {
-        $this->serving($stream, new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null), $request);
-    }
-
-    /**
-     * The connection of a request whose coroutines still run after its response (#98): it goes on
-     * here, in a coroutine of its own, as after any other request.
-     *
-     * @param resource $stream
-     */
-    private function detached($stream, HttpConnection $http, Accepted $request, bool $keepAlive, bool $application, int $served): void
-    {
-        $this->serving($stream, $http, $request, $keepAlive, $application, $served);
-    }
-
-    /**
-     * @param resource $stream
-     */
-    private function serving($stream, HttpConnection $http, Accepted $request, ?bool $keepAlive = null, bool $application = false, int $served = 0): void
-    {
         $id                     = (int) $stream;
-        $fiber                  = \Fiber::getCurrent();
-        $this->connections[$id] = [$http, $fiber];
+        $http                   = new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
+        $this->connections[$id] = [$http, \Fiber::getCurrent()];
         try {
-            $this->serveConnection($stream, $http, $request, null === $keepAlive ? null : $http->detached($keepAlive), $application, $served);
+            $this->serveConnection($stream, $http, $request);
         } finally {
-            // Not when exit() ends the lifecycle (it runs no finally): shutdown() finds it then. Nor
-            // when the connection went on in another coroutine (detached), which has it now
-            if (($this->connections[$id][1] ?? null) === $fiber) {
-                unset($this->connections[$id]);
+            unset($this->connections[$id]);
+            if (!HttpConnection::$exiting) {
                 phasync::raiseFlag($this); // room for an accept() at the limit
             }
         }
@@ -317,22 +296,20 @@ final class LotClient
     /**
      * @param resource $stream
      */
-    private function serveConnection($stream, HttpConnection $http, Accepted $request, ?bool $open, bool $application, int $served): void
+    private function serveConnection($stream, HttpConnection $http, Accepted $request): void
     {
-        $id             = (int) $stream;
-        $for            = null;
-        $http->onDetach = function (bool $keepAlive) use ($stream, $http, &$request, &$application, &$served): void {
-            // A service runs in the root Scope: not a coroutine of the request, though it starts it
-            phasync::service($this->detached(...), $stream, $http, $request, $keepAlive, $application, $served);
-        };
+        $id          = (int) $stream;
+        $for         = null;
+        $application = false;
+        $served      = 0;
         while (true) {
-            // $open given: went on from a request that detached (its response is complete)
-            if (null === $open && $for !== $request) {
-                // The application's handler, which notes that the request was not a file
-                $handler       = static function (ClientRequest $client) use ($request, &$application): void {
+            if ($for !== $request) {
+                // The application's handler, which notes that the request was not a file; the
+                // request is done when its code ended, tail work included
+                $http->handler = static function (ClientRequest $client) use ($request, &$application): void {
                     $application = true;
                     if ($client instanceof HttpClientRequest) {
-                        $client->onHandOff = $request->done(...);
+                        $client->onEnd = $request->done(...);
                     }
                     try {
                         ($request->handler)($client);
@@ -343,23 +320,17 @@ final class LotClient
                         throw $e;
                     }
                 };
-                $http->handler = null === $request->files ? $handler : $request->files->wrap($handler);
-                $for           = $request;
+                $http->files = $request->files;
+                $for         = $request;
             }
-            if (null === $open) {
-                $application = false;
-                $open        = $http->serve(one: true);
-                if (null === $open) {
-                    return; // the request detached: the connection went on in another coroutine
-                }
-            }
+            $application = false;
+            $open        = $http->serve(one: true);
             unset($this->busy[$id]);
             if (!$application) {
                 // A static file doesn't use up the accept(): it goes on with this connection's next
                 // request if the client has written it, else with another connection
                 if ($open && ++$served < self::KEEP_LIMIT && $http->pending()) {
                     $this->busy[$id] = $stream;
-                    $open            = null;
 
                     continue;
                 }
@@ -370,7 +341,6 @@ final class LotClient
 
                 return;
             }
-            $request->done();
             if (!$open) {
                 return; // closed
             }
@@ -385,7 +355,6 @@ final class LotClient
                 }
                 $request = $offer->request;
                 $offer->returnToPool();
-                $open = null;
 
                 continue;
             }
@@ -411,7 +380,7 @@ final class LotClient
 
                 return;
             }
-            if (($application && ++$served >= self::KEEP_LIMIT) || 0 === $this->accepting) {
+            if (++$served >= self::KEEP_LIMIT || 0 === $this->accepting) {
                 $this->giveBack($stream, 'R');
 
                 return;
@@ -425,7 +394,6 @@ final class LotClient
             }
             $request = $offer->request;
             $offer->returnToPool();
-            $open = null;
         }
     }
 
@@ -566,10 +534,11 @@ final class LotClient
     private function shutdown(): void
     {
         foreach ($this->busy as $id => $conn) {
-            [$http, $fiber] = $this->connections[$id] ?? [null, null];
-            $request        = $http?->current();
-            // exit() unwound the coroutine of the request it ended; the others are suspended
-            if (null === $request || !$fiber->isTerminated()) {
+            $http    = $this->connections[$id][0] ?? null;
+            $request = $http?->current();
+            // exit() unwound the pooled coroutine of the request it ended, before its response
+            // ended; the others are suspended
+            if (null === $request || !($http->runner?->isTerminated() ?? false)) {
                 continue;
             }
             try {

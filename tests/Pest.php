@@ -381,6 +381,37 @@ function ws_read($conn): ?array
 }
 
 /**
+ * $handler, for a HttpConnection served in this process, and a closure that waits until the
+ * requests it was given have ended: a request runs on in a pooled coroutine after its response
+ * (tail work), which the connection's coroutine does not wait for. Swerve's worker awaits its
+ * requests the same way (the Accepted that accept() returns).
+ *
+ * @return array{0: Closure(Swerve\ClientRequest): void, 1: Closure(): void}
+ */
+function awaited_handler(Closure $handler): array
+{
+    $requests = new class () {
+        public int $running = 0;
+    };
+    $wrapped = static function (Swerve\ClientRequest $r) use ($handler, $requests): void {
+        ++$requests->running;
+        $r->onEnd = static function () use ($requests): void {
+            if (0 === --$requests->running) {
+                phasync::raiseFlag($requests);
+            }
+        };
+        $handler($r);
+    };
+    $await = static function () use ($requests): void {
+        while ($requests->running > 0) {
+            phasync::awaitFlag($requests);
+        }
+    };
+
+    return [$wrapped, $await];
+}
+
+/**
  * Serve requests in this process with a HttpConnection (the handler takes a Swerve\ClientRequest) over a SEQPACKET socket pair, so
  * each of the server's writes arrives as one packet: the packets of the responses, up to the
  * end of the connection. Each of $requests is sent as one packet, and a read shorter than a

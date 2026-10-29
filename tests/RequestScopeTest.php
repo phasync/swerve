@@ -26,7 +26,9 @@ function serve_scope_test(array $handlers, ?Psr\Log\LoggerInterface $logger = nu
     phasync::run(function () use ($handlers, $logger) {
         $fibers = [];
         $conns  = [];
+        $ends   = [];
         foreach ($handlers as $handler) {
+            [$handler, $ends[]] = awaited_handler($handler);
             [$server, $conn] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
             stream_set_blocking($server, false);
             stream_set_blocking($conn, false);
@@ -37,6 +39,9 @@ function serve_scope_test(array $handlers, ?Psr\Log\LoggerInterface $logger = nu
         }
         foreach ($fibers as $fiber) {
             phasync::await($fiber);
+        }
+        foreach ($ends as $ended) {
+            $ended(); // the requests' own work too
         }
         foreach ($conns as $conn) {
             fclose($conn);
@@ -85,4 +90,29 @@ test('the coroutines a request starts are in its frame: it waits for them, and t
 
     expect($log)->toBe(['handler returned', 'child ended']);
     expect($logger->lines)->toBe(['error: A coroutine of GET / failed: child failed']);
+});
+
+test('a static file is answered in the connection\'s coroutine: no request coroutine, no Scope, no application', function () {
+    $dir = temp_path(true);
+    file_put_contents("$dir/a.txt", 'a file');
+    (new ReflectionProperty(Swerve\Http\RequestPool::class, 'idle'))->setValue(null, []); // a job would have to start one
+    $started = Swerve\Http\RequestPool::$started;
+    $body    = phasync::run(function () use ($dir) {
+        [$server, $conn] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
+        stream_set_blocking($server, false);
+        stream_set_blocking($conn, false);
+        $http        = new HttpConnection(new phasync\Net\StreamDuplex($server, '127.0.0.1:1'), static fn () => throw new LogicException('not the application'), new Psr\Log\NullLogger(), null);
+        $http->files = new Swerve\StaticFiles($dir);
+        phasync::go($http->serve(...));
+        fwrite($conn, "GET /a.txt HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
+        $response = '';
+        while ('' !== $chunk = (string) fread(phasync::readable($conn, 5), 65536)) {
+            $response .= $chunk;
+        }
+
+        return $response;
+    });
+
+    expect($body)->toStartWith('HTTP/1.1 200')->toEndWith("\r\n\r\na file")
+        ->and(Swerve\Http\RequestPool::$started)->toBe($started);
 });

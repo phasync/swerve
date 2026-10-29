@@ -231,6 +231,13 @@ it('serves a WebSocket on an upgraded request', function () {
     expect(ws_read($ws))->toBe([0x1, 'echo hi']);
 });
 
+it('runs a WebSocket in a Scope of its own, and frees the request that upgraded while the WebSocket is open', function () {
+    [, $addr] = accept_start('upgrade.php', 1);
+    $ws       = ws_connect($addr, '/ws-scope');
+    ws_send($ws, 0x1, 'hi');
+    expect(ws_read($ws))->toBe([0x1, '[false,true]']); // [in the request's Scope, the request's Scope freed]
+});
+
 it('agrees permessage-deflate for an upgrade closure, in place and moved to a WebSocket worker', function (string $script) {
     [, $addr] = accept_start($script, 1);
     $conn     = native_connect($addr);
@@ -480,3 +487,57 @@ foreach (['fastcgi_finish_request()' => '/finish', 'a body of its Content-Length
             ->and(accept_request($conn, '/hello', "Connection: close\r\n")['body'])->toBe("hello\n"); // nothing stray
     });
 }
+
+// Tail work: a request's code that runs on after its response ended. It runs to its end in the
+// request's pooled coroutine, Scope and frame; when the next request on the connection is served
+// is up to swerve.php: one request per run and one after another wait for it, a loop of
+// accept() calls doesn't.
+foreach (['classic' => true, 'sequential' => true, 'async' => false] as $style => $waits) {
+    foreach (['Content-Length' => '/length', 'fastcgi_finish_request()' => '/finish'] as $end => $route) {
+        it("runs a request's tail work after its response ended at $end to its end, with the connection's next request " . ($waits ? 'waiting for it' : 'served meanwhile') . " ($style)", function () use ($style, $waits, $route) {
+            [, $addr] = accept_start("tail-$style.php", 1);
+            $file     = temp_path();
+            $conn     = native_connect($addr);
+            $start    = microtime(true);
+            expect(accept_request($conn, "$route?tag=mine&file=" . urlencode($file))['body'])->toBe('done')
+                ->and(microtime(true) - $start)->toBeLessThan(0.25); // the client has it before the tail work's 0.3 s
+            expect(accept_request($conn, '/hello')['body'])->toBe("hello\n");
+            if ($waits) {
+                expect(microtime(true) - $start)->toBeGreaterThan(0.3);
+            } else {
+                expect(microtime(true) - $start)->toBeLessThan(0.25);
+            }
+            $deadline = microtime(true) + 2;
+            while ('' === file_get_contents($file)) {
+                expect(microtime(true))->toBeLessThan($deadline);
+                usleep(20_000);
+            }
+            expect(json_decode(file_get_contents($file)))->toBe(['mine', 1]); // its own request's $_GET, its client gone
+        });
+    }
+}
+
+it('ends a response that has no length and no finish with its script, while a coroutine it started runs on in its request', function () {
+    [, $addr] = accept_start('tail-async.php', 1);
+    $file     = temp_path();
+    $conn     = native_connect($addr);
+    $start    = microtime(true);
+    expect(accept_request($conn, '/chunked?tag=mine&file=' . urlencode($file))['body'])->toBe('done')
+        ->and(accept_request($conn, '/hello')['body'])->toBe("hello\n")
+        ->and(microtime(true) - $start)->toBeLessThan(0.25); // the coroutine sleeps 0.3 s
+    $deadline = microtime(true) + 2;
+    while ('' === file_get_contents($file)) {
+        expect(microtime(true))->toBeLessThan($deadline);
+        usleep(20_000);
+    }
+    expect(json_decode(file_get_contents($file)))->toBe(['mine', 1]);
+});
+
+it('runs requests one after another in one reused coroutine, not one coroutine each', function () {
+    [, $addr] = accept_start('tail-async.php', 1);
+    $conn     = native_connect($addr);
+    for ($i = 0; $i < 1000; ++$i) {
+        expect(accept_request($conn, '/hello')['body'])->toBe("hello\n");
+    }
+    expect(accept_request($conn, '/pool')['body'])->toBe('1');
+});

@@ -532,15 +532,9 @@ final class Swerve
         return false !== $file && \str_starts_with($file, "$root/") && \is_file($file) ? [$file, $name, $info] : null;
     }
 
-    /**
-     * The request ended with its connection taken off it: what accept() returned is ready, and
-     * $upgrade gets the connection, in this coroutine.
-     */
+    /** The request ended with its connection taken off it: $upgrade gets the connection. */
     private static function upgraded(ClientRequest $client, \Closure $upgrade): void
     {
-        if ($client instanceof HttpClientRequest) {
-            $client->handedOff();
-        }
         match ((new \ReflectionFunction($upgrade))->getParameters()[0]->getType()->getName()) {
             WebSocket::class        => WebSocket::from($client, $upgrade),
             ServerSentEvents::class => $upgrade(new ServerSentEvents($client)),
@@ -575,15 +569,14 @@ final class Swerve
                 return;
             }
             [$file, $name, $info] = $routed;
-            // $_SERVER's source not in a local: an upgraded connection runs on in this frame
             $upgrade = SapiRequest::run($client, self::serverVariables($client, $root, $file, $name, $info), static fn () => $code($client, $file));
             if (null !== $upgrade) {
-                // In a Scope of its own, seeded with the request's state as it was at upgrade(), and
-                // a frame of its own as a request has: onScopeChange() hooks see it enter
-                (new \Scope())->run(static fn () => phasync::run(static function () use ($client, $upgrade): void {
+                // The connection runs it once this returned, in a Scope of its own, as in the
+                // WebSocket worker: seeded with the request's state as it was at upgrade()
+                $client->upgrade = static function (ClientRequest $client) use ($upgrade): void {
                     SapiRequest::seed($upgrade[1]);
                     self::upgraded($client, $upgrade[0]);
-                }));
+                };
             }
         };
     }
