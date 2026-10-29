@@ -106,6 +106,26 @@ it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', fun
         ->and($response['body'])->toBe('psr7 /psr body');
 });
 
+it('upgrades on a PSR-7 101 response: the request body is what the client sends after it, the response body goes back', function () {
+    [, $addr] = accept_start('psr7.php', 1);
+    $conn     = native_connect($addr);
+    fwrite($conn, "GET /shout HTTP/1.1\r\nHost: test\r\nConnection: Upgrade\r\nUpgrade: shout\r\n\r\nhello");
+    $head = native_read_head($conn);
+    expect([$head['status'], $head['headers']['upgrade'] ?? null])->toBe([101, 'shout'])
+        ->and(read_exactly($conn, 5))->toBe('HELLO');
+    fwrite($conn, ' world');
+    expect(read_exactly($conn, 6))->toBe(' WORLD');
+    stream_socket_shutdown($conn, STREAM_SHUT_WR); // the request body ends: so does the response body, and the connection
+    expect(native_closed($conn))->toBeTrue();
+});
+
+it('refuses a PSR-7 101 response in a swerve.php that accepts once: the connection could not outlive its run', function () {
+    [, $addr] = accept_start('psr7once.php', 1);
+    $conn     = native_connect($addr);
+    fwrite($conn, "GET / HTTP/1.1\r\nHost: test\r\nConnection: Upgrade\r\nUpgrade: shout\r\n\r\n");
+    expect(native_read_head($conn)['status'])->toBe(500);
+});
+
 it('runs a PSR-7 closure under sapi(): PHP_SAPI, header(), and a form as getParsedBody() and $_POST', function () {
     [, $addr] = accept_start('psr7sapi.php', 1);
     $conn     = native_connect($addr);

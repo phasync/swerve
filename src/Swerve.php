@@ -339,7 +339,11 @@ final class Swerve
      *                                         parameters: likewise; a closure taking a
      *                                         ServerRequestInterface: returns a ResponseInterface,
      *                                         also under sapi(), its request made from the
-     *                                         superglobals and php://input as under php-fpm
+     *                                         superglobals and php://input as under php-fpm; a
+     *                                         `101` to an Upgrade request takes the connection
+     *                                         (the response body goes out, the request body is
+     *                                         what the client sends after it), and needs an
+     *                                         accept() loop
      *
      * @return ?\Fiber the coroutine serving the request; null once the worker stops
      *

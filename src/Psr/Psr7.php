@@ -2,19 +2,28 @@
 
 namespace Swerve\Psr;
 
+use phasync;
 use phasync\Psr\EmptyStream;
 use phasync\Psr\ResourceStream;
 use phasync\Psr\ServerRequest;
+use phasync\Psr\UnbufferedStream;
 use phasync\Psr\UploadedFile;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\ClientRequest;
+use Swerve\Lot\LotClient;
+use Swerve\Swerve;
 
 /**
  * Serves an exchange under sapi() with a closure taking a PSR-7 ServerRequestInterface and
  * returning a ResponseInterface, as a PSR-7 application runs under php-fpm: the request is made
  * from the superglobals, its body is php://input, and the response goes out through header() and
  * echo.
+ *
+ * A `101 Switching Protocols` response to a request with an Upgrade header takes the connection,
+ * as {@see Swerve::upgrade()} does: the 101 goes out with the response's headers, the response
+ * body is copied to the connection until it ends, and the request body is what the client sends
+ * after the 101, until it stops sending.
  *
  * @internal
  */
@@ -26,22 +35,35 @@ final class Psr7
     /** @param \Closure(ServerRequestInterface): ResponseInterface $app */
     public static function serve(ClientRequest $client, \Closure $app): void
     {
-        $response = $app(self::request($client));
+        $headers  = $client->getRequestHeaders();
+        $upgrade  = isset($headers['upgrade']) ? new UnbufferedStream() : null;
+        $response = $app(self::request($client, $headers, $upgrade));
         if (!$response instanceof ResponseInterface) {
             throw new \TypeError('A PSR-7 handler must return a ' . ResponseInterface::class . ', got ' . \get_debug_type($response));
+        }
+        if (101 === $response->getStatusCode()) {
+            if (null === $upgrade) {
+                throw new \LogicException('A PSR-7 handler answered 101 to a request without an Upgrade header');
+            }
+            if (LotClient::get()->shortLived()) {
+                throw new \LogicException('A PSR-7 101 response needs a swerve.php that keeps calling Swerve::accept(): one that accepts once per run ends with the request, and the connection with it');
+            }
+            self::upgrade($response, $upgrade);
+
+            return;
         }
         self::send($response);
     }
 
-    private static function request(ClientRequest $client): ServerRequestInterface
+    /** @param array<string, list<string>> $headers */
+    private static function request(ClientRequest $client, array $headers, ?UnbufferedStream $upgrade): ServerRequestInterface
     {
-        $headers = $client->getRequestHeaders();
-        $form    = (bool) \preg_match('#^(application/x-www-form-urlencoded|multipart/form-data)\b#i', $headers['content-type'][0] ?? '');
+        $form = (bool) \preg_match('#^(application/x-www-form-urlencoded|multipart/form-data)\b#i', $headers['content-type'][0] ?? '');
 
         return new ServerRequest(
             $client->getMethod(),
             $client->getTarget(),
-            static fn () => new ResourceStream(\fopen('php://input', 'rb')),
+            null === $upgrade ? static fn () => new ResourceStream(\fopen('php://input', 'rb')) : static fn () => $upgrade,
             $headers,
             $_GET,
             $_SERVER,
@@ -76,6 +98,29 @@ final class Psr7
         }
 
         return new UploadedFile(\UPLOAD_ERR_OK === $error ? $path : EmptyStream::create(), $name, $type, $size, $error);
+    }
+
+    /** The connection goes on with the response body out, and what the client sends into $in. */
+    private static function upgrade(ResponseInterface $response, UnbufferedStream $in): void
+    {
+        $headers = $response->getHeaders();
+        $out     = $response->getBody();
+        Swerve::upgrade(static function (ClientRequest $client) use ($headers, $out, $in): void {
+            $client->sendResponseHeaders(101, $headers);
+            phasync::go(static function () use ($client, $in): void {
+                try {
+                    while ('' !== $chunk = $client->read()) {
+                        $in->append($chunk);
+                    }
+                } finally {
+                    $in->end();
+                }
+            });
+            while (!$out->eof()) {
+                $client->write($out->read(self::CHUNK));
+            }
+            $client->end();
+        });
     }
 
     private static function send(ResponseInterface $response): void
