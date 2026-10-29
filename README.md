@@ -47,7 +47,8 @@ under php-fpm.
 
 ## Getting started
 
-Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix`, `sockets` and `apcu` extensions.
+Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions, and `apcu` for
+the shared cache, publish/subscribe and the container.
 ext-phasync ships inside phasync, and swerve loads it by itself.
 
 ```bash

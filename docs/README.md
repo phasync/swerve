@@ -31,4 +31,5 @@ them: [`sse-chat`](../examples/sse-chat) and
 cache, with a [step-by-step tutorial](../examples/memcached/README.md).
 
 Swerve is at 0.x: options and APIs may change before 1.0. It runs on Linux, with PHP 8.2 or
-later and the `pcntl`, `posix`, `sockets` and `apcu` extensions.
+later and the `pcntl`, `posix` and `sockets` extensions, and `apcu` for the shared cache,
+publish/subscribe and the container.
