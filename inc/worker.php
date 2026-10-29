@@ -19,6 +19,7 @@
             return;
         }
         phasync\ext\run_next(__FILE__);
+        Swerve\Lot\LotClient::startServices();
         try {
             require \getenv('SWERVE_APP');
         } catch (Swerve\WorkerStoppingException) {

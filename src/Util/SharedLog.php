@@ -61,6 +61,9 @@ final class SharedLog
     /** This process's reader, while it has subscriptions. */
     private static ?self $reader = null;
 
+    /** Raised as the first subscription starts, for the reader's coroutine, see service(). */
+    private static ?\stdClass $wake = null;
+
     /** @var resource this reader's doorbell */
     private mixed $own;
 
@@ -73,7 +76,7 @@ final class SharedLog
     /** stop() ended it: a reader stopped during a delivery reads no further. */
     private bool $stopped = false;
 
-    /** Null while it registers. */
+    /** Null until service() took it on. */
     private ?\Fiber $fiber = null;
 
     private function __construct()
@@ -95,16 +98,43 @@ final class SharedLog
     }
 
     /**
-     * Start reading as this process's first subscription starts: from the next message published.
+     * The coroutine that reads the log for this process, started as the lifecycle starts, before
+     * any request: it waits for the first subscription, which may start inside a request (and
+     * a coroutine a request starts belongs to it, see sapi()), then reads until stop().
      *
      * @param \Closure(int $seq, int $published, string $topic, string $message): void $deliver
      * @param \Closure(): void                                                          $gap     messages were lost
+     */
+    public static function service(\Closure $deliver, \Closure $gap): void
+    {
+        $wake = self::$wake = new \stdClass();
+        phasync::service(static function () use ($wake, $deliver, $gap): void {
+            try {
+                while (null === self::$reader) {
+                    phasync::awaitFlag($wake);
+                }
+            } catch (\Throwable) {
+                return; // the lifecycle ends without a subscription
+            }
+            $reader        = self::$reader;
+            $reader->fiber = \Fiber::getCurrent();
+            $reader->read($deliver, $gap);
+        });
+    }
+
+    /**
+     * Start reading as this process's first subscription starts: from the next message published.
      *
      * @return int the sequence number of the last message published before
+     *
+     * @throws \LogicException without service(): a worker starts it with its lifecycle
      */
-    public static function start(\Closure $deliver, \Closure $gap): int
+    public static function start(): int
     {
         if (null === self::$reader) {
+            if (null === self::$wake) {
+                throw new \LogicException('Swerve BUG: pub/sub in a worker whose lifecycle did not start the reader (SharedLog::service())');
+            }
             $reader      = new self();
             $address     = self::address(\getmypid());
             $reader->own = \stream_socket_server("udg://$address", $errno, $error, \STREAM_SERVER_BIND)
@@ -113,9 +143,7 @@ final class SharedLog
             self::$reader = $reader; // before register(), which may wait: one reader per process
             self::register(\getmypid(), $address);
             $reader->next  = self::head() + 1;
-            if (!$reader->stopped) {
-                $reader->fiber = phasync::service(static fn () => $reader->read($deliver, $gap));
-            }
+            phasync::raiseFlag(self::$wake);
         }
 
         return self::head();

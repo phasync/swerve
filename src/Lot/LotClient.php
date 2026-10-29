@@ -9,13 +9,16 @@ use phasync\Net\StreamDuplex;
 use phasync\TimeoutException;
 use Swerve\Accepted;
 use Swerve\ClientRequest;
+use Swerve\Container;
 use Swerve\Http\HttpClientRequest;
 use Swerve\Http\HttpConnection;
 use Swerve\StaticFiles;
 use Swerve\Swerve;
 use Swerve\StopReason;
 use Swerve\UpgradeException;
+use Swerve\Util\SharedLog;
 use Swerve\Util\Topics;
+use Swerve\WebSocket;
 use Swerve\WorkerStoppingException;
 use Swerve\Util\ObjectPoolTrait;
 
@@ -159,6 +162,22 @@ final class LotClient
         \register_shutdown_function(fn () => \register_shutdown_function($this->shutdown(...)));
 
         return true;
+    }
+
+    /**
+     * Start the services of this lifecycle's requests, before any request: what serves the
+     * requests (pub/sub's reader, the limited services' listener, the WebSocket pings) waits
+     * until a request needs it, and is only signalled by it. Started from a request, it would
+     * belong to that request (sapi(): a coroutine belongs to the request of the coroutine that
+     * starts it).
+     */
+    public static function startServices(): void
+    {
+        if (SharedLog::shared()) {
+            SharedLog::service(Topics::deliver(...), Topics::gap(...));
+            Container::service();
+        }
+        WebSocket::service();
     }
 
     /**

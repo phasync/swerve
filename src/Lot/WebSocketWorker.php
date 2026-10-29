@@ -47,6 +47,7 @@ final class WebSocketWorker
     /** Serve the WebSockets moved here, until the master says stop, or is gone. */
     public static function serve(): void
     {
+        LotClient::startServices();
         $taking = phasync::go(self::take(...));
         $control = \fopen('php://fd/' . self::CONTROL_FD, 'r+');
         $letter  = LotClient::receive($control, \socket_import_stream($control))[0] ?? 'S';

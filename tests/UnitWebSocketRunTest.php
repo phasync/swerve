@@ -173,3 +173,29 @@ test('the ping service ends with its run() and starts again for a WebSocket of t
         WebSocket::$pingInterval = $interval;
     }
 });
+
+test('the lifecycle\'s ping service, started before any WebSocket, waits while none is open and pings each one that opens later', function () {
+    $interval               = WebSocket::$pingInterval;
+    WebSocket::$pingInterval = 0.02;
+    try {
+        $sent = phasync::run(function () {
+            WebSocket::service();
+            $sent = [];
+            foreach ([1, 2] as $socket) {
+                phasync::sleep(0.05); // none open: the service waits, and survives it
+                $connection = new MemoryDuplex();
+                WebSocket::run($connection, function (WebSocket $ws) {
+                    phasync::sleep(0.07);
+                    $ws->end(1000);
+                });
+                $sent[] = $connection->sent;
+            }
+
+            return $sent;
+        });
+        expect($sent[0])->toStartWith("\x89\x00")  // a ping before the close
+            ->and($sent[1])->toStartWith("\x89\x00");
+    } finally {
+        WebSocket::$pingInterval = $interval;
+    }
+});

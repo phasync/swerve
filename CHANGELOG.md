@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A request runs in a pooled request coroutine, not in its connection's: the connection's coroutine does its I/O and answers static files itself, with no `Scope`. A request whose response ended (Content-Length, `fastcgi_finish_request()`, or its handler returned) runs its tail work to the end in its coroutine and `Scope`, and what `Swerve::accept()` returned is ready only then: one `accept()` per run, or awaiting each request, waits for it; an `accept()` loop serves the connection's next request meanwhile. (#102)
+- Nothing that serves the requests is started by a request any more, which kept that request alive (its `Scope`, superglobals, and a container slot it held) for as long as the service ran: pub/sub's reader, the limited services' listener and the WebSocket pings start with the worker's lifecycle and wait until a request needs them; pub/sub hands messages to its subscriptions without a coroutine per topic. A limited `Swerve::container()` service may be added inside a request. (#102)
+- `Swerve::upgrade()`'s closure runs once the handler returned, in its connection's coroutine and a `Scope` of its own, no longer nested in the request: the request is freed while a WebSocket stays open. (#8)
+- The limited services' releases go to one pub/sub topic for all of them. During a reload, workers of the old and the new code don't hear each other's releases, and fall back to looking again each second.
+
 - A request's `$_SERVER` holds no environment variables, as under php-fpm's default `clear_env`: `getenv()` reads them. Each request copied the worker's whole environment, and an upgraded connection kept its copy for its life: with 50 variables, 16 KiB of its 52 KiB. (#8)
 - An upgraded connection no longer keeps the array its request's `$_SERVER` was built from: 8 KiB less per raw upgrade or WebSocket. (#8)
 

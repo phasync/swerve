@@ -2,8 +2,8 @@
 
 namespace Swerve;
 
-use phasync\SubscriberInterface;
 use phasync\TimeoutException;
+use Swerve\Util\Inbox;
 use Swerve\Util\Topics;
 
 /**
@@ -42,7 +42,7 @@ use Swerve\Util\Topics;
 final class Subscription implements \IteratorAggregate
 {
     /** Null when made while the process drains: it has ended already. */
-    private ?SubscriberInterface $subscriber = null;
+    private ?Inbox $subscriber = null;
 
     /** The sequence number of the last message published before it: the earlier ones are not its. */
     private int $after = 0;
@@ -112,7 +112,7 @@ final class Subscription implements \IteratorAggregate
     public function __destruct()
     {
         if (null !== $this->subscriber) {
-            Topics::leave($this->topic);
+            Topics::leave($this->topic, $this->subscriber);
         }
     }
 }

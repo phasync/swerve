@@ -127,9 +127,12 @@ final class WebSocket implements \IteratorAggregate
     /** @var array<int, \WeakReference<self>> the open WebSockets of this process, see keepAlive() */
     private static array $open = [];
 
-    /** Raised when the last open WebSocket ends, for the ping loop. */
+    /** Raised when the last open WebSocket ends, or the first opens, for the ping loop. */
     private static ?object $idle = null;
     private static bool $pinging = false;
+
+    /** The lifecycle's ping coroutine runs, waiting while none is open, see service(). */
+    private static bool $resident = false;
 
     private string $buffer = '';
     private bool $binary   = false;
@@ -900,52 +903,93 @@ final class WebSocket implements \IteratorAggregate
     }
 
     /**
-     * Ping every open WebSocket of this process every $pingInterval seconds, from one coroutine
-     * for all of them, which ends when none is open. A ping doesn't wait for a client that reads
-     * slowly: that one's own sends time out and give it up.
+     * The lifecycle's ping coroutine, started as it starts, before any request: it waits while no
+     * WebSocket is open, and pings while some are. A WebSocket opened inside a request would
+     * otherwise start it there, and a coroutine a request starts belongs to it (see sapi()).
+     *
+     * @internal
+     */
+    public static function service(): void
+    {
+        self::$resident = self::$pinging = true;
+        phasync::service(static function (): void {
+            try {
+                while (true) {
+                    while (!self::$open) {
+                        phasync::awaitFlag(self::$idle ??= new \stdClass());
+                    }
+                    self::ping();
+                }
+            } catch (CancelledException) {
+                // the lifecycle ends
+            } finally {
+                self::$resident = self::$pinging = false;
+            }
+        });
+    }
+
+    /**
+     * Have the open WebSockets pinged: by the lifecycle's ping coroutine; outside a lifecycle
+     * (WebSocket::run() in a script), by one started now, which ends when none is open.
      */
     private static function keepAlive(): void
     {
+        if (self::$resident) {
+            if (1 === \count(self::$open)) {
+                phasync::raiseFlag(self::$idle ??= new \stdClass()); // the first: it waits for one
+            }
+
+            return;
+        }
         if (self::$pinging) {
             return;
         }
         self::$pinging = true;
-        // A service: it serves every connection, and no request waits for it (a drain waits for requests)
         phasync::service(static function () {
             try {
-                while (self::$open) {
-                    try {
-                        phasync::awaitFlag(self::$idle ??= new \stdClass(), self::$pingInterval);
-                    } catch (TimeoutException) {
-                        foreach (self::$open as $id => $reference) {
-                            $ws = $reference->get();
-                            if (null === $ws) {
-                                unset(self::$open[$id]); // dropped without end()
-
-                                continue;
-                            }
-                            if (\hrtime(true) - $ws->heard > 2 * self::$pingInterval * 1e9) {
-                                // Not even a pong for two intervals: the peer is gone without a word
-                                // (half-open), and no close frame would reach it
-                                $ws->note(1006, '');
-                                $ws->dead = true;
-                                $ws->end(1001);
-                                $ws->connection->close();
-
-                                continue;
-                            }
-                            try {
-                                $ws->connection->write("\x89\x00", 0.0); // a ping with no payload
-                            } catch (IOException|TimeoutException) {
-                                // gone, or not reading: the connection finds out by itself
-                            }
-                        }
-                    }
-                }
+                self::ping();
             } finally {
                 self::$pinging = false;
             }
         });
+    }
+
+    /**
+     * Ping every open WebSocket of this process every $pingInterval seconds, from one coroutine
+     * for all of them, until none is open. A ping doesn't wait for a client that reads slowly:
+     * that one's own sends time out and give it up.
+     */
+    private static function ping(): void
+    {
+        while (self::$open) {
+            try {
+                phasync::awaitFlag(self::$idle ??= new \stdClass(), self::$pingInterval);
+            } catch (TimeoutException) {
+                foreach (self::$open as $id => $reference) {
+                    $ws = $reference->get();
+                    if (null === $ws) {
+                        unset(self::$open[$id]); // dropped without end()
+
+                        continue;
+                    }
+                    if (\hrtime(true) - $ws->heard > 2 * self::$pingInterval * 1e9) {
+                        // Not even a pong for two intervals: the peer is gone without a word
+                        // (half-open), and no close frame would reach it
+                        $ws->note(1006, '');
+                        $ws->dead = true;
+                        $ws->end(1001);
+                        $ws->connection->close();
+
+                        continue;
+                    }
+                    try {
+                        $ws->connection->write("\x89\x00", 0.0); // a ping with no payload
+                    } catch (IOException|TimeoutException) {
+                        // gone, or not reading: the connection finds out by itself
+                    }
+                }
+            }
+        }
     }
 
     /** A refusal: the complete final response. */

@@ -2,10 +2,6 @@
 
 namespace Swerve\Util;
 
-use phasync;
-use phasync\ChannelException;
-use phasync\SubscribersInterface;
-use phasync\WriteChannelInterface;
 use Swerve\StopReason;
 
 /**
@@ -15,9 +11,11 @@ use Swerve\StopReason;
  * every message of every publisher; each process reads it and hands each message to its own
  * subscribers of the topic. Outside swerve (a test, a script), messages stay in this process.
  *
- * Each topic has its own phasync publisher: a message wakes only its topic's subscribers, and
- * is kept once, however many subscribe, until the slowest has read it. A topic exists from its
- * first subscription until its last one ends.
+ * Each subscription has an {@see Inbox}: a message wakes only its topic's subscribers, and is
+ * kept once, however many subscribe, until the slowest has read it. A topic exists from its
+ * first subscription until its last one ends. Delivering starts no coroutine: a subscription
+ * may start inside a request, and a coroutine started there would belong to that request
+ * (sapi()) for as long as the topic lives.
  *
  * @internal
  */
@@ -36,12 +34,8 @@ final class Topics
     /** Why the process stops, once drain() was called: a subscription's loop throws it. */
     public static ?StopReason $stopping = null;
 
-    /** @var array<string, SubscribersInterface> */
-    private static array $subscribers = [];
-    /** @var array<string, WriteChannelInterface> */
-    private static array $writers = [];
-    /** @var array<string, int> */
-    private static array $counts = [];
+    /** @var array<string, array<int, Inbox>> each topic's subscriptions, by object id */
+    private static array $inboxes = [];
 
     /** What a subscriber receives in place of the messages a gap lost. */
     private static ?\stdClass $gap = null;
@@ -115,18 +109,15 @@ final class Topics
      * subscriber unserializes its own copy: none sees another's changes, and a class this worker's
      * autoloader can't find is an Error in the subscriber's loop, not in the log's reader.
      *
-     * The write suspends until the topic's publisher has taken the message. If the last
-     * subscriber leaves meanwhile, or the process drains, the publisher is closed and the write
-     * throws: nobody is left to deliver to, which is the outcome, not a failure.
+     * Never waits.
      */
     public static function deliver(int $seq, int $published, string $topic, string $message): void
     {
-        if (isset(self::$writers[$topic])) {
-            try {
-                $shared = !\preg_match('/[OCE]:\d+:"/', $message);
-                self::$writers[$topic]->write([$seq, $published, $shared ? \unserialize($message) : null, $shared ? null : $message]);
-            } catch (ChannelException) {
-                // Closed while the write was suspended: the topic has no subscribers left
+        if (isset(self::$inboxes[$topic])) {
+            $shared = !\preg_match('/[OCE]:\d+:"/', $message);
+            $item   = [$seq, $published, $shared ? \unserialize($message) : null, $shared ? null : $message];
+            foreach (self::$inboxes[$topic] as $inbox) {
+                $inbox->push($item);
             }
         }
     }
@@ -134,10 +125,10 @@ final class Topics
     /** Messages were lost: every subscriber of this process learns so, at that point of its messages. */
     public static function gap(): void
     {
-        foreach (self::$writers as $writer) {
-            try {
-                $writer->write([\PHP_INT_MAX, \hrtime(true), self::lost(), null]);
-            } catch (ChannelException) {
+        $item = [\PHP_INT_MAX, \hrtime(true), self::lost(), null];
+        foreach (self::$inboxes as $inboxes) {
+            foreach ($inboxes as $inbox) {
+                $inbox->push($item);
             }
         }
     }
@@ -151,40 +142,34 @@ final class Topics
     /** Whether this process has a subscription on the topic. */
     public static function has(string $topic): bool
     {
-        return isset(self::$counts[$topic]);
+        return isset(self::$inboxes[$topic]);
     }
 
     /**
-     * A subscription starts: its topic's publisher is created with the first one.
+     * A subscription starts.
      *
-     * @return array{0: SubscriberInterface, 1: int} the subscriber, and the sequence number of
-     *                                               the last message published before it: it receives the later ones
+     * @return array{0: Inbox, 1: int} its inbox, and the sequence number of the last message
+     *                                 published before it: it receives the later ones
      */
     public static function subscribe(string $topic): array
     {
-        if (!isset(self::$subscribers[$topic])) {
-            phasync::publisher(self::$subscribers[$topic], self::$writers[$topic]);
-            self::$counts[$topic] = 0;
-        }
-        ++self::$counts[$topic];
-        $subscriber = self::$subscribers[$topic]->subscribe();
+        $inbox                                           = new Inbox();
+        self::$inboxes[$topic][\spl_object_id($inbox)] = $inbox;
 
-        return [$subscriber, SharedLog::shared() ? SharedLog::start(self::deliver(...), self::gap(...)) : -1]; // in this process alone, every message is 0
+        return [$inbox, SharedLog::shared() ? SharedLog::start() : -1]; // in this process alone, every message is 0
     }
 
     /**
-     * A subscription ended. After the last one of a topic, its publisher is closed. The process
-     * goes on reading the log until it drains: it skips what nobody here subscribes to.
+     * A subscription ended. After the last one of a topic, the topic is gone. The process goes
+     * on reading the log until it drains: it skips what nobody here subscribes to.
      */
-    public static function leave(string $topic): void
+    public static function leave(string $topic, Inbox $inbox): void
     {
         // Gone already when the drain ended it
-        if (!isset(self::$counts[$topic]) || --self::$counts[$topic] > 0) {
-            return;
+        unset(self::$inboxes[$topic][\spl_object_id($inbox)]);
+        if ([] === (self::$inboxes[$topic] ?? null)) {
+            unset(self::$inboxes[$topic]);
         }
-        $writer = self::$writers[$topic];
-        unset(self::$subscribers[$topic], self::$writers[$topic], self::$counts[$topic]);
-        $writer->close();
     }
 
     /**
@@ -197,10 +182,12 @@ final class Topics
     {
         self::$draining = self::$closed = true;
         self::$stopping = $reason;
-        foreach (self::$writers as $writer) {
-            $writer->close();
+        foreach (self::$inboxes as $inboxes) {
+            foreach ($inboxes as $inbox) {
+                $inbox->close();
+            }
         }
-        self::$subscribers = self::$writers = self::$counts = [];
+        self::$inboxes = [];
         SharedLog::stop();
         Shutdown::fire();
     }
@@ -208,6 +195,6 @@ final class Topics
     /** @return string[] the topics with subscribers in this process */
     public static function active(): array
     {
-        return \array_keys(self::$counts);
+        return \array_keys(self::$inboxes);
     }
 }
