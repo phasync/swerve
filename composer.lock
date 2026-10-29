@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9bd38eb23038b848493d483dfbbf7314",
+    "content-hash": "8494e3cc56cfdcd6617b073625514bd9",
     "packages": [
         {
             "name": "fiber-interop/scope",
@@ -66,20 +66,20 @@
         },
         {
             "name": "phasync/net",
-            "version": "2.0.0",
+            "version": "2.0.2-RC1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/net.git",
-                "reference": "c54b4afd19c12c9d98e13e0a1f3d0f68fc87bfa0"
+                "reference": "dde8a5ed543606916e5977603c2da03572d8e180"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/net/zipball/c54b4afd19c12c9d98e13e0a1f3d0f68fc87bfa0",
-                "reference": "c54b4afd19c12c9d98e13e0a1f3d0f68fc87bfa0",
+                "url": "https://api.github.com/repos/phasync/net/zipball/dde8a5ed543606916e5977603c2da03572d8e180",
+                "reference": "dde8a5ed543606916e5977603c2da03572d8e180",
                 "shasum": ""
             },
             "require": {
-                "phasync/phasync": "^2.0@alpha",
+                "phasync/phasync": "^2.0",
                 "php": "^8.2"
             },
             "require-dev": {
@@ -108,22 +108,22 @@
             "description": "TCP, UDP and Unix socket networking for PHP using phasync coroutines.",
             "support": {
                 "issues": "https://github.com/phasync/net/issues",
-                "source": "https://github.com/phasync/net/tree/2.0.0"
+                "source": "https://github.com/phasync/net/tree/2.0.2-RC1"
             },
-            "time": "2026-10-19T16:28:44+00:00"
+            "time": "2026-10-29T12:12:18+00:00"
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.6",
+            "version": "2.0.7-RC1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "1e081915ac94e83b3af9f22c1b6dab6560209571"
+                "reference": "0c8ea12b76fba995e17a3df0fa6513acd7119a2c"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/1e081915ac94e83b3af9f22c1b6dab6560209571",
-                "reference": "1e081915ac94e83b3af9f22c1b6dab6560209571",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/0c8ea12b76fba995e17a3df0fa6513acd7119a2c",
+                "reference": "0c8ea12b76fba995e17a3df0fa6513acd7119a2c",
                 "shasum": ""
             },
             "require": {
@@ -182,9 +182,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.6"
+                "source": "https://github.com/phasync/phasync/tree/2.0.7-RC1"
             },
-            "time": "2026-10-28T13:21:22+00:00"
+            "time": "2026-10-29T12:17:32+00:00"
         },
         {
             "name": "phasync/serializor",
@@ -243,6 +243,59 @@
                 "source": "https://github.com/phasync/serializor/tree/v2.1.2"
             },
             "time": "2026-10-26T22:39:29+00:00"
+        },
+        {
+            "name": "psr/container",
+            "version": "2.0.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/php-fig/container.git",
+                "reference": "c71ecc56dfe541dbd90c5360474fbc405f8d5963"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/php-fig/container/zipball/c71ecc56dfe541dbd90c5360474fbc405f8d5963",
+                "reference": "c71ecc56dfe541dbd90c5360474fbc405f8d5963",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.4.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "2.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Psr\\Container\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "PHP-FIG",
+                    "homepage": "https://www.php-fig.org/"
+                }
+            ],
+            "description": "Common Container Interface (PHP FIG PSR-11)",
+            "homepage": "https://github.com/php-fig/container",
+            "keywords": [
+                "PSR-11",
+                "container",
+                "container-interface",
+                "container-interop",
+                "psr"
+            ],
+            "support": {
+                "issues": "https://github.com/php-fig/container/issues",
+                "source": "https://github.com/php-fig/container/tree/2.0.2"
+            },
+            "time": "2021-11-05T16:47:00+00:00"
         },
         {
             "name": "psr/http-factory",
@@ -2703,59 +2756,6 @@
                 }
             ],
             "time": "2026-07-06T14:52:39+00:00"
-        },
-        {
-            "name": "psr/container",
-            "version": "2.0.2",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/php-fig/container.git",
-                "reference": "c71ecc56dfe541dbd90c5360474fbc405f8d5963"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/php-fig/container/zipball/c71ecc56dfe541dbd90c5360474fbc405f8d5963",
-                "reference": "c71ecc56dfe541dbd90c5360474fbc405f8d5963",
-                "shasum": ""
-            },
-            "require": {
-                "php": ">=7.4.0"
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "2.0.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Psr\\Container\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "PHP-FIG",
-                    "homepage": "https://www.php-fig.org/"
-                }
-            ],
-            "description": "Common Container Interface (PHP FIG PSR-11)",
-            "homepage": "https://github.com/php-fig/container",
-            "keywords": [
-                "PSR-11",
-                "container",
-                "container-interface",
-                "container-interop",
-                "psr"
-            ],
-            "support": {
-                "issues": "https://github.com/php-fig/container/issues",
-                "source": "https://github.com/php-fig/container/tree/2.0.2"
-            },
-            "time": "2021-11-05T16:47:00+00:00"
         },
         {
             "name": "psr/event-dispatcher",
@@ -5979,7 +5979,7 @@
         }
     ],
     "aliases": [],
-    "minimum-stability": "stable",
+    "minimum-stability": "RC",
     "stability-flags": {
         "friendsofphp/php-cs-fixer": 20
     },

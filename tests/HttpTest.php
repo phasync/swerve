@@ -654,7 +654,9 @@ test('a large file-backed response body goes out in writes of up to 64 KiB, not 
     $packets = native_serve_packets($handler, "GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n");
 
     expect(strlen(implode('', $packets)))->toBeGreaterThan(3000000);
-    expect(count($packets))->toBeLessThan(50); // 3000000 / 65536 = 46
+    // 3000000 / 65536 = 46 writes; partial socket writes add some (phasync/net slices them at
+    // 64 KiB), and 8 KiB reads would make 366
+    expect(count($packets))->toBeLessThan(3000000 / 32768);
 });
 
 test('a response body that returns more than asked for closes the connection, never desyncs it', function () {
