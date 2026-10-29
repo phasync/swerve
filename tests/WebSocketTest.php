@@ -194,6 +194,88 @@ test('a client breaking the protocol is closed with 1002, 1007 or 1009', functio
     ws_clean($log);
 })->with('modes');
 
+/** A message compressed as a client compresses it (RFC 7692): raw deflate, the sync flush's end taken off. */
+function ws_deflate(string $data): string
+{
+    return substr(deflate_add(deflate_init(ZLIB_ENCODING_RAW), $data, ZLIB_SYNC_FLUSH), 0, -4);
+}
+
+function ws_inflate(string $data): string
+{
+    return inflate_add(inflate_init(ZLIB_ENCODING_RAW), $data . "\x00\x00\xff\xff", ZLIB_SYNC_FLUSH);
+}
+
+/** A WebSocket with permessage-deflate agreed. */
+function ws_connect_deflate(string $addr, string $path = '/websocket')
+{
+    [$conn, $head] = ws_handshake($addr, $path, ['Sec-WebSocket-Extensions' => 'permessage-deflate; client_max_window_bits']);
+    expect($head['status'])->toBe(101);
+    expect($head['headers']['sec-websocket-extensions'])->toBe('permessage-deflate; client_no_context_takeover');
+
+    return $conn;
+}
+
+test('permessage-deflate: compressed messages are inflated, long replies are compressed, short ones and control frames are not', function (array $mode) {
+    [$process, $addr, $log] = ws_start($mode);
+    try {
+        $conn = ws_connect_deflate($addr);
+        $text = str_repeat('compress me ', 100);
+        ws_raw($conn, 0xC1, ws_deflate($text));             // text, RSV1: compressed
+        $frame = ws_frame($conn);
+        expect([$frame['rsv'], $frame['op'], ws_inflate($frame['payload'])])->toBe([4, 1, $text]);
+        ws_raw($conn, 0x81, 'short');                        // uncompressed messages go on as well
+        expect(ws_frame($conn))->toMatchArray(['rsv' => 0, 'op' => 1, 'payload' => 'short']);
+        // Fragmented: RSV1 on the first frame only
+        $deflated = ws_deflate($text);
+        ws_raw($conn, 0x42, substr($deflated, 0, 10));
+        ws_raw($conn, 0x80, substr($deflated, 10));
+        $frame = ws_frame($conn);
+        expect([$frame['rsv'], $frame['op'], ws_inflate($frame['payload'])])->toBe([4, 2, $text]);
+        ws_send($conn, 9, 'ping');
+        expect(ws_frame($conn))->toMatchArray(['rsv' => 0, 'op' => 10, 'payload' => 'ping']);
+        fclose($conn);
+
+        // Without the offer, RSV1 is still a protocol error
+        $conn = ws_connect($addr, '/websocket');
+        ws_raw($conn, 0xC1, ws_deflate($text));
+        expect(ws_read($conn))->toBe([8, pack('n', 1002)]);
+        fclose($conn);
+    } finally {
+        native_stop($process);
+    }
+    ws_clean($log);
+})->with('modes');
+
+test('permessage-deflate: RSV1 where it may not be, data that is no deflate, and a message that inflates past the limit close the connection', function (array $mode) {
+    [$process, $addr, $log] = ws_start($mode);
+    $cases = [
+        'RSV1 on a continuation'       => ['/websocket', function ($c) {
+            ws_raw($c, 0x01, 'a');
+            ws_raw($c, 0xC0, ws_deflate('b'));
+        }, 1002],
+        'RSV1 on a ping'               => ['/websocket', fn ($c) => ws_raw($c, 0xC9, ws_deflate('p')), 1002],
+        'no deflate data'              => ['/websocket', fn ($c) => ws_raw($c, 0xC1, "\xFF\xFF\xFF\xFF"), 1007],
+        'a small message, inflating past maxMessage' => ['/websocket-limit', fn ($c) => ws_raw($c, 0xC2, ws_deflate(str_repeat("\0", 1_000_001))), 1009],
+        'past the default 1 MiB'       => ['/websocket', fn ($c) => ws_raw($c, 0xC2, ws_deflate(str_repeat("\0", (1 << 20) + 1))), 1009],
+    ];
+    try {
+        foreach ($cases as $name => [$path, $send, $code]) {
+            $conn = ws_connect_deflate($addr, $path);
+            $send($conn);
+            expect(ws_read($conn))->toBe([8, pack('n', $code)], $name);
+            fclose($conn);
+        }
+        // At the limit it goes through
+        $conn = ws_connect_deflate($addr, '/websocket-limit');
+        ws_raw($conn, 0xC2, ws_deflate(str_repeat("\0", 1000)));
+        expect(ws_read($conn))->toBe([1, '1000 bytes']);
+        fclose($conn);
+    } finally {
+        native_stop($process);
+    }
+    ws_clean($log);
+})->with('modes');
+
 test('a message above the limit given to serve() closes with 1009, one at the limit goes through', function (array $mode) {
     [$process, $addr, $log] = ws_start($mode);
     try {
@@ -251,7 +333,7 @@ test('handshake: what is accepted, what is answered 400 (naming version 13) and 
                     expect($head['headers']['sec-websocket-accept'])->toBe(base64_encode(sha1($sent . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true)), $name);
                     expect($head['headers']['upgrade'])->toBe('websocket', $name);
                     expect(strtolower($head['headers']['connection']))->toBe('upgrade', $name);
-                    expect($head['headers'])->not->toHaveKey('sec-websocket-extensions');
+                    expect($head['headers']['sec-websocket-extensions'] ?? null)->toBe(isset($headers['Sec-WebSocket-Extensions']) ? 'permessage-deflate; client_no_context_takeover' : null, $name);
                     expect($head['headers'])->not->toHaveKey('sec-websocket-protocol');
                 } elseif (400 === $status) {
                     expect($head['headers']['sec-websocket-version'] ?? null)->toBe('13', "$path $name");
@@ -572,6 +654,35 @@ test('quiet connections are pinged every ping interval, by one coroutine for all
         expect(ws_read($b))->toBe([9, '']);
         ws_send($c, 1, 'still here');
         expect([ws_read($c), ws_read($c)])->toContain([1, 'still here']); // a ping may come before the echo
+    } finally {
+        native_stop($process);
+    }
+    ws_clean($log);
+})->with('modes');
+
+test('a client that sends nothing for two ping intervals, not even a pong, is given up: $onClose sees 1006', function (array $mode) {
+    [$process, $addr, $log] = ws_start($mode, env: ['SWERVE_TEST_PING' => '0.3']);
+    try {
+        $silent  = ws_connect($addr, '/websocket-events');
+        $start   = microtime(true);
+        $frames  = [];
+        while (microtime(true) - $start < 3 && null !== ($frame = ws_read($silent))) {
+            $frames[] = $frame;
+        }
+        $seconds = microtime(true) - $start;
+        // Pinged, then cut once nothing came back for two intervals: no close frame, the peer is gone
+        expect($frames)->toContain([9, ''])->not->toContain([8, pack('n', 1001)]);
+        expect($seconds)->toBeGreaterThan(0.5)->toBeLessThan(1.5);
+        expect(ws_closes($addr, 1))->toBe([[1006, '']]);
+        // A client that answers the pings stays
+        $talking = ws_connect($addr, '/websocket');
+        $until = microtime(true) + 1.2;
+        while (microtime(true) < $until) {
+            expect(ws_read($talking))->toBe([9, '']);
+            ws_send($talking, 10, '');
+        }
+        ws_send($talking, 1, 'still here');
+        expect([ws_read($talking), ws_read($talking)])->toContain([1, 'still here']);
     } finally {
         native_stop($process);
     }

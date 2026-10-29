@@ -36,7 +36,8 @@ use phasync\Util\Event;
  * closes it early. The connection is read all the time, also when the callback only sends: pings
  * are answered, and when the client leaves the callback is cancelled, so the loop above ends with
  * its client. The server pings every connection every {@see WebSocket::$pingInterval} seconds, from
- * one coroutine for all of them, so proxies don't close a quiet one.
+ * one coroutine for all of them, so proxies don't close a quiet one; a client silent for two
+ * intervals, not even answering, is given up. permessage-deflate is agreed when the client offers it.
  *
  * A message goes to the `$onMessage` listeners, one at a time, in the order it arrived: a slow
  * listener holds back the reading. The pull style is the alternative, and the two don't mix:
@@ -78,6 +79,12 @@ final class WebSocket implements \IteratorAggregate
 
     /** Seconds the close frame waits for a client that doesn't read. */
     public const CLOSE_TIMEOUT = 5.0;
+
+    /** Messages sent shorter than this go uncompressed, also once permessage-deflate is agreed. */
+    public const DEFLATE_FROM = 256;
+
+    /** Bytes of a compressed message inflated at a time: deflate inflates at most ~1032x, so a step stays near 1 MiB. */
+    private const INFLATE_STEP = 1024;
 
     /**
      * Seconds between the pings the server sends to every open connection (a process-wide setting).
@@ -146,14 +153,21 @@ final class WebSocket implements \IteratorAggregate
     /** @var list<array{0: string, 1: bool}> */
     private array $inbox = [];
 
+    /** When the client's bytes came last (hrtime()): the ping loop gives up a client silent for two intervals. */
+    private int $heard;
+
     /** The pump saw the connection end: receive() returns null once the inbox is empty. */
     private bool $readerDone = false;
 
-    private function __construct(private readonly Duplex $connection, ?string $subprotocol, private readonly int $maxMessage)
+    /**
+     * @param ?int $deflate permessage-deflate was agreed: the window bits its compression may use; null: not
+     */
+    private function __construct(private readonly Duplex $connection, ?string $subprotocol, private readonly int $maxMessage, private readonly ?int $deflate = null)
     {
         $this->subprotocol = $subprotocol;
         $this->onMessage   = new Event();
         $this->onClose     = new Event();
+        $this->heard       = \hrtime(true);
     }
 
     /**
@@ -181,7 +195,7 @@ final class WebSocket implements \IteratorAggregate
     public static function from(ClientRequest $request, callable $callback, array $subprotocols = [], ?array $origins = null, int $maxMessage = self::MAX_MESSAGE): void
     {
         if (null !== $handshake = self::answer($request, $subprotocols, $origins)) {
-            self::run($request, $callback, $handshake->subprotocol, $maxMessage);
+            self::run($request, $callback, $handshake->subprotocol, $maxMessage, $handshake->headers['sec-websocket-extensions'] ?? null);
         }
     }
 
@@ -211,7 +225,9 @@ final class WebSocket implements \IteratorAggregate
      * a key of 16 bytes (base64), and no body. Otherwise the response is 426 (not a WebSocket
      * request at all: `Upgrade` or `Connection` is missing), 400 (a WebSocket request that is not
      * valid, naming version 13) or 403 (an `Origin` that `$origins` does not allow), and null is returned.
-     * The handler returns then. No extension (permessage-deflate) is accepted.
+     * The handler returns then. permessage-deflate (RFC 7692) is agreed when the client offers it,
+     * without context takeover: each message is compressed on its own, so an idle connection holds
+     * no compression state.
      *
      * The caller reads with {@see WebSocket::receive()} and must call {@see WebSocket::end()} when done:
      * the close frame is written by end(), before the handler returns. `$onMessage` is not called.
@@ -245,7 +261,7 @@ final class WebSocket implements \IteratorAggregate
         }
         $request->sendResponseHeaders(101, $handshake->headers);
 
-        return self::open($request, self::subprotocolOf($handshake->headers), $maxMessage);
+        return self::open($request, self::subprotocolOf($handshake->headers), $maxMessage, $handshake->headers['sec-websocket-extensions'] ?? null);
     }
 
     /**
@@ -302,11 +318,73 @@ final class WebSocket implements \IteratorAggregate
             }
         }
 
+        $deflate = self::deflateOffer($headers['sec-websocket-extensions'] ?? []);
+
         return new WebSocketHandshake(101, [
             'upgrade'              => 'websocket',
             'connection'           => 'Upgrade',
             'sec-websocket-accept' => \base64_encode(\sha1($key . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true)),
-        ] + (null === $subprotocol ? [] : ['sec-websocket-protocol' => $subprotocol]), '', $subprotocol);
+        ] + (null === $subprotocol ? [] : ['sec-websocket-protocol' => $subprotocol])
+          + (null === $deflate ? [] : ['sec-websocket-extensions' => $deflate]), '', $subprotocol);
+    }
+
+    /**
+     * The answer to the first permessage-deflate offer this server can take, or null: one with
+     * only the parameters of RFC 7692, each once, with valid values. The client is told not to
+     * take over context (client_no_context_takeover), and the server never does, so each message
+     * inflates and deflates with a context of its own. An offer of server_max_window_bits=8 is
+     * declined: zlib's raw deflate can't keep to a window of 256 bytes.
+     *
+     * @param list<string> $lines the Sec-WebSocket-Extensions lines of the request
+     */
+    private static function deflateOffer(array $lines): ?string
+    {
+        foreach (\explode(',', \implode(',', $lines)) as $offer) {
+            $parts = \array_map('trim', \explode(';', $offer));
+            if ('permessage-deflate' !== \strtolower(\array_shift($parts))) {
+                continue;
+            }
+            $params = [];
+            foreach ($parts as $part) {
+                [$name, $value] = \array_map('trim', \explode('=', $part, 2)) + [1 => null];
+                $name           = \strtolower($name);
+                $value          = null === $value ? null : \trim($value, '"');
+                $valid          = match ($name) {
+                    'server_no_context_takeover', 'client_no_context_takeover' => null === $value,
+                    'server_max_window_bits' => null !== $value && \preg_match('/^(9|1[0-5])$/', $value),
+                    'client_max_window_bits' => null === $value || \preg_match('/^([89]|1[0-5])$/', $value),
+                    default                  => false,
+                };
+                if (!$valid || \array_key_exists($name, $params)) {
+                    continue 2;
+                }
+                $params[$name] = $value;
+            }
+            $answer = 'permessage-deflate; client_no_context_takeover';
+            if (\array_key_exists('server_no_context_takeover', $params)) {
+                $answer .= '; server_no_context_takeover';
+            }
+            if (isset($params['server_max_window_bits'])) {
+                $answer .= '; server_max_window_bits=' . $params['server_max_window_bits'];
+            }
+
+            return $answer;
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether a 101's Sec-WebSocket-Extensions agreed permessage-deflate: the window bits the
+     * server's compression may use, or null. Only this server's own answers are understood.
+     */
+    private static function deflateOf(?string $extensions): ?int
+    {
+        if (null === $extensions || !\str_starts_with($extensions, 'permessage-deflate')) {
+            return null;
+        }
+
+        return \preg_match('/server_max_window_bits=(\d+)/', $extensions, $m) ? (int) $m[1] : 15;
     }
 
     /**
@@ -326,7 +404,7 @@ final class WebSocket implements \IteratorAggregate
     public static function upgrade(ClientRequest $request, array $headers, callable $callback, int $maxMessage = self::MAX_MESSAGE): void
     {
         $request->sendResponseHeaders(101, $headers);
-        self::run($request, $callback, self::subprotocolOf($headers), $maxMessage);
+        self::run($request, $callback, self::subprotocolOf($headers), $maxMessage, \array_change_key_case($headers)['sec-websocket-extensions'] ?? null);
     }
 
     /**
@@ -337,12 +415,13 @@ final class WebSocket implements \IteratorAggregate
      *
      * @param callable(WebSocket): void $callback
      * @param int                       $maxMessage see upgrade()
+     * @param string|null               $extensions the `sec-websocket-extensions` of the `101` sent, as {@see WebSocket::handshake()} decided it
      *
      * @example examples/WebSocket.run/1-own-101.php After a 101 of your own
      */
-    public static function run(Duplex $connection, callable $callback, ?string $subprotocol = null, int $maxMessage = self::MAX_MESSAGE): void
+    public static function run(Duplex $connection, callable $callback, ?string $subprotocol = null, int $maxMessage = self::MAX_MESSAGE, ?string $extensions = null): void
     {
-        self::open($connection, $subprotocol, $maxMessage)->pump($callback(...));
+        self::open($connection, $subprotocol, $maxMessage, $extensions)->pump($callback(...));
     }
 
     /** The decision for the request of an exchange. */
@@ -360,9 +439,9 @@ final class WebSocket implements \IteratorAggregate
     }
 
     /** Register the connection and start the ping loop; the `101` is already on its way. */
-    private static function open(Duplex $connection, ?string $subprotocol, int $maxMessage): self
+    private static function open(Duplex $connection, ?string $subprotocol, int $maxMessage, ?string $extensions): self
     {
-        $ws = new self($connection, $subprotocol, $maxMessage);
+        $ws = new self($connection, $subprotocol, $maxMessage, self::deflateOf($extensions));
         self::$open[\spl_object_id($ws)] = \WeakReference::create($ws);
         self::keepAlive();
 
@@ -626,8 +705,9 @@ final class WebSocket implements \IteratorAggregate
      */
     private function readMessage(): ?array
     {
-        $message = null; // a fragmented message in progress
-        $text    = false;
+        $message    = null; // a fragmented message in progress
+        $text       = false;
+        $compressed = false;
         while (!$this->ended) {
             try {
                 $head   = $this->need(2);
@@ -640,8 +720,11 @@ final class WebSocket implements \IteratorAggregate
                     $length = \unpack('J', $this->need(8))[1];
                 }
                 $control = $opcode >= 8;
+                // RSV1 marks a compressed message, on its first frame, once permessage-deflate was agreed
+                $rsv1 = (\ord($head[0]) & 0x40) !== 0;
                 if (
-                    (\ord($head[0]) & 0x70)                                     // reserved bits, no extension agreed
+                    (\ord($head[0]) & 0x30)                                     // reserved bits no extension uses
+                    || ($rsv1 && (null === $this->deflate || $control || 0 === $opcode))
                     || !(\ord($head[1]) & 0x80)                                 // clients must mask
                     || $length < 0                                              // a 64-bit length has its top bit clear
                     || ($control ? !$fin || $length > 125 || $opcode > 10       // control frames: whole and short
@@ -686,10 +769,14 @@ final class WebSocket implements \IteratorAggregate
                 $this->frame(10, $payload);
             } elseif (10 !== $opcode) {
                 if (0 !== $opcode) {
-                    $text = 1 === $opcode;
+                    $text       = 1 === $opcode;
+                    $compressed = $rsv1;
                 }
                 $message = ($message ?? '') . $payload;
                 if ($fin) {
+                    if ($compressed && null === ($message = $this->inflate($message))) {
+                        return null; // closed: too large, or not deflate
+                    }
                     if ($text && !\preg_match('//u', $message)) {
                         $this->end(1007); // text must be UTF-8
 
@@ -725,6 +812,7 @@ final class WebSocket implements \IteratorAggregate
                 throw new \UnderflowException("The client's side ended");
             }
             $this->buffer .= $bytes;
+            $this->heard = \hrtime(true);
         }
         $bytes        = \substr($this->buffer, 0, $n);
         $this->buffer = \substr($this->buffer, $n);
@@ -747,17 +835,54 @@ final class WebSocket implements \IteratorAggregate
         return ($code >= 1000 && $code <= 1003) || ($code >= 1007 && $code <= 1014) || ($code >= 3000 && $code <= 4999);
     }
 
-    /** The head of a frame that is final and not masked. */
-    private static function head(int $opcode, int $length): string
+    /**
+     * A compressed message, inflated with a context of its own (client_no_context_takeover), in
+     * steps so that a small message that inflates past $maxMessage closes with 1009 before it is
+     * all in memory; one that is no deflate data closes with 1007. Null once closed.
+     */
+    private function inflate(string $data): ?string
     {
-        return \chr(0x80 | $opcode) . ($length < 126 ? \chr($length) : ($length < 65536 ? \chr(126) . \pack('n', $length) : \chr(127) . \pack('J', $length)));
+        $context = \inflate_init(\ZLIB_ENCODING_RAW);
+        $data .= "\x00\x00\xff\xff"; // the end the sender took off (RFC 7692, 7.2.2)
+        $out = '';
+        for ($at = 0, $n = \strlen($data); $at < $n; $at += self::INFLATE_STEP) {
+            $piece = @\inflate_add($context, \substr($data, $at, self::INFLATE_STEP), \ZLIB_SYNC_FLUSH);
+            if (false === $piece) {
+                \error_clear_last();
+                $this->end(1007);
+
+                return null;
+            }
+            $out .= $piece;
+            if (\strlen($out) > $this->maxMessage) {
+                $this->end(1009);
+
+                return null;
+            }
+        }
+
+        return $out;
+    }
+
+    /** The head of a frame that is final and not masked; $rsv1 marks a compressed message. */
+    private static function head(int $opcode, int $length, bool $rsv1 = false): string
+    {
+        return \chr(0x80 | ($rsv1 ? 0x40 : 0) | $opcode) . ($length < 126 ? \chr($length) : ($length < 65536 ? \chr(126) . \pack('n', $length) : \chr(127) . \pack('J', $length)));
     }
 
     private function frame(int $opcode, string $payload): void
     {
-        if (!$this->ended && !$this->dead) {
-            $this->put(self::head($opcode, \strlen($payload)) . $payload, self::WRITE_TIMEOUT);
+        if ($this->ended || $this->dead) {
+            return;
         }
+        if (null !== $this->deflate && $opcode < 8 && \strlen($payload) >= self::DEFLATE_FROM) {
+            // A context of its own (no context takeover), and the sync flush's end taken off (RFC 7692, 7.2.1)
+            $deflated = \substr(\deflate_add(\deflate_init(\ZLIB_ENCODING_RAW, ['window' => $this->deflate]), $payload, \ZLIB_SYNC_FLUSH), 0, -4);
+            $this->put(self::head($opcode, \strlen($deflated), true) . $deflated, self::WRITE_TIMEOUT);
+
+            return;
+        }
+        $this->put(self::head($opcode, \strlen($payload)) . $payload, self::WRITE_TIMEOUT);
     }
 
     /** Write whole frames; a client that is gone, or that doesn't read, is given up. */
@@ -796,6 +921,16 @@ final class WebSocket implements \IteratorAggregate
                             $ws = $reference->get();
                             if (null === $ws) {
                                 unset(self::$open[$id]); // dropped without end()
+
+                                continue;
+                            }
+                            if (\hrtime(true) - $ws->heard > 2 * self::$pingInterval * 1e9) {
+                                // Not even a pong for two intervals: the peer is gone without a word
+                                // (half-open), and no close frame would reach it
+                                $ws->note(1006, '');
+                                $ws->dead = true;
+                                $ws->end(1001);
+                                $ws->connection->close();
 
                                 continue;
                             }

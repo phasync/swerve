@@ -121,9 +121,23 @@ test('subprotocols: the first of the server\'s list that the client offered, sen
     expect(WebSocket::handshake('GET', '1.1', hs_headers(['sec-websocket-protocol' => 'V1.CHAT']), false, ['v1.chat'])->subprotocol)->toBeNull(); // case-sensitive, as the protocol says
 });
 
-test('the extensions the client offers are ignored', function () {
-    $h = WebSocket::handshake('GET', '1.1', hs_headers(['sec-websocket-extensions' => 'permessage-deflate']), false);
+test('permessage-deflate: the first offer that can be kept is answered, without context takeover by the client', function (string|array|null $offer, ?string $answer) {
+    $h = WebSocket::handshake('GET', '1.1', hs_headers(['sec-websocket-extensions' => $offer]), false);
 
-    expect($h->accepted())->toBeTrue();
-    expect($h->headers)->not->toHaveKey('sec-websocket-extensions');
-});
+    expect($h->headers['sec-websocket-extensions'] ?? null)->toBe($answer);
+})->with([
+    'none'                                  => [null, null],
+    'plain'                                 => ['permessage-deflate', 'permessage-deflate; client_no_context_takeover'],
+    'what browsers send'                    => ['permessage-deflate; client_max_window_bits', 'permessage-deflate; client_no_context_takeover'],
+    'any case, spaces'                      => ['Permessage-Deflate ;Client_Max_Window_Bits = 10', 'permessage-deflate; client_no_context_takeover'],
+    'server_no_context_takeover is echoed'  => ['permessage-deflate; server_no_context_takeover', 'permessage-deflate; client_no_context_takeover; server_no_context_takeover'],
+    'server_max_window_bits is kept to'     => ['permessage-deflate; server_max_window_bits=10', 'permessage-deflate; client_no_context_takeover; server_max_window_bits=10'],
+    'a quoted value'                        => ['permessage-deflate; server_max_window_bits="12"', 'permessage-deflate; client_no_context_takeover; server_max_window_bits=12'],
+    'a window of 8 declined, the next taken'=> ['permessage-deflate; server_max_window_bits=8, permessage-deflate', 'permessage-deflate; client_no_context_takeover'],
+    'an unknown parameter'                  => ['permessage-deflate; x=1', null],
+    'a parameter twice'                     => ['permessage-deflate; client_max_window_bits; client_max_window_bits', null],
+    'a value where none goes'               => ['permessage-deflate; client_no_context_takeover=1', null],
+    'a window out of range'                 => ['permessage-deflate; client_max_window_bits=16', null],
+    'another extension first'               => ['x-webkit-deflate-frame, permessage-deflate', 'permessage-deflate; client_no_context_takeover'],
+    'on several lines'                      => [['foo', 'permessage-deflate'], 'permessage-deflate; client_no_context_takeover'],
+]);

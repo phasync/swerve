@@ -441,7 +441,7 @@ final class Swerve
             if (LotClient::get()->shortLived()) {
                 // It moves to a WebSocket worker as the request ends, with the request's state:
                 // serialized now, so a closure that can't go fails here
-                $moving = [$upgrade, SapiRequest::state()];
+                $moving = [$upgrade, SapiRequest::state(), $handshake->headers['sec-websocket-extensions'] ?? null];
                 try {
                     $closure = (new Codec())->serialize($moving);
                 } catch (\Throwable $e) {

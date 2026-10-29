@@ -79,8 +79,10 @@ serves the next request.
   let through: the list protects browsers' cross-site connections, not the server from other programs.
 - `subprotocols` is your list in your order of preference; the first one the client offered is chosen and sent back
   as `Sec-WebSocket-Protocol`, exposed as `$ws->subprotocol`. None in common: none is sent, and the connection opens.
-- Extensions are never accepted (no permessage-deflate): `Sec-WebSocket-Extensions` is ignored, so frames never
-  carry reserved bits.
+- permessage-deflate (RFC 7692) is agreed when the client offers it, as browsers do: the `101` answers
+  `permessage-deflate; client_no_context_takeover`. Each message is compressed on its own, in both directions,
+  so an idle connection holds no compression state. Messages sent shorter than `WebSocket::DEFLATE_FROM`
+  (256 bytes) go uncompressed. No other extension is accepted.
 
 ### For adapters
 
@@ -92,7 +94,7 @@ example reads alike. The framework's request is not a `ClientRequest`, so the ad
 |---|---|
 | `WebSocket::handshake($method, $version, $headers, $hasBody, $subprotocols = [], $origins = null)` | the decision, from the parts of any request (`$headers` as `getRequestHeaders()` gives them: lowercase name => list); answers nothing and returns a `WebSocketHandshake` |
 | `WebSocket::upgrade($request, $headers, $callback, $maxMessage = 1 MiB)` | sends the `101` with `$headers` exactly as given on a `ClientRequest`, then runs the callback as `from()` does; no second validation |
-| `WebSocket::run($connection, $callback, $subprotocol = null, $maxMessage = 1 MiB)` | the callback on a connection whose `101` was already sent, by the adapter's own code: any `Duplex`, not only a `ClientRequest` |
+| `WebSocket::run($connection, $callback, $subprotocol = null, $maxMessage = 1 MiB, $extensions = null)` | the callback on a connection whose `101` was already sent, by the adapter's own code: any `Duplex`, not only a `ClientRequest` |
 
 A `WebSocketHandshake` has `status`, `headers`, `body`, `subprotocol` and `accepted()`. Refused (426, 400, 403),
 `status`, `headers` and `body` are the whole final response, as swerve answers it: the adapter returns it as the
@@ -103,7 +105,8 @@ followed by `run()`, for an adapter that hands swerve a `ClientRequest` directly
 the `101` itself (swerve-psr15, so that the response's body is the outbound frames a middleware can wrap) calls
 `run()` on a `Duplex` of its own instead, once it decides to start the callback; `WebSocket` only ever calls
 `read()`, `write()`, `end()` and `close()` on it. The subprotocol is not read back from the headers in that
-case, so the adapter passes the one it chose as `$subprotocol`. Applications call `from()`, not these.
+case, so the adapter passes the one it chose as `$subprotocol`, and the `101`'s `sec-websocket-extensions` as
+`$extensions`. Applications call `from()`, not these.
 
 ### States
 
@@ -127,9 +130,9 @@ code), the code given to `end()`, or a protocol code from the table below.
 |---|---|---|
 | 1000 | the callback returned; `end()`; the client sent an empty close frame, or 1000 | what the client sent, or 1005 for none |
 | 1001 | the client's connection ended without a close frame, or swerve drains (shutdown, reload) | 1006 |
-| 1002 | protocol error: a frame not masked; a reserved bit or opcode; a control frame fragmented or over 125 bytes; a continuation of nothing, or a new message inside one; a length with the top bit set; a close frame of one byte; a close code that may not be sent | 1002 |
-| 1007 | text, or a close reason, that is not UTF-8 (checked on the whole message, so a character may be split across fragments) | 1007 |
-| 1009 | a message over `maxMessage`, also as the sum of its fragments (the length is checked before the payload is read) | 1009 |
+| 1002 | protocol error: a frame not masked; a reserved bit or opcode (RSV1 only on the first frame of a data message, once permessage-deflate is agreed); a control frame fragmented or over 125 bytes; a continuation of nothing, or a new message inside one; a length with the top bit set; a close frame of one byte; a close code that may not be sent | 1002 |
+| 1007 | text, or a close reason, that is not UTF-8, or a compressed message that is no deflate data (checked on the whole message, so a character may be split across fragments) | 1007 |
+| 1009 | a message over `maxMessage`, also as the sum of its fragments (the length is checked before the payload is read), or as it inflates (checked as it inflates, in steps) | 1009 |
 | 1011 | the callback or an `$onMessage` listener threw | 1011 |
 
 A close code from the client is echoed when it is 1000-1003, 1007-1014 or 3000-4999; any other (0-999, 1004,
@@ -180,8 +183,9 @@ wire. `send()` throws `ValueError` for text that is not UTF-8; use `sendBinary()
 
 The server pings every open connection every `WebSocket::$pingInterval` seconds (15), with an empty ping, from one
 coroutine for all connections in the worker, started with the first connection and ended with the last. A ping is
-skipped for a client whose socket buffer is full: it is not reading anyway, and its own `send()` times out. Pongs
-are not required.
+skipped for a client whose socket buffer is full: it is not reading anyway, and its own `send()` times out. A
+client that sends nothing for two intervals, not even a pong, is gone without a word (a half-open connection):
+the connection is closed without a close frame, and `$onClose` gets 1006.
 
 ### Limits and settings
 
@@ -194,6 +198,8 @@ are not required.
 | `send()` wait for a client that does not read | 30 s | `WebSocket::WRITE_TIMEOUT` |
 | Close frame wait | 5 s | `WebSocket::CLOSE_TIMEOUT` |
 | Ping interval | 15 s | `WebSocket::$pingInterval`, set it once at start-up |
+| Silence before a client is given up | two ping intervals | `WebSocket::$pingInterval` |
+| Shortest message sent compressed | 256 bytes | `WebSocket::DEFLATE_FROM` |
 
 TLS is the proxy's: the connection swerve sees is `ws://` ([Production](production.md)).
 

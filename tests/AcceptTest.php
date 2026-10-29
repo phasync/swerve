@@ -211,6 +211,24 @@ it('serves a WebSocket on an upgraded request', function () {
     expect(ws_read($ws))->toBe([0x1, 'echo hi']);
 });
 
+it('agrees permessage-deflate for an upgrade closure, in place and moved to a WebSocket worker', function (string $script) {
+    [, $addr] = accept_start($script, 1);
+    $conn     = native_connect($addr);
+    fwrite($conn, "GET /ws HTTP/1.1\r\nHost: t\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " . base64_encode(random_bytes(16)) . "\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n\r\n");
+    $head = native_read_head($conn);
+    expect([$head['status'], $head['headers']['sec-websocket-extensions'] ?? null])->toBe([101, 'permessage-deflate; client_no_context_takeover']);
+    $text = str_repeat('deflated ', 50);
+    $mask = "\1\2\3\4";
+    $data = substr(deflate_add(deflate_init(ZLIB_ENCODING_RAW), $text, ZLIB_SYNC_FLUSH), 0, -4);
+    fwrite($conn, "\xC1" . chr(0x80 | strlen($data)) . $mask . ($data ^ substr(str_repeat($mask, intdiv(strlen($data), 4) + 1), 0, strlen($data))));
+    $b       = fread($conn, 2);
+    $length  = ord($b[1]) & 0x7F;
+    $length  = 126 === $length ? unpack('n', fread($conn, 2))[1] : $length;
+    $payload = stream_get_contents($conn, $length);
+    expect(ord($b[0]) & 0x40)->toBe(0x40);
+    expect(inflate_add(inflate_init(ZLIB_ENCODING_RAW), $payload . "\x00\x00\xff\xff", ZLIB_SYNC_FLUSH))->toContain(" $text"); // upgrade.php: "echo …", short-lived.php: "hello … from <pid>"
+})->with(['upgrade.php', 'short-lived.php']);
+
 it('runs an upgrade closure with the request\'s superglobals, session data and timezone, in place and moved to a WebSocket worker', function (string $script) {
     [, $addr] = accept_start($script, 1);
     $ws       = ws_connect($addr, '/ws-state?n=1');

@@ -66,16 +66,16 @@ final class WebSocketWorker
             if ('W' !== $bytes[0] || null === $conn) {
                 throw new \UnexpectedValueException("A worker sent '$bytes[0]' to the WebSocket worker");
             }
-            [$closure, $state] = $codec->unserialize(\substr($bytes, 1));
+            [$closure, $state, $extensions] = $codec->unserialize(\substr($bytes, 1));
             $stream  = \socket_export_stream($conn);
             \stream_set_blocking($stream, false);
             // In a Scope of its own, seeded with the request's state, and a frame of its own:
             // onScopeChange() hooks see it enter
-            phasync::go(static fn () => (new \Scope())->run(static fn () => phasync::run(static function () use ($stream, $closure, $state): void {
+            phasync::go(static fn () => (new \Scope())->run(static fn () => phasync::run(static function () use ($stream, $closure, $state, $extensions): void {
                 SapiRequest::seed($state);
                 $connection = new StreamDuplex($stream);
                 try {
-                    WebSocket::run($connection, $closure);
+                    WebSocket::run($connection, $closure, extensions: $extensions);
                 } catch (ShutdownException) {
                     // the worker stops: the WebSocket said goodbye
                 } catch (\Throwable $e) {
