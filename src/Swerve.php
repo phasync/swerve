@@ -44,12 +44,6 @@ final class Swerve
     /** accept() was called in this lifecycle (its shutdown function is registered). */
     private static bool $accepting = false;
 
-    /**
-     * The worker's own $_SERVER, which each request's starts from (a request's Scope starts empty),
-     * without the worker's argv and argc: PHP's request startup sets the request's.
-     */
-    private static array $server;
-
     private function __construct()
     {
     }
@@ -357,7 +351,6 @@ final class Swerve
         }
         if (!self::$accepting) {
             self::$accepting = true;
-            self::$server    = \array_diff_key($_SERVER, ['argv' => 0, 'argc' => 0]);
             \register_shutdown_function(static function () { HttpConnection::$exiting = true; });
             require_once __DIR__ . '/Util/finish_request.php';
         }
@@ -595,7 +588,12 @@ final class Swerve
         };
     }
 
-    /** @return array<string, mixed> $_SERVER for a request: the worker's own, and the request's; PHP adds REQUEST_TIME */
+    /**
+     * $_SERVER for a request, as php-fpm gives it by default (clear_env): the request's entries, not
+     * the worker's environment, which getenv() reads. PHP adds REQUEST_TIME.
+     *
+     * @return array<string, mixed>
+     */
     private static function serverVariables(ClientRequest $client, string $root, string $script, string $name, ?string $info): array
     {
         $target = $client->getTarget();
@@ -608,7 +606,7 @@ final class Swerve
             'SCRIPT_NAME'        => $name,
             'PHP_SELF'           => $name . $info,
             'DOCUMENT_ROOT'      => $root,
-        ] + self::$server;
+        ];
         if (null !== $info) {
             $server['PATH_INFO']       = $info;
             $server['PATH_TRANSLATED'] = $root . $info;

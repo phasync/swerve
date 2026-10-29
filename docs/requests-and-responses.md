@@ -21,8 +21,8 @@ As under php-fpm: `$_GET`, `$_POST`, `$_COOKIE`, `$_FILES`, `$_REQUEST`, `$_SERV
 are the request's own, and `php://input` is its body.
 
 - `$_SERVER` has what php-fpm gives a script (`REQUEST_METHOD`, `REQUEST_URI`, `QUERY_STRING`,
-  `SCRIPT_NAME`, `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `PATH_INFO`, the `HTTP_*` headers, ...) and the
-  worker's own entries, its environment.
+  `SCRIPT_NAME`, `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `PATH_INFO`, the `HTTP_*` headers, ...). As
+  php-fpm's default `clear_env`, it holds no environment variables: `getenv()` reads them.
 - A POST form (`application/x-www-form-urlencoded`, `multipart/form-data`) fills `$_POST` and
   `$_FILES` under `php.ini`'s limits (`post_max_size`, `upload_max_filesize`, `max_file_uploads`,
   `max_input_vars`).

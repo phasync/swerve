@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- A request's `$_SERVER` holds no environment variables, as under php-fpm's default `clear_env`: `getenv()` reads them. Each request copied the worker's whole environment, and an upgraded connection kept its copy for its life: with 50 variables, 16 KiB of its 52 KiB. (#8)
+- An upgraded connection no longer keeps the array its request's `$_SERVER` was built from: 8 KiB less per raw upgrade or WebSocket. (#8)
+
 ## 0.2.0-RC1 (2026-10-29)
 
 0.2 runs any PHP application. The master accepts every connection and hands each request to the worker that asks first; a worker runs `swerve.php`, which takes requests with `Swerve::accept()`: every request as it comes, one at a time with the application kept loaded, or one per run, starting over clean as under php-fpm. A request is PHP as under php-fpm (its own superglobals, session, `header()`, `echo`, `php://input`, shutdown functions), and the handler is a script, a closure, or a PSR-7 closure. `swerve -S [dir] [router.php]` serves a directory as `php -S` does. `Swerve::upgrade()` takes a connection off a request for Server-Sent Events, a WebSocket (moved to a WebSocket worker when `swerve.php` accepts once) or the raw `ClientRequest`. `RequestHandler`, the adapters, `--public`, the watchdog and the 0.1 command-line options other than `--http`, `--workers`, `--log`, `--grace`, `--watch` and `--pubsub-ring` are gone; ext-phasync is required, and loaded by swerve itself.

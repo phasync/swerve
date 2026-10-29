@@ -261,15 +261,15 @@ it('runs an upgrade closure with the request\'s superglobals, session data and t
     }
 })->with(['upgrade.php', 'short-lived.php']);
 
-it('gives a request the worker\'s own $_SERVER entries along with its own', function () {
+it('gives a request its own $_SERVER entries, not the worker\'s environment, which getenv() has', function () {
     putenv('SWERVE_TEST_ENV=1');
     try {
         [, $addr] = accept_start('server-env.php', 1);
     } finally {
         putenv('SWERVE_TEST_ENV');
     }
-    expect(accept_request(native_connect($addr), '/a')['body'])->toBe('env /a')
-        ->and(accept_request(native_connect($addr), '/b')['body'])->toBe('env /b');
+    expect(accept_request(native_connect($addr), '/a')['body'])->toBe('getenv /a')
+        ->and(accept_request(native_connect($addr), '/b')['body'])->toBe('getenv /b');
 });
 
 it('sends header names as the script wrote them, a name\'s later lines joining its first', function () {
