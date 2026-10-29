@@ -492,7 +492,7 @@ final class LotClient
                 // its client got its answer; the application's await() has it
             }
         }
-        Topics::drain();
+        Topics::drain($this->stopping);
         if (phasync::shutdown(self::STOP_WINDOW, new WorkerStoppingException($this->stopping)) > 0) {
             exit(0); // what did not end is dropped
         }

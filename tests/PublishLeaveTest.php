@@ -38,13 +38,14 @@ test('a drain while publish() delivers does not make it throw', function () {
 
             return 'published';
         });
-        \Swerve\Util\Topics::drain();
+        \Swerve\Util\Topics::drain(\Swerve\StopReason::Shutdown);
         $result = phasync::await($published);
         unset($subscription);
 
         return $result;
     });
     \Swerve\Util\Topics::$draining = \Swerve\Util\Topics::$closed = false;
+    \Swerve\Util\Topics::$stopping = null;
 
     expect($outcome)->toBe('published');
 });

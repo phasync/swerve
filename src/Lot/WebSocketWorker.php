@@ -51,8 +51,9 @@ final class WebSocketWorker
         $control = \fopen('php://fd/' . self::CONTROL_FD, 'r+');
         $letter  = LotClient::receive($control, \socket_import_stream($control))[0] ?? 'S';
         phasync::cancel($taking);
-        Topics::drain();
-        phasync::shutdown(self::STOP_WINDOW, new WorkerStoppingException('L' === $letter ? StopReason::Reload : StopReason::Shutdown));
+        $reason = 'L' === $letter ? StopReason::Reload : StopReason::Shutdown;
+        Topics::drain($reason);
+        phasync::shutdown(self::STOP_WINDOW, new WorkerStoppingException($reason));
     }
 
     /** Take the WebSockets moved here, and serve each. */

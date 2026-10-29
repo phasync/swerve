@@ -90,7 +90,8 @@ final class Subscription implements \IteratorAggregate
                 continue;
             }
             if ($eof) {
-                return;
+                // Its topic ends only as the worker stops: the loop says so, as its wait would
+                throw new WorkerStoppingException(Topics::$stopping);
             }
             [$seq, $published, $message, $copy] = $item;
             if ($seq <= $this->after) {

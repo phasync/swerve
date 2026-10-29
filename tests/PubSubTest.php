@@ -307,20 +307,23 @@ test('with a heartbeat, the loop also gets null after that long without a messag
     expect(end($got))->toBe('later');
 });
 
-test('a drain ends every subscription\'s loop, and one made while draining ends at once', function () {
+test('a drain ends every subscription\'s loop with a WorkerStoppingException, and one made while draining ends at once', function () {
     $got = phasync::run(function () {
         $ended = [];
         foreach (['a', 'b'] as $name) {
             $subscription = Swerve::subscribe('t');
             phasync::go(static function () use ($subscription, $name, &$ended) {
-                foreach ($subscription as $message) {
+                try {
+                    foreach ($subscription as $message) {
+                    }
+                } catch (\Swerve\WorkerStoppingException) {
+                    $ended[] = $name;
                 }
-                $ended[] = $name;
             });
         }
         unset($subscription);
         phasync::sleep(0.01);
-        Topics::drain();
+        Topics::drain(\Swerve\StopReason::Shutdown);
         phasync::sleep(0.01);
         foreach (Swerve::subscribe('t') as $message) {
             $ended[] = 'got a message';
@@ -330,6 +333,7 @@ test('a drain ends every subscription\'s loop, and one made while draining ends 
         return [$ended, Swerve::draining(), Topics::active()];
     });
     Topics::$draining = Topics::$closed = false; // this test process goes on
+    Topics::$stopping = null;
 
     expect($got)->toBe([['a', 'b', 'new one ended'], true, []]);
 });

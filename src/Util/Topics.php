@@ -6,6 +6,7 @@ use phasync;
 use phasync\ChannelException;
 use phasync\SubscribersInterface;
 use phasync\WriteChannelInterface;
+use Swerve\StopReason;
 
 /**
  * The topics subscribed to in this process, behind Swerve::publish() and Swerve::subscribe().
@@ -31,6 +32,9 @@ final class Topics
     public static bool $draining = false;
     /** The process must now close its connections: subscriptions have ended, see drain(). */
     public static bool $closed = false;
+
+    /** Why the process stops, once drain() was called: a subscription's loop throws it. */
+    public static ?StopReason $stopping = null;
 
     /** @var array<string, SubscribersInterface> */
     private static array $subscribers = [];
@@ -186,11 +190,13 @@ final class Topics
     /**
      * The process must close its connections (a shutdown or a reload): every subscription ends,
      * so that the long responses fed by them (Server-Sent Events) end too, and the
-     * Swerve::onShutdown() callbacks run. Subscriptions made from now on end at once.
+     * Swerve::onShutdown() callbacks run. A subscription's loop throws a WorkerStoppingException
+     * with $reason, as every wait does then; subscriptions made from now on end at once.
      */
-    public static function drain(): void
+    public static function drain(StopReason $reason): void
     {
         self::$draining = self::$closed = true;
+        self::$stopping = $reason;
         foreach (self::$writers as $writer) {
             $writer->close();
         }

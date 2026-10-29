@@ -4,15 +4,40 @@
  * Swerve::onShutdown() and awaitShutdown(): told that this worker must now close its connections.
  */
 
+use Swerve\StopReason;
 use Swerve\Swerve;
 use Swerve\Util\Topics;
+use Swerve\WorkerStoppingException;
 
 /** The process goes on after a test that drained it. */
 function shutdown_reset(): void
 {
     Topics::$draining = false;
     Topics::$closed   = false;
+    Topics::$stopping = null;
 }
+
+test('a subscription ends with a WorkerStoppingException when the worker stops, not as if its topic ended', function () {
+    $got = phasync::run(function () {
+        $listener = phasync::go(static function () {
+            try {
+                foreach (Swerve::subscribe('shutdown-test') as $message) {
+                }
+
+                return 'ended';
+            } catch (WorkerStoppingException $e) {
+                return $e->reason;
+            }
+        });
+        phasync::sleep(0.01);
+        Topics::drain(StopReason::Reload);
+
+        return phasync::await($listener);
+    });
+    shutdown_reset();
+
+    expect($got)->toBe(StopReason::Reload);
+});
 
 test('onShutdown() callbacks run when the worker shuts down, each in a coroutine of its own', function () {
     $got = phasync::run(function () {
@@ -26,7 +51,7 @@ test('onShutdown() callbacks run when the worker shuts down, each in a coroutine
         });
         phasync::sleep(0.01);
         $log[] = 'before';
-        Topics::drain();
+        Topics::drain(StopReason::Shutdown);
         phasync::sleep(0.2);
 
         return $log;
@@ -42,8 +67,8 @@ test('onShutdown() callbacks run once only, and one registered after the shutdow
         Swerve::onShutdown(static function () use (&$log) {
             $log[] = 'first';
         });
-        Topics::drain();
-        Topics::drain();
+        Topics::drain(StopReason::Shutdown);
+        Topics::drain(StopReason::Shutdown);
         Swerve::onShutdown(static function () use (&$log) {
             $log[] = 'late';
         });
@@ -78,7 +103,7 @@ test('an exception in an onShutdown() callback is logged and does not stop the o
         Swerve::onShutdown(static function () use (&$log) {
             $log[] = 'four';
         });
-        Topics::drain();
+        Topics::drain(StopReason::Shutdown);
         phasync::sleep(0.05);
 
         return $log;
@@ -107,7 +132,7 @@ test('a callback of a request that ended never runs, and what it holds is freed 
         phasync::sleep(0.7); // phasync collects cycles half a second after a coroutine ends
         gc_collect_cycles();
         $alive = count(array_filter($probes, static fn (WeakReference $r) => null !== $r->get()));
-        Topics::drain();
+        Topics::drain(StopReason::Shutdown);
         phasync::sleep(0.05);
 
         return [$alive, $ran];
@@ -133,7 +158,7 @@ test('a callback of a coroutine that is still running does run, also when anothe
         $long = $ctx('long', 0.5);
         $ctx('short', 0.01);
         phasync::sleep(0.1);
-        Topics::drain();
+        Topics::drain(StopReason::Shutdown);
         phasync::sleep(0.05);
         phasync::await($long);
 
@@ -157,7 +182,7 @@ test('a callback runs in the scope of the request that registered it', function 
             });
         });
         phasync::sleep(0.01);
-        Topics::drain();
+        Topics::drain(StopReason::Shutdown);
         phasync::sleep(0.05);
         phasync::await($long);
 
@@ -175,7 +200,7 @@ test('awaitShutdown() waits for the shutdown, or the timeout', function () {
         $waited  = microtime(true) - $start;
         $waiter  = phasync::go(static fn () => Swerve::awaitShutdown());
         phasync::sleep(0.01);
-        Topics::drain();
+        Topics::drain(StopReason::Shutdown);
         $after = Swerve::awaitShutdown(0.01); // already shut down: at once
 
         return [$timeout, $waited >= 0.04, phasync::await($waiter), $after];
