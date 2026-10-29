@@ -7,237 +7,156 @@
 ```php
 <?php // swerve.php
 
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-    $request->write("Hello, World\n");
-});
+while (Swerve\Swerve::accept('public/', function () {
+    echo "Hello, World\n";
+})) {
+}
 ```
 
 Swerve is a PHP application server, built on [phasync](https://github.com/phasync/phasync)
-coroutines. Your application stays loaded between requests, every worker serves many requests
-and connections at once, and request and response bodies stream. A handler gets a
-`ClientRequest`: the request to read and the response to write, for as long as it keeps it.
-Frameworks are served through an adapter that turns a `ClientRequest` into the framework's own
-request and response: [Laravel](https://github.com/phasync/swerve-laravel),
-[Symfony](https://github.com/phasync/swerve-symfony), [Yii](https://github.com/phasync/swerve-yii),
-[CakePHP](https://github.com/phasync/swerve-cakephp),
-[Spiral](https://github.com/phasync/swerve-spiral),
-[CodeIgniter](https://github.com/phasync/swerve-codeigniter) and
-[Laminas](https://github.com/phasync/swerve-laminas).
+coroutines. A master process accepts the connections and hands each request to a worker; the
+worker runs your `swerve.php`, which takes requests with `Swerve::accept()`. A request is PHP
+as you know it: `$_GET`, `$_POST`, `$_SESSION`, `header()`, `echo`, `php://input`, each its own,
+while the worker serves other requests at once. Your `swerve.php` chooses how: every request as it
+comes, one at a time with the application kept loaded, or one per run, starting over clean as
+under php-fpm.
 
 > Swerve is at 0.x: options and APIs may still change before 1.0.
 
 **[Documentation](docs/README.md)** · [Examples](examples/): a chat room over
-[Server-Sent Events](examples/sse-chat).
+[Server-Sent Events](examples/sse-chat) and one over [WebSockets](examples/websocket-chat).
 
 ## Why swerve
 
-PHP-FPM builds your application from nothing for every request (autoloader, framework,
-container, database connection), runs one request per process, and throws it all away. swerve
-keeps the application loaded in long-running workers, and each worker serves thousands of
-requests and connections at once on [phasync](https://github.com/phasync/phasync) coroutines.
-
-- **Connections that stay open.** Server-Sent Events and long polling from an ordinary request
-  handler, streaming request and response bodies, raw connections after a `101`, and
-  [publish/subscribe](docs/publish-subscribe.md) between workers, so live features need no
-  separate Node or Go service.
-- **Boot once, serve forever.** The framework, routes and connection pools are built once per
-  worker. A Slim app costs swerve about 10% over a bare handler; Express costs Node half or more.
+- **Connections that stay open.** Server-Sent Events, WebSockets and long polling from an ordinary
+  request, raw connections after a `101`, and [publish/subscribe](docs/publish-subscribe.md)
+  between workers, so live features need no separate Node or Go service.
 - **Waiting is free.** While one request waits for the database or an API, the same worker serves
-  others. Your handler stays ordinary sequential PHP: no promises, no callbacks.
-- **Isolated requests.** Each request runs in a `Scope` of its own, which the coroutines it
-  starts share, so request-scoped state stays separate even with thousands in flight.
-- **Supervised.** Crashed workers restart, a worker stuck in a loop is replaced (the watchdog),
-  and reloads roll one worker at a time.
-- **Yours to own.** MIT, with no third-party dependencies beyond phasync and the PSR logger and
-  cache interfaces. See [the Ennerd philosophy](PHILOSOPHY.md).
-
-Up to 512 connections per worker swerve runs on PHP's own `stream_select()`; above that
-it needs ext-phasync, which waits with epoll.
-
-
-### Coming from PHP-FPM
-
-1. **Already using phasync under FPM?** That code runs unchanged in swerve: the coroutines you
-   started inside one request now also share the worker with other requests.
-2. **Keep per-request state per request.** A worker runs many requests at once, so static
-   properties and globals are shared between them. There are no `$_GET`, `$_SERVER` or
-   `$_SESSION`: read request data from the `ClientRequest` (a framework's adapter does), and keep
-   request-scoped state in a `WeakMap` keyed by `Scope::getCurrent()`: each request is a `Scope`
-   of its own. See
-   [How swerve runs your application](docs/how-it-runs.md).
-3. **Call `Swerve::accept()`** in `swerve.php`, or serve a directory with `swerve -S` as
-   `php -S` does. A framework gets an adapter.
-4. **ext-phasync** ships inside phasync, and `vendor/bin/swerve` loads it by itself (one installed
-   with `pie install phasync/ext-phasync` is used as it is). Blocking calls in libraries you did
-   not write (MySQL through PDO or mysqli, curl, Guzzle, file and DNS functions) wait as a
-   coroutine instead of stalling the worker, and a worker can hold far more than 1,024
-   connections.
+  others. Your code stays ordinary sequential PHP: no promises, no callbacks. ext-phasync makes the
+  blocking calls of libraries you did not write (PDO, mysqli, curl, file and DNS functions) wait
+  as a coroutine.
+- **Isolated requests.** Each request runs in a `Scope` of its own, with its own superglobals,
+  headers and output, which the coroutines it starts share.
+- **Boot once, or start clean.** A `swerve.php` that loops keeps the framework, routes and
+  connection pools between requests; one that accepts once per run gives each request a fresh
+  process state, as php-fpm does, and still shares opcache and APCu with every worker.
+- **Supervised.** A worker that dies is replaced. A reload starts new workers before the old ones
+  stop, and the master's listener stays open throughout: no connection is refused.
+- **Yours to own.** MIT, with no third-party dependencies beyond phasync and the PSR interfaces.
+  See [the Ennerd philosophy](PHILOSOPHY.md).
 
 ## Getting started
 
-Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix` and `sockets` extensions.
+Requirements: PHP 8.2 or later on Linux, with the `pcntl`, `posix`, `sockets` and `apcu` extensions.
+ext-phasync ships inside phasync, and swerve loads it by itself.
 
-1. Install swerve:
-
-   ```bash
-   composer require phasync/swerve
-   ```
-
-2. Create `swerve.php` in your project root, returning a `Swerve\RequestHandler` that wraps a
-   closure (the file is also your [bootstrap](docs/bootstrap.md): each worker runs it once at
-   start). The closure runs once for each HTTP exchange, and the exchange lasts as long as the
-   closure does:
-
-   ```php
-   <?php // swerve.php
-
-   return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-       $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-       $request->write("Hello, World\n");
-   });
-   ```
-
-   Keeping the request open makes a stream. This one pushes a number every second as
-   Server-Sent Events, until the client leaves:
-
-   ```php
-   <?php // swerve.php
-
-   use phasync;
-   use phasync\IOException;
-
-   return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-       $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream', 'cache-control' => 'no-cache']);
-       $request->flush(); // the head goes out now, not with the first event
-       try {
-           for ($n = 1; ; ++$n) {
-               $request->write("data: $n\n\n");
-               phasync::sleep(1);
-           }
-       } catch (IOException) {
-           // the client left
-       }
-   });
-   ```
-
-3. Run it:
-
-   ```
-   > vendor/bin/swerve
-   2026-09-26 17:00:30.12    swerve 0.1.0 serving ./swerve.php on http://127.0.0.1:8080 with 8 workers
-   2026-09-26 17:00:31.25 3 GET / 200 1.2ms
-   2026-09-26 17:00:31.31 6 GET /missing 404 0.4ms
-   ```
-
-   Each line has the time, the worker (its slot number, 0 to 7 here; blank for the master
-   process), and the message: a request with its status and how long the application took,
-   or anything else worth knowing, such as a worker that crashed and was restarted. Ctrl+C
-   stops swerve: requests in flight get a `503`, or are cut.
-
-   ```bash
-   vendor/bin/swerve --watch              # during development: reload when a PHP file changes
-   vendor/bin/swerve --public=public      # also serve the files in public/ (CSS, JavaScript, images)
-   vendor/bin/swerve app.php --http :80   # app.php on port 80 of every interface
-   ```
-
-## Usage
-
-```
-> vendor/bin/swerve --help
-Usage: swerve [options] [swerve.php]
-       swerve [options] -S [dir] [router.php]
-
-Application:
-  [swerve.php]           The application's runner, which calls Swerve::accept() (default: ./swerve.php)
-  -S [dir] [router.php]  Serve a directory as php -S does: its files, its PHP files run, every
-                         other request to the router (default: dir's index.php; without one, 404).
-                         dir defaults to the current directory. Not with a swerve.php
-
-Options:
-  --http=<address>       Serve HTTP here: host:port, or unix:/path (default: 127.0.0.1:8080)
-  --workers=<n>          Worker processes (default: one per CPU core)
-  --log=<path>           Append the log, and the workers' PHP errors, to this file instead of the terminal
-  -d name=value          PHP settings go to PHP itself: php -d memory_limit=1G vendor/bin/swerve
+```bash
+composer require phasync/swerve
+vendor/bin/swerve -S public          # serve a directory as php -S does: WordPress, Laravel's public/
+vendor/bin/swerve                    # run ./swerve.php
+vendor/bin/swerve --watch            # during development: reload when a PHP file changes
 ```
 
-Options and the application file may come in any order; an option's value is attached
-(`--workers=4`, `-w4`) or the next word (`--workers 4`, `-w 4`). A usage error exits with
-code 2, and so does an application (a `swerve.php` or an adapter's entry) that returns anything but a
-`Swerve\RequestHandler`.
-
-swerve runs in the foreground, as systemd, Docker and supervisord expect, and logs to
-standard output, which they collect; there is no daemon mode. Elsewhere,
-`nohup swerve -q --log=/var/log/swerve.log &` does the same.
-
-Every worker serves HTTP/1.1 itself on the `--http` address, and the kernel spreads new
-connections over the workers. A proxy in front (nginx, HAProxy, Caddy) speaks HTTP to it too.
-
-The line per request costs about 5% of the throughput of a hello-world application, and
-less of a real one; `--no-access-log` turns it off.
-
-## Adapters
-
-swerve is installed into the application's own `vendor/`, so the application and swerve share
-one version of each library. Run as `vendor/bin/swerve`, the worker loads only swerve's own
-dependency closure (swerve, the installed adapters, and what they require), never the
-application's classes or its Composer `files`: an application that includes
-`vendor/autoload.php` itself (a plain PHP application under swerve-sapi) gets them fresh in every
-request, framework bootstraps included, as under php-fpm. swerve accepts every major version of the PSR packages it uses
-(`psr/log` 1 to 3, `psr/simple-cache` 1 to 3, `psr/http-message` 1 and 2), and Composer picks
-the one the application needs; `php tests/psr-versions.php` checks that every class loads with
-each.
-
-An adapter is an installed package that provides the entry point in place of `swerve.php`. It
-declares itself in its own `composer.json`:
-
-```json
-{"extra": {"swerve": {"adapter": "psr15", "entry": "Swerve\\Psr15\\init"}}}
-```
-
-`entry` names a function that each worker calls once, after the fork, with the application
-directory; it returns a `Swerve\RequestHandler`, as `swerve.php` does, and anything else stops
-swerve with exit code 2. The entry runs with swerve's dependency closure only (above): the
-adapter, what it requires, swerve and phasync. Whether the application's classes are loaded once
-per worker and shared by its requests, or fresh in each request, is the adapter's choice. One that
-shares them (a framework adapter) requires the application's autoloader in its entry, from the
-vendor directory swerve runs from:
+`swerve.php` decides how many requests a worker serves at once:
 
 ```php
-require_once $GLOBALS['_composer_autoload_path'] ?? "$appDir/vendor/autoload.php";
-``` The master only reads
-`vendor/composer/installed.json` to find adapters, and doesn't call their entry.
+// every request as it comes, concurrently, with the application kept loaded
+while (Swerve::accept('public/', $app->handle(...))) {
+}
 
-The adapter is the first of: `--adapter=<name>`; `"extra": {"swerve": {"adapter": "<name>"}}` in the
-application's own `composer.json`; the only installed adapter; `swerve`, the built-in one, which
-loads `swerve.php` (always available as `--adapter=swerve`). Several installed adapters and no
-choice, or a name that is not installed, stops swerve at start. Adapters are looked up in the
-vendor directory swerve itself was loaded from (`vendor/`, or wherever the application keeps it,
-such as Joomla's `libraries/vendor`), and in the root package's `composer.json`, which may declare
-an adapter with its `entry` itself (an adapter package run from its own checkout). With an adapter other
-than `swerve`, a `swerve.php` in the application directory is ignored (logged once). The
-application directory is the current one, or for the `swerve` adapter the directory of the
-`swerve.php` given.
+// one at a time, keeping the application between requests
+while ($request = Swerve::accept('public/', $app->handle(...))) {
+    phasync::await($request);
+}
 
-An adapter's entry may take two more arguments, which swerve passes by name, as absolute paths,
-only when given on the command line: `$docroot` (`-t <dir>`) and `$file` (the file argument). What
-they mean is the adapter's: one serving plain PHP files can take the shape of PHP's built-in
-server, so that `swerve -t public router.php` serves like `php -S 127.0.0.1:8080 -t public
-router.php`. An entry without such a parameter stops swerve with exit code 2 when it is
-given; `-t` with the `swerve` adapter is a usage error (`--public` serves files in front of a
-`swerve.php`).
+// one request per run of swerve.php, which starts over clean for the next (as under php-fpm)
+phasync::await(Swerve::accept('wordpress/', 'wordpress/index.php'));
+```
+
+The first argument is a directory of static files, answered without the application. The
+handler is a script's path (run as a fresh main script, its PHP files too), a closure without
+parameters (superglobals in, `header()` and `echo` out), or a closure taking a PSR-7
+`ServerRequestInterface` and returning a `ResponseInterface`. [Getting started](docs/getting-started.md)
+goes through it step by step.
+
+## What a request can do
+
+- **Stay open.** `Swerve::upgrade()` takes the connection off the request for a closure that keeps
+  it as long as it likes: a `Swerve\WebSocket`, a `Swerve\ServerSentEvents` stream, or the raw
+  `Swerve\ClientRequest`. The worker serves other requests meanwhile. A PSR-7 handler's `101`
+  response does the same. See [Realtime](docs/realtime.md).
+- **Finish early.** The response is complete at its `Content-Length`, or at
+  `Swerve::finishRequest()`, which `fastcgi_finish_request()` calls: the connection takes its next
+  request while the request's code runs on.
+- **Wait cheaply.** `phasync::sleep()`, `phasync::go()` and every phasync primitive work in a
+  request; the worker serves others while it waits.
+
+## Between workers
+
+### Publish and subscribe
 
 ```php
-function entry(string $appDir, ?string $docroot = null, ?string $file = null): Swerve\RequestHandler
+Swerve::publish('chat', $message);
+
+foreach (Swerve::subscribe('chat') as $message) {
+    // every message published to 'chat', in any worker, from the moment subscribe() returned
+}
+```
+
+Every message of every publisher has its place in one order, in a log the workers share in APCu.
+Delivery is at most once, to the subscriptions that exist when it is published; a subscriber too
+far behind gets a `SubscriberLagException`. [Publish and subscribe](docs/publish-subscribe.md)
+has the rest.
+
+### Shared cache
+
+`Swerve::cache()` is a PSR-16 cache every worker shares, held in APCu.
+
+```php
+$cache = Swerve::cache();
+$user  = $cache->get("user.$id") ?? load_user($id);
+$cache->set("user.$id", $user, 60);
+```
+
+A get, set or delete is one APCu call: a write is seen by every worker at once. Values last as
+long as the master; a reload keeps them. It shares `apc.shm_size` (256M by default, taking memory
+only as it fills) with publish/subscribe, and when that is full APCu empties itself.
+
+### Limiting a resource across workers
+
+`Swerve::container()` is a PSR-11 container that caps how many instances of a service exist at
+once in all workers together: MySQL accepts 151 connections by default, however many workers
+there are.
+
+```php
+// swerve.php, before accept(): every worker adds the same services
+Swerve::container()->add(\PDO::class, fn () => new \PDO($dsn, $user, $password), limit: 151);
+
+$db = Swerve::container()->get(\PDO::class);            // this request's; waits while 151 are out
+$db = Swerve::container()->tryGet(\PDO::class, $ok);    // null, $ok false, instead of waiting
+```
+
+A `Lifetime::Scoped` instance (the default) is shared by a request and its coroutines and given
+back when the request has ended; `Transient` is one per `get()`; `Singleton` one per worker. An
+instance holds its slot until it is garbage, and a worker that dies gives its slots back.
+
+### One worker at a time
+
+A job that must not run twice takes a lock with `flock()` on a file of its own; the kernel
+releases it when the handle closes or the worker dies.
+
+```php
+$lock = fopen(sys_get_temp_dir() . '/myapp-nightly-report.lock', 'c');
+if (flock($lock, LOCK_EX | LOCK_NB)) {
+    work();
+}
 ```
 
 ## Per-request process state, for framework authors
 
-Each request runs in a `Scope` of its own (fiber-interop/scope), which the coroutines it starts
-share. A framework that runs its requests as coroutines of one worker (not one process each, as
-PHP-FPM does) shares process-wide PHP state - `setlocale()`, `date_default_timezone_set()`, a
-static of its own - between every request running there. A `phasync::onScopeChange()` hook keeps
-that state as each request's own, so application code can go on using the plain functions:
+Superglobals, headers, output and the session are each request's own. Process-wide PHP state is
+not: `setlocale()`, a static of your own. A `phasync::onScopeChange()` hook keeps such state as
+each request's, so application code can go on using the plain functions:
 
 ```php
 $locales = new WeakMap();   // per Scope
@@ -249,268 +168,23 @@ phasync::onScopeChange(function (Scope $new, ?Scope $old) use ($locales) {
 });
 ```
 
-Register it once at boot. It runs before a coroutine of another scope than the last one runs, and
-as a request begins: never between a request's own coroutines. The worker's own code runs in
-the root scope (`Scope::getRootScope()`), which gets its state saved and restored the same way.
-A hook runs in the event loop and must not wait, and an exception from one stops the worker.
+Register it once, before `accept()`. It runs before a coroutine of another scope than the last one
+runs: never between a request's own coroutines. It runs in the event loop and must not wait.
 
-## Static files
+## Running it
 
-`--public=<dir>` serves the files in a directory, and passes every other request to the
-application: `/css/site.css` is `public/css/site.css`, `/` is `public/index.html`. Files are
-streamed, with their Content-Type, Content-Length, Last-Modified and ETag; a browser's
-revalidation gets `304 Not Modified`, and a `Range` request (video, resumed downloads) `206
-Partial Content`. Other methods than GET and HEAD, names starting with a dot (`.env`, `.git/`;
-`.well-known/` is served), PHP files (`.php`, `.phtml`, `.phar`, `.inc`: a source is never sent),
-and paths leading out of the directory (`..`, a symlink pointing outside) go to the application;
-directories are never listed. This is deliberately small: for a lot of static content, or
-anything beyond this, let nginx or a CDN serve it in front of swerve.
-
-The same is available to your own handler: `(new Swerve\StaticFiles($dir))->wrap($handler)` returns
-a handler that answers file requests and calls `$handler` for the rest.
-
-## Logging from the application
-
-`Swerve::log()` is swerve's log as a PSR-3 `LoggerInterface`: lines go where swerve's go (the
-terminal, or `--log`'s file), with the time and the worker's slot. Give it to anything that takes
-a logger, or log directly:
-
-```php
-Swerve::log()->warning('Payment {id} declined', ['id' => $id]);
-```
-
-With `-q` it logs nothing; embedded without swerve's command line, it logs nothing until you give
-it a logger with `Swerve::setLog()`.
-
-## The ClientRequest
-
-`Swerve\ClientRequest` is one HTTP exchange, a `phasync\Net\Duplex`: `read()` returns the request
-body (`''` only at its end) and `write()` sends the response body. The module does the framing.
-[Requests and responses](docs/requests-and-responses.md) is the reference; in short:
-
-- The handler runs in the connection's own coroutine, once per exchange, in a `Scope` of its
-  own (`phasync::finally()` in a handler runs once the exchange is finished). Return to finish the
-  response; the request body can no longer be read after that.
-- `sendResponseHeaders($status, $headers)` sets the head, held until the first `write()`, `end()`,
-  `flush()` or `sendFile()`. A `1xx` goes out at once (`103` Early Hints, repeatable); a `101`
-  switches to the raw connection.
-- Nothing is buffered: `write()` goes straight out, chunked unless you send a `content-length`.
-  `write()` throws `phasync\IOException` once the client is gone, which is how a producer learns
-  it can stop.
-- An exception before the head went out is a `500` (logged); after, the connection is aborted.
-- The request body, query string and cookies are yours to parse from `read()`, `getTarget()` and
-  `getRequestHeaders()`; there is no PSR-7 request.
-
-## Long-lived connections
-
-- **Shutdown and reload.** The worker stops accepting, and every coroutine, requests in flight
-  included, gets a `Swerve\WorkerStoppingException` at its wait at once: a phasync
-  `ShutdownException`, so a `CancelledException`. swerve ends what it owns: a request whose
-  response has not started gets a `503`, a started response is cut, a `Swerve\WebSocket` closes
-  with 1001 (Going Away, or 1012, Service Restart, on a reload), idle connections close. Clients
-  retry and reconnect, as they must when any server dies. Save or undo partial work in
-  `phasync::finally()` or `phasync::shielded()`; the exception reaches every later wait too, so
-  a goodbye of your own (on a raw `101` tunnel, say) is written shielded. `$e->reason`
-  (`Shutdown`, `Reload`, `Recycle`) says what happens next. The worker exits once every
-  coroutine has ended, a second before `--grace` at most, whatever is left, which is logged.
-- **Saying goodbye.** `Swerve::onShutdown($callback)` runs the callback in a coroutine when the
-  worker stops (`Swerve::draining()` turns true when it begins), for example to send a protocol-level goodbye from a place that holds no request.
-  Its waits get the `WorkerStoppingException` too: write the goodbye shielded. A callback runs in
-  the `Scope` that registered it, which holds it weakly: one whose request has ended is dropped (it relies on phasync's garbage collection, about half a
-  second after a coroutine ends) and never runs. An exception in a callback is logged and
-  stops no other. `Swerve::awaitShutdown($timeout)` waits for the same moment.
-- **Many connections.** Without ext-phasync a worker serves at most 512 connections, whatever
-  `ulimit -n` says: add workers or install the extension for many of them.
-- **Server-Sent Events and WebSockets** are in core: `Swerve\ServerSentEvents` and `Swerve\WebSocket`,
-  specified in [WebSockets and Server-Sent Events](docs/websocket.md); see also [Realtime](docs/realtime.md).
-
-## Publish and subscribe
-
-A message published in any worker reaches the subscribers of its topic in every worker, the
-publishing one included: a chat room, a live dashboard, cache invalidation.
-
-```php
-use Swerve\Swerve;
-
-Swerve::publish('chat', $message);
-
-foreach (Swerve::subscribe('chat') as $message) {
-    // every message published to 'chat' from the moment subscribe() returned
-}
-```
-
-- Messages travel serialized: strings and bytes, arrays, enums and objects (each subscriber gets
-  a copy of its own; the autoloader finds the classes). Every message of every publisher has its place in one order, in a log the
-  workers share in APCu, and every subscriber in every worker receives them in that order.
-- Delivery is at most once, to the subscriptions that exist when a message is published. There
-  is no history. Swerve is one machine; across machines, use Redis, NATS or the like.
-- A subscription ends when its last reference goes: a `break`, the variable going out of scope,
-  the request's coroutine ending.
-- A subscriber falling more than `maxLag` seconds behind (30 by default) gets a
-  `SubscriberLagException` from its loop, and so does one whose worker fell a whole
-  `--pubsub-ring` (8192 messages) behind. Nothing is lost silently.
-- Topics are 1 to 255 bytes, messages at most 128 KiB serialized. `publish()` never waits.
-  [Publish and subscribe](docs/publish-subscribe.md) has the rest.
-
-## Shared cache
-
-`Swerve::cache()` is a PSR-16 cache every worker shares, held in APCu: sessions, rate limits,
-results that are costly to make.
-
-```php
-$cache = Swerve::cache();
-$user  = $cache->get("user.$id") ?? load_user($id);
-$cache->set("user.$id", $user, 60);
-```
-
-- A get, set or delete is one APCu call into memory the workers share: no trip to another
-  process, and a write is seen by every worker at once.
-- Values are PHP values, serialized by APCu (objects too). They last as long as the master: a
-  reload keeps them, a restart empties them.
-- It shares `apc.shm_size` (256M by default, taking memory only as it fills) with
-  publish/subscribe. When it is full, APCu empties itself: its eviction is not LRU.
-- It works anywhere: in `swerve.php`, in coroutines started there, and in requests. Outside
-  swerve (a test, a script) it needs `apc.enable_cli=1`.
-
-## Limiting a resource across workers
-
-`Swerve::container()` is a PSR-11 container for frameworks, beside their own, whose job is to
-cap how many instances of a service exist at once in all workers together: MySQL accepts 151
-connections by default, however many workers there are.
-
-```php
-// swerve.php, before accept(): every worker adds the same services
-Swerve::container()->add(\PDO::class, fn () => new \PDO($dsn, $user, $password), limit: 151);
-
-$db = Swerve::container()->get(\PDO::class);            // this request's; waits while 151 are out
-$db = Swerve::container()->tryGet(\PDO::class, $ok);    // null, $ok false, instead of waiting
-```
-
-- `add($id, $factory, $limit = PHP_INT_MAX, $lifetime = Lifetime::Scoped)`. A `Scoped` instance
-  is shared by a request and the coroutines it starts, and given back when the request has
-  ended; `Transient` is a new one per `get()`, given back when it is garbage; `Singleton` is one
-  per worker. Adding an id twice throws.
-- An instance holds its slot until it is garbage: something that keeps it for good (a static)
-  keeps the slot. A worker that dies gives its slots back.
-- The counts live in APCu: if APCu empties itself, they start over, and more than the limit may
-  be out until the instances out then are gone.
-
-### One worker at a time
-
-A job that must not run twice, or a leader, takes a lock with `flock()` on a file of its own.
-The kernel releases it when the handle closes or the worker dies.
-
-```php
-function nightlyReport(): void
-{
-    $lock = fopen(sys_get_temp_dir() . '/myapp-nightly-report.lock', 'c');
-    if (flock($lock, LOCK_EX | LOCK_NB)) {
-        work();
-    }
-}   // $lock goes out of scope: released
-```
-
-- `LOCK_NB` returns at once. A lock is held per opened handle, so two coroutines of one worker
-  that each `fopen()` the file exclude each other too.
-
-## Supervision
-
-A master process starts the workers and looks after them. It never loads the application
-itself: each worker loads it after starting, so a reload runs the current code.
-
-| Signal to the master | Effect |
+| Signal to the master | |
 |---|---|
-| `SIGTERM`, `SIGINT` (Ctrl+C), `SIGQUIT` | Shutdown: the workers stop accepting, end their coroutines with a `WorkerStoppingException` (requests in flight get a `503`, or are cut) and exit once these have cleaned up. What is left after `--grace` seconds is killed. A second signal kills at once. |
-| `SIGHUP`, `SIGUSR2` | Reload: every worker stops as on a shutdown, then the master restarts swerve in place (same PID, same command line), so the application, swerve, phasync, `php.ini` and opcache are all fresh, and old and new code never run side by side. The cache starts empty. Connections arriving while swerve restarts are refused. The `--log` file is reopened first, by the master and the workers, so `logrotate` can rename it and send `SIGHUP`. |
-| `SIGUSR1` | Reopen the `--log` file only. |
+| `SIGTERM`, `SIGINT` (Ctrl+C) | Stop: the listener closes, the workers finish the requests in flight, then their WebSockets and event streams get a `WorkerStoppingException` (a WebSocket closes with 1001). What still runs after `--grace` (10 s) is killed. A second signal kills at once. |
+| `SIGHUP` | Reload: each slot starts a worker on the code as it is now, and its old worker stops as above once the new one asks for its first request (a WebSocket closes with 1012: reconnect). A new worker that fails to start leaves the old one serving. |
 
-`SIGQUIT`, `SIGUSR1` and `SIGUSR2` mean what they mean to php-fpm, so its deploy and
-`logrotate` scripts work unchanged. The master asks a worker to drain over its pipe, not with a
-signal, which would cut short a blocking call (`sleep()`, `stream_select()`) of a request in
-flight.
+- The master never loads your application. Workers are forked from it, so they share its opcache
+  and APCu memory.
+- swerve runs PHP as a long-running server: `memory_limit` is a quarter of the machine's memory
+  (at most 4 GiB) per worker, `max_execution_time` is off, and opcache never checks timestamps:
+  changed code arrives with a reload. `php -d name=value vendor/bin/swerve` sets anything else.
+- It runs in the foreground, as systemd, Docker and supervisord expect, and logs to stderr (or
+  `--log=<file>`): notices and up, such as reloads and workers that exit.
 
-Workers ignore `SIGINT` and `SIGHUP` sent to the whole process group (Ctrl+C, a closing
-terminal): only the master decides. When the master itself dies, the workers drain and exit;
-one stuck in a busy loop or a blocking call, which can't drain, kills itself a second after the
-`--watchdog` timeout, so that it doesn't keep the port (with `--watchdog=0` it stays until it
-gets unstuck); one still loading the application does the same a second after the 60 seconds
-the master allows for that. A worker sent `SIGTERM` by someone else (an operator, the OOM
-tooling) drains, and the master starts another in its slot. `SIGQUIT` to a worker logs what it
-is doing: its requests in flight, and where its code runs.
-
-- **Crashes.** Every worker exit is logged with its exit code or signal, and the worker is
-  restarted. A worker that dies before it was ready, or within 5 seconds of it without having
-  served a request, is a failed start: its slot waits 0.5, 1, 2, 4, ... up to 30 seconds before
-  the next start, and three in a row are logged as a crash loop. A worker that served requests
-  started fine: a request killed it, and it is restarted at once. When every slot failed to
-  start before any worker became ready (the application can't load, the port is taken), swerve
-  exits with the worker's exit code, or 1 when that is 0 (`die('no config')`). A new worker of a
-  reload that fails to start leaves the old one serving, and is retried in its
-  slot with the same backoff, so a failure that passes (a database away for a moment) doesn't
-  leave the old code serving for good. A PHP fatal error is logged by its worker, with the
-  requests it had in flight. An exception in
-  the application answers 500, is logged with its request, and the worker serves on; one in a
-  background coroutine nobody awaits is logged too. The master also reaps children it did not
-  start, as PID 1 in a container without `--init` or after `job & exec swerve` in an
-  entrypoint.
-- **Stuck workers.** Each worker's event loop sends the master a heartbeat four times a second.
-  Requests starting and ending count too, so a worker busy with many short blocking requests in
-  a row is not taken for stuck. A worker silent for `--watchdog` seconds, stuck in a busy loop or
-  a blocking call, logs its requests in flight and where its code runs (`SIGQUIT`), and is
-  killed and replaced. So is a request that does more CPU work than that without yielding; raise
-  `--watchdog`, or set it to 0, for such applications. A worker uses `SIGALRM` to notice that
-  the master died while it was stuck (see above), a second after the timeout, so that a live
-  master kills it first and a shorter blocking call (`sleep()`, `stream_select()`) is never
-  cut short; with `--watchdog=0` the application may use `SIGALRM` itself.
-- **Memory leaks.** Each worker's `memory_limit` is a quarter of the machine's memory (or its
-  container's), at most 4 GiB, as V8 sizes a Node.js heap. A worker that reaches it dies with
-  PHP's fatal error (in the log with `--log`), loses its requests in flight, and is replaced.
-  `-d memory_limit=512M` sets another limit.
-- **`--watch`** watches the `*.php` files next to and below the swerve file (not in
-  `vendor/`, nor names starting with a dot, such as editors' lock files; but
-  `vendor/composer/installed.php`, so `composer install` counts) and reloads 1 to 2 seconds
-  after the last change. Directories it can't read are skipped. The scan runs in the master:
-  on a large tree (`node_modules`, caches) it waits ten times as long as the last scan took
-  before the next, so that the master stays mostly idle, and changes take that much longer to
-  be noticed.
-
-What a reload picks up: the swerve file and every class autoloaded in the worker, with
-Composer's class map and PSR-4 prefixes read again (`opcache_reset()` is called too). Workers
-never check source files for changes themselves: swerve turns off `opcache.validate_timestamps`,
-so changed code arrives only through a reload. It does
-not pick up swerve itself, phasync, Composer `files` autoloads, `php.ini` or the command line
-options; restart for those. The swerve file's path is not resolved, so a deploy that points a
-`current` symlink at a new release and sends `SIGHUP` runs the new release; but the class map
-and PSR-4 prefixes read again are those of the `vendor/` directory the master loaded at its
-start, so an application whose swerve file requires its own release's `vendor/autoload.php`
-is safest.
-
-Operating notes:
-
-- Linux resets connections still waiting in the accept queue of a listener that closes. For
-  handovers without any lost connection, set `sysctl net.ipv4.tcp_migrate_req=1` (swerve logs a
-  hint at startup when it is 0).
-- Give the process manager more time than `--grace`: `docker stop -t 35`, Compose
-  `stop_grace_period: 35s` or systemd `TimeoutStopSec=35` for the default 30 seconds. During a
-  handover a slot briefly has two workers, so budget for one worker's memory more.
-- Long responses such as Server-Sent Events or long polling are cut at once on a reload or
-  shutdown.
-- Without `-v` the log has notices and up: reloads, every worker exit, the pid of
-  each worker started after the first ones, and shutdown. `-v` adds the first starts and each
-  worker's readiness, `-vv` debug lines. What a client sent, such as a request target in an
-  error, is logged as it is, with control characters escaped.
-- swerve refuses to start on an address something already listens on. Its own workers share
-  the address with `SO_REUSEPORT`, which would otherwise let a second swerve (a forgotten one,
-  or one started by hand next to systemd's) silently take a share of the connections.
-- Log lines to a pipe that nobody reads (a stalled log collector) are dropped rather than
-  block the server; with `--log` they go to a file, which never blocks. A line that can't be
-  written (a full disk, a log reader gone) is dropped without a PHP warning, which an
-  application's error handler could turn into an exception.
-- A worker at its limit of connections (its open-file limit less 64, and without ext-phasync at most 512) logs a
-  warning, at most once a minute.
-- Options go before the swerve file: anything after it is refused.
-- The listeners and the workers' pipes to the master are close-on-exec (this needs the
-  `sockets` extension of PHP 8.4 or later), so a background job the application starts
-  (`exec('job &')`, `proc_open()`, `mail()`) doesn't keep the port after its worker died or
-  swerve stopped. A client connection is still inherited, and the job holds it open until it
-  exits.
+[Command line](docs/command-line.md) has every option, and [Production](docs/production.md) sizing,
+systemd, Docker, nginx and TLS.

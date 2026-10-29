@@ -10,83 +10,79 @@ Swerve runs on the phasync extension, which ships with phasync: `vendor/bin/swer
 itself, or uses one installed with `pie install phasync/ext-phasync`. See
 [Production](production.md#ext-phasync) for what it does.
 
-## A first application
+## A directory, as php -S serves it
 
-Swerve serves a PHP file that returns a `Swerve\RequestHandler` wrapping a closure. By default it
-is `swerve.php` in the current directory. The closure runs once for each HTTP exchange, with a
-`Swerve\ClientRequest`:
-
-```php
-<?php // swerve.php
-
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-    $request->write("Hello, World\n");
-});
+```bash
+vendor/bin/swerve -S public
 ```
 
-Reading the request is up to the handler: the method, target and headers are getters, and the
-body is read with `read()`.
+serves the files in `public/`, runs its PHP files, and sends every other request to
+`public/index.php`, as `php -S localhost:8080 -t public` does. Each request runs as under
+php-fpm: a fresh main script, its own superglobals, `header()` and `echo` for the response. A
+WordPress site runs this way unchanged.
+
+## A first swerve.php
+
+For more than that, write a `swerve.php`. A worker runs it, and it takes requests with
+`Swerve::accept()`: the directory of static files, and the handler for the rest.
 
 ```php
 <?php // swerve.php
 
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    parse_str((string) parse_url($request->getTarget(), PHP_URL_QUERY), $query);
+use Swerve\Swerve;
 
-    $request->sendResponseHeaders(200, ['content-type' => 'text/plain']);
-    $request->write('Hello, ' . ($query['name'] ?? 'World') . "\n");
-});
+while (Swerve::accept('public/', function () {
+    header('Content-Type: text/plain');
+    echo 'Hello, ', $_GET['name'] ?? 'World', "\n";
+})) {
+}
 ```
 
-The exchange lasts as long as the closure does, so a handler that waits and writes is a stream:
+Each call takes one request and serves it in a coroutine of its own, so the loop serves every
+request as it comes, many at once. Code before the loop (creating the app, reading configuration)
+runs once per worker, and the application stays loaded between requests. `swerve.php` may also
+start background coroutines and servers of its own: see [swerve.php as bootstrap](bootstrap.md).
+
+The handler is one of:
+
+- a closure without parameters, as above: superglobals and `php://input` in, `header()`,
+  `http_response_code()` and `echo` out;
+- a closure taking a PSR-7 `ServerRequestInterface`, returning a `ResponseInterface`;
+- a script's path, run as a fresh main script for each request, its variables globals:
+  `Swerve::accept('public/', 'public/index.php')`.
+
+A request that waits lets the worker serve others meanwhile, so a response may take as long as it
+likes. One that stays open hands its connection to a closure with `Swerve::upgrade()`:
 
 ```php
-<?php // swerve.php
+while (Swerve::accept(null, function () {
+    if ('/events' === $_SERVER['REQUEST_URI']) {
+        Swerve::upgrade(static function (Swerve\ServerSentEvents $events): void {
+            for ($n = 1; ; ++$n) {
+                $events->send((string) $n);   // throws once the client left
+                phasync::sleep(1);            // other requests run meanwhile
+            }
+        });
 
-use phasync\IOException;
-
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    $request->sendResponseHeaders(200, ['content-type' => 'text/event-stream', 'cache-control' => 'no-cache']);
-    $request->flush();                       // the head goes out now
-    try {
-        for ($n = 1; ; ++$n) {
-            $request->write("data: $n\n\n");
-            phasync::sleep(1);               // other requests run meanwhile
-        }
-    } catch (IOException) {
-        // the client left
+        return;
     }
-});
+    echo "Hello\n";
+})) {
+}
 ```
 
-A framework is served through an adapter that turns a `ClientRequest` into the framework's own
-request and response. [Requests and responses](requests-and-responses.md) is the reference for the
-`ClientRequest`.
-
-The file is loaded once in each worker process, when the worker starts: code outside the
-handler (creating the app, reading configuration, connecting to a database) runs once per
-worker, not once per request. It is the application's bootstrap: it may also start background
-coroutines and servers of your own, see [swerve.php as bootstrap](bootstrap.md).
+[Requests and responses](requests-and-responses.md) is the reference.
 
 ## Run it
 
-```
-> vendor/bin/swerve
-2026-09-26 17:00:30.12    swerve 0.1.0 serving ./swerve.php on http://127.0.0.1:8080 with 8 workers
-2026-09-26 17:00:31.25 3 GET / 200 1.2ms
-```
-
-Every line has the time, the worker (its slot number; blank for the master process), and the
-message. Ctrl+C stops swerve: requests in flight finish first.
-
-During development:
-
 ```bash
-vendor/bin/swerve --watch                 # reload the workers when a PHP file changes
-vendor/bin/swerve --watch -S public       # the same for a directory served as php -S does
-vendor/bin/swerve --workers=1             # one worker
+vendor/bin/swerve                         # ./swerve.php on http://127.0.0.1:8080, a worker per core
+vendor/bin/swerve --watch                 # during development: reload when a PHP file changes
+vendor/bin/swerve --workers=1 app.php     # one worker, another file
 ```
+
+swerve logs notices and up: a reload, a worker that exited, an error of the application.
+Ctrl+C stops it: requests in flight finish first.
 
 `--watch` reloads when a file changes: new workers start on the new code, and each old one stops
 once its replacement is ready, after finishing its requests. A syntax error in a changed file is

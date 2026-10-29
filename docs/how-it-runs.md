@@ -3,15 +3,15 @@
 ## Processes
 
 `vendor/bin/swerve` starts a **master process**, which starts the **workers**: one per CPU
-core by default (`--workers`). The master never loads your application; it supervises:
-it restarts a worker that dies, replaces a stuck one (the watchdog), and reloads by restarting all workers.
+core by default (`--workers`). The master never loads your application: it listens, accepts every
+connection, waits for its request to arrive, and hands it to the worker that asked first. It also
+restarts a worker that dies, and reloads by replacing the workers. The workers are forked from it,
+so they share its opcache and APCu memory.
 
-Every worker loads your application file once, inside its event loop. The file is the
-application's bootstrap: it sets things up, may start coroutines that run for the worker's
-whole life (a subscriber, a periodic job) and servers of its own, and returns the
-`Swerve\RequestHandler` ([details](bootstrap.md)). Then the worker serves HTTP on the same address as the
-others (`SO_REUSEPORT`): the kernel hands each new connection to one of them. A connection
-stays with its worker until it closes.
+A worker runs your `swerve.php` inside its event loop. Each `Swerve::accept()` asks the master for
+a connection with a request waiting ([details](bootstrap.md)). After the response, a connection
+whose client sends its next request at once is served on in the same worker; one that goes idle
+goes back to the master, which hands its next request to whichever worker asks first.
 
 ## Coroutines
 
@@ -56,31 +56,23 @@ Work that must outlive the worker's next reload belongs in a queue.
 
 ## The rule: never block a worker
 
-A call that blocks the process, instead of letting phasync switch coroutines, stops
-**every** request of that worker until it returns. Without the phasync extension that is:
+A call that blocks the process, instead of letting phasync switch coroutines, stops **every**
+request of that worker until it returns. [ext-phasync](production.md#ext-phasync), which swerve
+always loads, makes almost every waiting call wait as a coroutine: sockets and TLS, MySQL through
+mysqli or PDO, `curl_exec()` and curl-multi loops such as Guzzle's,
+`file_get_contents('https://...')`, pipes and child processes, file and DNS functions, `sleep()`
+and `usleep()`. The [extension's README](https://github.com/phasync/ext-phasync#readme) has the
+full list. What still blocks:
 
-- `sleep()` and `usleep()`: use `phasync::sleep()`
-- database queries (PDO, mysqli), Redis clients, `curl`, `file_get_contents('https://...')`,
-  `mail()`
-- CPU-heavy work: a long loop, image processing, a big `json_decode()`
+- clients with their own network code instead of PHP's streams, such as PostgreSQL's libpq
+  (pdo_pgsql, pgsql) and phpredis;
+- SQLite queries and cached local file reads, which return quickly;
+- CPU-heavy work: a long loop, image processing, a big `json_decode()`. A coroutine running PHP
+  code for 20 ms lets the others run, so it delays them but doesn't stop them.
 
-With [ext-phasync](production.md#ext-phasync) loaded, almost all of that waits as a coroutine
-instead of blocking the process: sockets and TLS, MySQL through mysqli or PDO, `curl_exec()`
-and curl-multi loops such as Guzzle's, `file_get_contents('https://...')`, pipes and child
-processes, file and DNS functions, `sleep()` and `usleep()`. The
-[extension's README](https://github.com/phasync/ext-phasync#readme) has the full list.
-CPU-bound code still blocks, and so do clients with their own network code instead of PHP's
-streams, such as PostgreSQL's libpq (pdo_pgsql, pgsql) and phpredis.
-
-What that means in practice:
-
-- A short blocking call is fine: a 1 ms SQLite query delays the other requests of that worker
-  by 1 ms. Keep them short, and count them: 50 of them in one request is 50 ms for everyone.
-- Long blocking calls need more workers (each worker is blocked alone), or belong in another
-  process (a queue worker).
-- A worker whose event loop is stuck for 30 seconds (`--watchdog`) is killed and replaced;
-  the log says which request it was stuck in, and where.
-- CPU-heavy work in a loop can let others run now and then: `phasync::yield()`.
+A short blocking call is fine: a 1 ms query delays the other requests of that worker by 1 ms.
+Count them: 50 of them in one request is 50 ms for everyone. Long blocking calls need more
+workers, or belong in another process (a queue worker).
 
 ## State: per worker, shared by its requests
 
@@ -116,24 +108,25 @@ $db->exec('CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, room TEX
 Every worker runs this at start, at the same time: keep it idempotent (`IF NOT EXISTS`). A
 SQLite query blocks the worker while it runs, usually well under a millisecond; a writer waiting
 for the lock blocks it up to the busy timeout. For many concurrent writers, a database server
-(MySQL, PostgreSQL) does better. Its queries block the worker the same way, for their duration,
-unless ext-phasync is loaded and the database is MySQL: then they wait as a coroutine.
+(MySQL, PostgreSQL) does better. MySQL's queries wait as a coroutine; PostgreSQL's block the
+worker for their duration.
 
 ## Things that work differently from PHP-FPM
 
-- **Superglobals are not filled**: no `$_GET`, `$_POST`, `$_SERVER`, `$_COOKIE`, `$_FILES`. The
-  request is the `ClientRequest` (see [Requests and responses](requests-and-responses.md)); a
-  framework's adapter builds the framework's own request from it.
-- **`header()`, `echo`, `setcookie()`, `http_response_code()` don't make the response.** Use
-  `sendResponseHeaders()` and `write()`.
-- **PHP's sessions (`session_start()`) don't work.** Use a session library that takes the request,
-  or your framework's.
-- **`exit()` and `die()` end the worker**, and every request it serves. The master starts a
-  new one, but the others are cut off.
+A request is PHP as under php-fpm: its own `$_GET`, `$_POST`, `$_SERVER`, `$_COOKIE`, `$_FILES`
+and `$_SESSION`, `header()`, `setcookie()`, `http_response_code()` and `echo` for the response,
+`php://input` for the body, and the shutdown functions it registers run at its end. What differs:
+
+- **A `swerve.php` that loops shares the worker's memory** between its requests, including those
+  running at the same time: statics and globals, as above. One that accepts once per run starts
+  over clean for every request, as php-fpm does.
+- **`exit()` and `die()` end the run of `swerve.php`**: the requests it serves at that moment are
+  cut, and the worker starts it over. In a `swerve.php` that accepts once per run that is php-fpm's
+  behaviour; in one that loops, return from the handler instead.
 - **Uncaught exceptions** become a `500 Internal Server Error` for that request (when nothing was
   sent yet) and are logged with their trace; the worker goes on.
-- **Memory leaks accumulate** over the worker's life. A worker that reaches its
-  `memory_limit` (a quarter of the memory, at most 4 GiB) dies and is replaced.
+- **Memory leaks accumulate** over a run. A worker that reaches its `memory_limit` (a quarter of
+  the memory, at most 4 GiB) dies and is replaced.
 
 ## phasync in one page
 
@@ -151,4 +144,4 @@ The functions an application uses most (all static on `phasync`):
 
 `phasync\TimeoutException` is thrown when a wait takes longer than its timeout.
 
-Next: [The application file](bootstrap.md), then [Requests and responses](requests-and-responses.md).
+Next: [swerve.php as bootstrap](bootstrap.md), then [Requests and responses](requests-and-responses.md).

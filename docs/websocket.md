@@ -1,22 +1,21 @@
 # WebSockets and Server-Sent Events
 
-`Swerve\WebSocket` speaks RFC 6455 over the `101` connection of a [`ClientRequest`](requests-and-responses.md),
-and `Swerve\ServerSentEvents` writes an event stream on one. Both are in swerve itself, so the adapters
-(swerve-psr15, Symfony, Tether) share one implementation. This page is their contract; the tests in
-`tests/WebSocketTest.php` and `tests/ServerSentEventsTest.php` pin every line of it, over raw sockets, with and
-without ext-phasync, and nothing differs.
+`Swerve\WebSocket` speaks RFC 6455 over a connection that [`Swerve::upgrade()`](realtime.md) took off a
+request, and `Swerve\ServerSentEvents` writes an event stream on one. This page is their contract; the tests in
+`tests/WebSocketTest.php` and `tests/ServerSentEventsTest.php` pin every line of it, over raw sockets.
 
 ## WebSocket
 
 ```php
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    Swerve\WebSocket::from($request, function (Swerve\WebSocket $ws) {
-        foreach ($ws as $message) {          // ends when the connection closes
-            $ws->send("echo: $message");
-        }
-    });
+Swerve::upgrade(static function (Swerve\WebSocket $ws): void {
+    foreach ($ws as $message) {              // ends when the connection closes
+        $ws->send("echo: $message");
+    }
 });
 ```
+
+`upgrade()` does the handshake with the defaults below; a closure taking the `ClientRequest` calls `from()` or
+`accept()` itself for subprotocols, allowed origins or another message size.
 
 | | |
 |---|---|
@@ -84,29 +83,23 @@ serves the next request.
   so an idle connection holds no compression state. Messages sent shorter than `WebSocket::DEFLATE_FROM`
   (256 bytes) go uncompressed. No other extension is accepted.
 
-### For adapters
+### Building blocks
 
-A framework adapter (swerve-psr15, Symfony, Tether) hands the application this same `WebSocket`, so every
-example reads alike. The framework's request is not a `ClientRequest`, so the adapter uses the functions
-`from()` is made of:
+For a bridge whose request is not a `ClientRequest` (PSR-15 middleware speaking WebSocket over a `101`
+response's bodies), the functions `from()` is made of:
 
 | | |
 |---|---|
 | `WebSocket::handshake($method, $version, $headers, $hasBody, $subprotocols = [], $origins = null)` | the decision, from the parts of any request (`$headers` as `getRequestHeaders()` gives them: lowercase name => list); answers nothing and returns a `WebSocketHandshake` |
 | `WebSocket::upgrade($request, $headers, $callback, $maxMessage = 1 MiB)` | sends the `101` with `$headers` exactly as given on a `ClientRequest`, then runs the callback as `from()` does; no second validation |
-| `WebSocket::run($connection, $callback, $subprotocol = null, $maxMessage = 1 MiB, $extensions = null)` | the callback on a connection whose `101` was already sent, by the adapter's own code: any `Duplex`, not only a `ClientRequest` |
+| `WebSocket::run($connection, $callback, $subprotocol = null, $maxMessage = 1 MiB, $extensions = null)` | the callback on a connection whose `101` was already sent, by your own code: any `Duplex`, not only a `ClientRequest` |
 
 A `WebSocketHandshake` has `status`, `headers`, `body`, `subprotocol` and `accepted()`. Refused (426, 400, 403),
-`status`, `headers` and `body` are the whole final response, as swerve answers it: the adapter returns it as the
-framework's ordinary response, so middleware may decorate it. Accepted (`101`), `headers` are `Upgrade`,
-`Connection`, `Sec-WebSocket-Accept` and the chosen `Sec-WebSocket-Protocol`: the adapter returns a `101`
-response with them (middleware may add more) that carries the callback. `upgrade()` is `sendResponseHeaders(101, $headers)`
-followed by `run()`, for an adapter that hands swerve a `ClientRequest` directly. An adapter whose bridge sends
-the `101` itself (swerve-psr15, so that the response's body is the outbound frames a middleware can wrap) calls
-`run()` on a `Duplex` of its own instead, once it decides to start the callback; `WebSocket` only ever calls
-`read()`, `write()`, `end()` and `close()` on it. The subprotocol is not read back from the headers in that
-case, so the adapter passes the one it chose as `$subprotocol`, and the `101`'s `sec-websocket-extensions` as
-`$extensions`. Applications call `from()`, not these.
+`status`, `headers` and `body` are the whole final response, as swerve answers it. Accepted (`101`), `headers` are
+`Upgrade`, `Connection`, `Sec-WebSocket-Accept` and the chosen `Sec-WebSocket-Protocol`. `upgrade()` is
+`sendResponseHeaders(101, $headers)` followed by `run()`. A bridge that sends the `101` itself calls `run()` on a
+`Duplex` of its own, passing the subprotocol it chose and the `101`'s `sec-websocket-extensions`; `WebSocket`
+only ever calls `read()`, `write()`, `end()` and `close()` on it.
 
 ### States
 
@@ -174,10 +167,10 @@ wire. `send()` throws `ValueError` for text that is not UTF-8; use `sendBinary()
       }
   });
   ```
-- **Drain.** A shutdown or reload closes every open WebSocket with 1001, so the process exits within its grace
+- **Drain.** A shutdown closes every open WebSocket with 1001 (a reload with 1012), so the process exits within its grace
   period, with status 0 and a clean log. Clients reconnect, as they must after any 1001.
 - **Many sockets.** A socket costs a coroutine and no thread; a worker serves ordinary requests promptly with 200
-  open (the test), and holds 512 connections without ext-phasync, see [Production](production.md#sizing).
+  open (the test), up to the open-file limit, see [Production](production.md#sizing).
 
 ### Pings
 
@@ -206,19 +199,18 @@ TLS is the proxy's: the connection swerve sees is `ws://` ([Production](producti
 ## Server-Sent Events
 
 ```php
-return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
-    $sse = new Swerve\ServerSentEvents($request);
+Swerve::upgrade(static function (Swerve\ServerSentEvents $sse): void {
     foreach (Swerve::subscribe('news', heartbeat: 15) as $message) {
         null === $message ? $sse->comment('keep-alive') : $sse->send($message, event: 'news');
     }
 });
 ```
 
-- The constructor sends `200`, `content-type: text/event-stream`, `cache-control: no-cache` and
+- The constructor (`new ServerSentEvents($client)` on a `ClientRequest`, or swerve's before the closure runs) sends `200`, `content-type: text/event-stream`, `cache-control: no-cache` and
   `x-accel-buffering: no`, and puts the head on the wire at once, before any event exists. More headers go in its
   second argument.
 - The body is chunked on HTTP/1.1 (a `content-length` is never sent) and ends with the connection on HTTP/1.0. Each
-  event is one write, so one chunk. The stream ends when the handler returns.
+  event is one write, so one chunk. The stream ends when the closure returns.
 - `send($data, $event = null, $id = null, $retry = null)` writes the fields `event`, `id`, `retry` and then one
   `data:` line for every line of `$data` (split on `\r\n`, `\r` or `\n`), so the browser joins them again; empty data
   is one empty `data:` line. CR and LF are removed from `$event` and `$id` (and NUL from `$id`): they cannot inject
@@ -227,7 +219,7 @@ return new Swerve\RequestHandler(function (Swerve\ClientRequest $request) {
   makes the next write fail when the client is gone.
 - `lastEventId()` is the `Last-Event-ID` the client sent when it reconnected, or `null`. Swerve keeps no history:
   resume from your own storage.
-- **Disconnect.** A write to a client that left throws `phasync\IOException`. Let it leave the handler: the
+- **Disconnect.** A write to a client that left throws `phasync\IOException`. Let it leave the closure: the
   exchange ends without a line in the log, so a loop ends with its client. A client that stopped reading is given
   up by the write timeout, see [Realtime](realtime.md).
 - A `HEAD` request gets the head and an empty body; `send()` and `comment()` then throw `IOException`, since

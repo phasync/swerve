@@ -304,9 +304,9 @@ final class Swerve
 
     /**
      * Serve the next request: wait until the master hands this worker a connection with a
-     * request waiting, and return the coroutine that serves it. The coroutine ends once the
-     * response is sent; the connection then goes back to the master, which hands its next
-     * request to whichever worker asks first.
+     * request waiting, and return the request, which is served in a coroutine of its own and is
+     * ready once answered (await it to serve one at a time). The connection then goes back to
+     * the master, which hands its next request to whichever worker asks first.
      *
      * The application's swerve.php decides how many requests a worker serves at once:
      *
@@ -345,9 +345,10 @@ final class Swerve
      *                                         what the client sends after it), and needs an
      *                                         accept() loop
      *
-     * @return ?\Fiber the coroutine serving the request; null once the worker stops
+     * @return Accepted the request taken on; awaiting it throws what its handler threw
      *
-     * @throws \LogicException when called inside a request
+     * @throws WorkerStoppingException once the worker stops: swerve.php ends there
+     * @throws \LogicException         when called inside a request
      */
     public static function accept(?string $staticPath, string|\Closure|null $handler): Accepted
     {

@@ -39,39 +39,21 @@ configuration, with one restart at startup. An explicit `-d` on the command line
 | `opcache.enable_file_override` | 1 | `file_exists()` and `is_file()` on PHP scripts answer from the cache |
 | `opcache.save_comments` | 1 | attributes and annotations need doc comments |
 | `opcache.file_cache`, `opcache.file_cache_consistency_checks`, `opcache.consistency_checks`, `opcache.protect_memory` | off | shared memory only; no debugging checks |
+| `apc.enable_cli`, `apc.shm_size` | 1, 256M | the shared cache and publish/subscribe live in APCu; the size is address space, taking memory only as it fills |
 
 ## Sizing
 
-**Workers.** `--workers=auto` (the default) is one per CPU (hardware thread). On large machines
-fewer can be faster: on a 2-socket server with 56 hardware threads, a hello-world app served the
-most requests with 16 workers. Measure with your own application. Each worker holds its own copy
-of your application in memory.
+**Workers.** One per CPU (hardware thread) by default. On large machines fewer can be faster:
+measure with your own application. In a `swerve.php` that loops, each worker holds its own copy of
+your application in memory.
 
-**Several sockets.** On a machine with more than one NUMA node, worker *i* pins itself to node
-*i* mod the number of nodes, so it stays near the memory it allocated: about a quarter more
-throughput at 10,000 connections on a 2-socket server. It uses FFI when PHP allows it (the CLI
-does by default), else `taskset`; without either, workers stay unpinned. Only CPUs the process
-may already use count: under `taskset`, a cgroup cpuset or `--cpuset-cpus`, a worker pins to its
-node's share of them, and when they all lie on one node, nothing is pinned. With `-v` the log
-shows each worker's CPUs.
-
-**Connections per worker.**
-
-- *Without ext-phasync*, a worker holds at most **512 connections**: half of PHP's `stream_select()`
-  limit of 1024 descriptors, because your application opens files and connections of its own,
-  about one per client on average. Long-lived
-  connections (SSE, long polling, upgraded ones) use one each for as long as they are open. For
-  many of them, run more workers than cores: **`--workers` of four times the cores** is a good
-  start (4 cores: 16 workers, about 8,000 connections). Idle connections cost almost no CPU,
-  so the extra workers don't compete much; they cost memory, one application each.
-- *With ext-phasync*, the limit is the open-file limit less 64 (`ulimit -n`; `LimitNOFILE` under
-  systemd). Past a few hundred **busy** connections per worker, waiting on them gets
-  expensive; more workers help here too.
-
-At the limit, a worker closes connections that sit idle (kept-alive ones, ones that never sent
-a request) to make room for new ones, and logs a warning at most once a minute. Upgraded
-(101) connections and ones whose request is still being handled are never closed to
-make room.
+**Connections.** A process, the master or a worker, holds at most its open-file limit less 64
+connections (`ulimit -n`; `LimitNOFILE` under systemd). At the limit, the master closes the oldest
+connection still waiting for its request before it accepts another, and a worker closes one
+waiting on its client (answered and lingering, reading a request head, kept alive, and last
+waiting for a request body) before it takes another; each logs a warning at most once a minute.
+Upgraded (101) connections and requests being handled are never closed to make room. Past a few
+hundred **busy** connections per worker, waiting on them gets expensive; more workers help.
 
 **Memory.** A worker that reaches its `memory_limit` dies with PHP's fatal error and is
 replaced, losing its requests in flight; there is no recycling before that, as in Node.js.
@@ -118,10 +100,10 @@ restart. Logs go to the journal (`journalctl -u myapp`).
 
 ```dockerfile
 FROM php:8.4-cli
-RUN docker-php-ext-install pcntl sockets
+RUN docker-php-ext-install pcntl sockets && pecl install apcu && docker-php-ext-enable apcu
 WORKDIR /app
 COPY . .
-CMD ["vendor/bin/swerve", "--http=:8080", "--public=public"]
+CMD ["vendor/bin/swerve", "--http=0.0.0.0:8080"]
 ```
 
 `docker stop` sends `SIGTERM` and waits 10 s by default, as long as swerve's `--grace`: give it
@@ -161,9 +143,8 @@ server {
 }
 ```
 
-Caddy does all of that with `reverse_proxy 127.0.0.1:8080`. The request's `peer()` is then the
-proxy's, unless it is a [trusted proxy](#behind-a-proxy); the client's address is in
-`X-Forwarded-For`.
+Caddy does all of that with `reverse_proxy 127.0.0.1:8080`. `REMOTE_ADDR` is then the proxy's;
+the client's address is in `X-Forwarded-For` (see [Behind a proxy](#behind-a-proxy)).
 
 ## Reloads, shutdown, and long-lived connections
 
@@ -176,8 +157,8 @@ proxy's, unless it is a [trusted proxy](#behind-a-proxy); the client's address i
 
 ## Logs
 
-Swerve logs to standard output, which systemd and Docker collect. `--log=<file>` appends to a
-file instead; after rotating it, send `SIGUSR1` (logrotate's `postrotate`), or use
-`copytruncate`. PHP's own errors go to the same place. `-q` logs nothing to the terminal.
+Swerve logs to standard error, which systemd and Docker collect: notices and up. `--log=<file>`
+appends to a file instead; rotate it with logrotate's `copytruncate`. PHP's own errors go to the
+same place.
 
 Next: [Troubleshooting](troubleshooting.md).
