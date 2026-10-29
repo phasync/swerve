@@ -138,3 +138,32 @@ test('swerve -S serves one request per run, as php-fpm: requests at once never s
         native_stop($process);
     }
 });
+
+test('a request\'s shutdown functions run at its end, with its superglobals, as under php-fpm (#97)', function () {
+    $dir = serve_site();
+    file_put_contents("$dir/shut.php", '<?php register_shutdown_function(function () { file_put_contents(__DIR__ . "/shutdown.txt", ($_SERVER["REQUEST_URI"] ?? "NULL") . " " . json_encode($_GET) . "\n", FILE_APPEND); }); echo "ok";');
+    [$process, $addr] = serve_start($dir);
+    try {
+        expect(serve_get($addr, '/shut.php?a=1'))->toBe('ok');
+        expect(serve_get($addr, '/shut.php?b=2'))->toBe('ok');
+        expect(file_get_contents("$dir/shutdown.txt"))->toBe("/shut.php?a=1 {\"a\":\"1\"}\n/shut.php?b=2 {\"b\":\"2\"}\n");
+    } finally {
+        native_stop($process);
+    }
+});
+
+test('ob_gzhandler and zlib.output_compression compress for a client that accepts gzip (#90)', function () {
+    $dir = serve_site();
+    file_put_contents("$dir/gz.php", '<?php ob_start("ob_gzhandler"); echo str_repeat("compress me ", 200);');
+    file_put_contents("$dir/zl.php", '<?php ini_set("zlib.output_compression", "1"); echo str_repeat("compress me ", 200);');
+    [$process, $addr] = serve_start($dir);
+    try {
+        foreach (['/gz.php', '/zl.php'] as $path) {
+            $response = serve_request($addr, "GET $path HTTP/1.1\r\nHost: t\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n");
+            expect([$response['headers']['content-encoding'] ?? null, $response['headers']['vary'] ?? null])->toBe(['gzip', 'Accept-Encoding'], $path);
+            expect(gzdecode($response['body']))->toBe(str_repeat('compress me ', 200), $path);
+        }
+    } finally {
+        native_stop($process);
+    }
+});
