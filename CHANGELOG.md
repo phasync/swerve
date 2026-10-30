@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-RC3 (2026-10-30)
 
 - `Swerve::upgrade($handler)` runs the handler in the request, which waits for it: the handler has the request's code, objects, `Scope` and state for as long as the connection is open, `upgrade()` returns once it closed, and code after the call runs then. Any callable will do, a closure capturing what it likes. This reverses RC2's run after the handler returned, in a `Scope` of its own (#8): an open WebSocket keeps its request's state. A `swerve.php` that accepts one request per run, as WordPress's, is busy for as long as an inline WebSocket stays open, and so is a PSR-7 `101` there, which used to be refused.
 - `Swerve::upgrade($handler, $bootstrap)` moves a WebSocket to swerve's WebSocket workers for that bootstrap file: they load it once as they start, in the global scope, with pub/sub, the cache and the container's limits shared with every worker. Each file has its own, up to one per worker, and every WebSocket a worker moves with a file goes to the same one. The handler is the name of a function or `[class, static method]`, or a static closure when phasync/serializor is installed. What decided before was the `swerve.php`: one that accepted once moved every WebSocket, with only the Composer autoload in the WebSocket worker.
