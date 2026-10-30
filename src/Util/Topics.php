@@ -13,9 +13,8 @@ use Swerve\StopReason;
  *
  * Each subscription has an {@see Inbox}: a message wakes only its topic's subscribers, and is
  * kept once, however many subscribe, until the slowest has read it. A topic exists from its
- * first subscription until its last one ends. Delivering starts no coroutine: a subscription
- * may start inside a request, and a coroutine started there would belong to that request
- * (sapi()) for as long as the topic lives.
+ * first subscription until its last one ends. Delivering starts no coroutine per topic: the
+ * process's one reader (SharedLog) hands each message to the inboxes.
  *
  * @internal
  */
@@ -156,7 +155,7 @@ final class Topics
         $inbox                                           = new Inbox();
         self::$inboxes[$topic][\spl_object_id($inbox)] = $inbox;
 
-        return [$inbox, SharedLog::shared() ? SharedLog::start() : -1]; // in this process alone, every message is 0
+        return [$inbox, SharedLog::shared() ? SharedLog::start(self::deliver(...), self::gap(...)) : -1]; // in this process alone, every message is 0
     }
 
     /**

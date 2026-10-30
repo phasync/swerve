@@ -51,9 +51,6 @@ final class Container implements ContainerInterface
     /** Every worker's releases, through pub/sub: the key of each slot that is back. */
     private const RELEASED = "\0" . self::PREFIX . 'released';
 
-    /** Raised as the first limited service needs the releases, for the listener, see service(). */
-    private static ?\stdClass $wake = null;
-
     /** The listener's subscription, once a limited service needs it in a worker. */
     private ?Subscription $listening = null;
 
@@ -282,48 +279,28 @@ final class Container implements ContainerInterface
         if (!SharedLog::shared() || null !== $this->listening) {
             return; // in a process alone, released() wakes the waiters itself
         }
-        if (null === self::$wake) {
-            throw new \LogicException('Swerve BUG: a limited service in a worker whose lifecycle did not start its listener (Container::service())');
-        }
         $this->listening = new Subscription(self::RELEASED); // subscribed now: no release after this goes unheard
-        phasync::raiseFlag(self::$wake);
+        phasync::service($this->hear(...));
     }
 
-    /**
-     * The coroutine that hears every worker's releases for this one, started as the lifecycle
-     * starts, before any request: it waits until a limited service needs them, which may be
-     * inside a request (and a coroutine a request starts belongs to it, see sapi()).
-     *
-     * @internal
-     */
-    public static function service(): void
+    /** The service that hears every worker's releases for this one, until it drains. */
+    private function hear(): void
     {
-        $wake = self::$wake = new \stdClass();
-        phasync::service(static function () use ($wake): void {
+        while (!Topics::$closed) {
             try {
-                while (null === self::$instance?->listening) {
-                    phasync::awaitFlag($wake);
-                }
-            } catch (\Throwable) {
-                return; // the lifecycle ends without a limited service
-            }
-            $container = self::$instance;
-            while (!Topics::$closed) {
-                try {
-                    foreach ($container->listening as $key) {
-                        if (isset($container->flags[$key])) {
-                            $container->heard($key);
-                        }
+                foreach ($this->listening as $key) {
+                    if (isset($this->flags[$key])) {
+                        $this->heard($key);
                     }
-                } catch (SubscriberLagException) {
-                    foreach ($container->flags as $key => $_) {
-                        $container->heard($key); // some were lost: look again
-                    }
-                    $container->listening = new Subscription(self::RELEASED);
-                } catch (ShutdownException) {
-                    return;
                 }
+            } catch (SubscriberLagException) {
+                foreach ($this->flags as $key => $_) {
+                    $this->heard($key); // some were lost: look again
+                }
+                $this->listening = new Subscription(self::RELEASED);
+            } catch (ShutdownException) {
+                return;
             }
-        });
+        }
     }
 }

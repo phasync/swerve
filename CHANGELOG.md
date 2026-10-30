@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Pub/sub's reader, the limited services' listener and the WebSocket pings start on first use again, which may be inside a request, instead of with every worker's lifecycle: phasync 2.0.7's `phasync::service()` is started by the event loop, so it belongs to no request and keeps none alive (#102). A worker that never uses them starts none.
+
 ## 0.2.0-RC3 (2026-10-30)
 
 - `Swerve::upgrade($handler)` runs the handler in the request, which waits for it: the handler has the request's code, objects, `Scope` and state for as long as the connection is open, `upgrade()` returns once it closed, and code after the call runs then. Any callable will do, a closure capturing what it likes. This reverses RC2's run after the handler returned, in a `Scope` of its own (#8): an open WebSocket keeps its request's state. A `swerve.php` that accepts one request per run, as WordPress's, is busy for as long as an inline WebSocket stays open, and so is a PSR-7 `101` there, which used to be refused.

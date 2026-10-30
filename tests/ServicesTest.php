@@ -1,11 +1,9 @@
 <?php
 
 /*
- * Nothing that serves the requests is started by a request: a coroutine belongs to the request
- * of the coroutine that starts it (sapi()), and a service started there would belong to that
- * request for the life of the worker. The services start with the lifecycle (pub/sub's reader,
- * the limited services' listener, the WebSocket pings) and are only signalled by requests; the
- * connections' and the requests' coroutines are started by accept() and the connections.
+ * What serves the requests (pub/sub's reader, the limited services' listener, the WebSocket
+ * pings) starts on first use, often inside a request, with phasync::service(): the event loop
+ * starts it, so it belongs to no request (sapi()) and keeps none alive.
  */
 
 /** GET $path on a connection of its own: the response body. */
@@ -17,64 +15,18 @@ function services_get(string $addr, string $path): ?string
     return native_read_response($conn)['body'] ?? null;
 }
 
-test('phasync::service() is called only where no request runs, and swerve starts no Fiber itself', function () {
-    $allowed = [
-        'Swerve\Http\RequestPool::reserve',      // from a connection's coroutine, never inside a request (it throws)
-        'Swerve\Lot\LotClient::assign',          // accept() and the connections' coroutines
-        'Swerve\Lot\LotClient::startServices',
-        'Swerve\Util\SharedLog::service',        // the lifecycle's start
-        'Swerve\Container::service',
-        'Swerve\WebSocket::service',
-        'Swerve\WebSocket::keepAlive',           // outside a lifecycle only: the lifecycle's ping coroutine runs
-        'Swerve\Lot\Supervisor::*',              // the master, which serves no request
-    ];
+test('swerve starts no Fiber itself: its coroutines are phasync\'s', function () {
     $found = [];
     foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../src', FilesystemIterator::SKIP_DOTS)) as $file) {
-        if ('php' !== $file->getExtension()) {
-            continue;
-        }
-        $tokens    = token_get_all(file_get_contents($file->getPathname()));
-        $namespace = $class = $function = '';
+        $tokens = array_values(array_filter(token_get_all(file_get_contents($file->getPathname())), static fn ($t) => !is_array($t) || T_WHITESPACE !== $t[0]));
         foreach ($tokens as $i => $token) {
-            if (!is_array($token)) {
-                continue;
-            }
-            $next = static function (int $i) use ($tokens) {
-                for (++$i; isset($tokens[$i]); ++$i) {
-                    if (!is_array($tokens[$i]) || T_WHITESPACE !== $tokens[$i][0]) {
-                        return $tokens[$i];
-                    }
-                }
-
-                return null;
-            };
-            switch ($token[0]) {
-                case T_NAMESPACE:
-                    $namespace = $next($i)[1];
-                    break;
-                case T_CLASS:
-                    $name  = $next($i);
-                    $class = is_array($name) && T_STRING === $name[0] ? "$namespace\\$name[1]" : $class;
-                    break;
-                case T_FUNCTION:
-                    $name     = $next($i);
-                    $function = is_array($name) && T_STRING === $name[0] ? $name[1] : $function; // a closure is its method's
-                    break;
-                case T_NEW:
-                    $name = $next($i);
-                    expect(is_array($name) ? ltrim($name[1], '\\') : '')->not->toBe('Fiber', "new Fiber in $class::$function");
-                    break;
-                case T_STRING:
-                    if ('service' === $token[1] && is_array($tokens[$i - 2] ?? null) && 'phasync' === ltrim($tokens[$i - 2][1], '\\') && '(' === $next($i)) {
-                        $found[] = "$class::$function";
-                    }
+            if (is_array($token) && T_NEW === $token[0] && is_array($tokens[$i + 1]) && 'Fiber' === ltrim($tokens[$i + 1][1], '\\')) {
+                $found[] = $file->getFilename() . ':' . $token[2];
             }
         }
     }
-    $outside = array_values(array_filter(array_unique($found), static fn ($at) => !in_array($at, $allowed, true) && !in_array(explode('::', $at)[0] . '::*', $allowed, true)));
 
-    expect($found)->not->toBeEmpty()
-        ->and($outside)->toBe([]);
+    expect($found)->toBe([]);
 });
 
 test('a request that is the first to need pub/sub, or a limited service, leaves them working for every request, in every worker', function () {

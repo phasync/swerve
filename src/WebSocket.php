@@ -127,12 +127,9 @@ final class WebSocket implements \IteratorAggregate
     /** @var array<int, \WeakReference<self>> the open WebSockets of this process, see keepAlive() */
     private static array $open = [];
 
-    /** Raised when the last open WebSocket ends, or the first opens, for the ping loop. */
+    /** Raised when the last open WebSocket ends, for the ping loop. */
     private static ?object $idle = null;
     private static bool $pinging = false;
-
-    /** The lifecycle's ping coroutine runs, waiting while none is open, see service(). */
-    private static bool $resident = false;
 
     private string $buffer = '';
     private bool $binary   = false;
@@ -906,45 +903,9 @@ final class WebSocket implements \IteratorAggregate
         }
     }
 
-    /**
-     * The lifecycle's ping coroutine, started as it starts, before any request: it waits while no
-     * WebSocket is open, and pings while some are. A WebSocket opened inside a request would
-     * otherwise start it there, and a coroutine a request starts belongs to it (see sapi()).
-     *
-     * @internal
-     */
-    public static function service(): void
-    {
-        self::$resident = self::$pinging = true;
-        phasync::service(static function (): void {
-            try {
-                while (true) {
-                    while (!self::$open) {
-                        phasync::awaitFlag(self::$idle ??= new \stdClass());
-                    }
-                    self::ping();
-                }
-            } catch (CancelledException) {
-                // the lifecycle ends
-            } finally {
-                self::$resident = self::$pinging = false;
-            }
-        });
-    }
-
-    /**
-     * Have the open WebSockets pinged: by the lifecycle's ping coroutine; outside a lifecycle
-     * (WebSocket::run() in a script), by one started now, which ends when none is open.
-     */
+    /** Have the open WebSockets pinged, by one service for all of them, which ends when none is open. */
     private static function keepAlive(): void
     {
-        if (self::$resident) {
-            if (1 === \count(self::$open)) {
-                phasync::raiseFlag(self::$idle ??= new \stdClass()); // the first: it waits for one
-            }
-
-            return;
-        }
         if (self::$pinging) {
             return;
         }

@@ -66,7 +66,6 @@ final class WebSocketWorker
         if ('' === $bootstrap) {
             return; // the master is gone
         }
-        LotClient::startServices();
         try {
             ext\include_global($bootstrap);
         } catch (\Throwable $e) {
