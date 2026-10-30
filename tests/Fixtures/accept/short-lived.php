@@ -2,43 +2,70 @@
 use Swerve\Swerve;
 use Swerve\WebSocket;
 
-// WordPress's shape: one request per lifecycle, so a WebSocket can't stay in the worker
+// WordPress's shape: one request per lifecycle. A WebSocket runs in the request, which waits
+// for it, or moves to the WebSocket workers of a bootstrap file
 phasync::await(Swerve::accept(null, function () {
-    if ('/ws' === $_SERVER['REQUEST_URI']) {
-        $greeting = 'echo';
-        Swerve::upgrade(static function (WebSocket $ws) use ($greeting): void {
-            foreach ($ws as $message) {
-                $ws->send("$greeting $message from " . getmypid());
-            }
-        });
-
-        return;
-    }
-    if ('/ws-state' === strtok($_SERVER['REQUEST_URI'], '?')) {
-        date_default_timezone_set('Asia/Tokyo');
-        $_SESSION = ['user' => 7];
-        Swerve::upgrade(static function (WebSocket $ws): void {
-            foreach ($ws as $message) {
-                $ws->send(json_encode([$_GET, $_SERVER['QUERY_STRING'], $_SESSION, date_default_timezone_get()]));
-            }
-        });
-
-        return;
-    }
-    if ('/ws-busy' === $_SERVER['REQUEST_URI']) {
-        Swerve::upgrade(static function (WebSocket $ws): void {
-            foreach ($ws as $message) {
-                if ('block' === $message) {
-                    // About two seconds in one C call: no coroutine of this process runs meanwhile
-                    password_hash('x', PASSWORD_BCRYPT, ['cost' => 15]);
+    $boot = __DIR__ . '/ws-boot.php';
+    switch (strtok($_SERVER['REQUEST_URI'], '?')) {
+        case '/ws-inline':
+            $local = new ArrayObject(['inline']);
+            Swerve::upgrade(function (WebSocket $ws) use ($local): void {
+                foreach ($ws as $message) {
+                    $ws->send("{$local[0]} $message from " . getmypid());
                 }
-                $ws->send("$message from " . getmypid());
-            }
-        });
+            });
+            file_put_contents(sys_get_temp_dir() . '/swerve-inline-' . $_GET['id'], connection_aborted() ? 'aborted' : 'connected');
 
-        return;
+            return;
+        case '/ws':
+            Swerve::upgrade('ws_echo', $boot);
+
+            return;
+        case '/ws-state':
+            date_default_timezone_set('Asia/Tokyo');
+            $_SESSION = ['user' => 7];
+            Swerve::upgrade('ws_state', $boot);
+
+            return;
+        case '/ws-busy':
+            Swerve::upgrade([WsHandlers::class, 'busy'], $boot);
+
+            return;
+        case '/ws-boots':
+            Swerve::upgrade('ws_boots', $boot);
+
+            return;
+        case '/ws-admin':
+            Swerve::upgrade('ws_admin', __DIR__ . '/ws-boot-admin.php');
+
+            return;
+        case '/ws-closure':
+            $greeting = 'closure';
+            Swerve::upgrade(static function (WebSocket $ws) use ($greeting): void {
+                foreach ($ws as $message) {
+                    $ws->send("$greeting $message from " . getmypid());
+                }
+            }, $boot);
+
+            return;
+        case '/ws-missing':
+            Swerve::upgrade('ws_no_such_handler', $boot);
+
+            return;
+        case '/ws-broken':
+            Swerve::upgrade('ws_echo', __DIR__ . '/ws-boot-broken.php');
+
+            return;
+        case '/ws-nofile':
+            try {
+                Swerve::upgrade('ws_echo', __DIR__ . '/ws-boot-missing.php');
+            } catch (LogicException $e) {
+                echo 'refused: ', $e->getMessage();
+            }
+
+            return;
     }
-    // Code of this file, which is no autoloaded code: the WebSocket worker does not have it
+    // Code of this file, which neither the bootstrap file nor the autoload has: the WebSocket worker does not have it
     if ('/ws-function' === $_SERVER['REQUEST_URI']) {
         if (!function_exists('sl_not_autoloaded')) {
             function sl_not_autoloaded(): string
@@ -50,7 +77,7 @@ phasync::await(Swerve::accept(null, function () {
             foreach ($ws as $message) {
                 $ws->send(sl_not_autoloaded());
             }
-        });
+        }, __DIR__ . '/ws-boot.php');
 
         return;
     }
@@ -64,7 +91,7 @@ phasync::await(Swerve::accept(null, function () {
         $local = new SlNotAutoloaded();
         Swerve::upgrade(static function (WebSocket $ws) use ($local): void {
             $ws->send($local->name);
-        });
+        }, __DIR__ . '/ws-boot.php');
 
         return;
     }
@@ -72,7 +99,7 @@ phasync::await(Swerve::accept(null, function () {
         $file = fopen(__FILE__, 'r');
         try {
             Swerve::upgrade(static function (WebSocket $ws) use ($file): void {
-            });
+            }, __DIR__ . '/ws-boot.php');
         } catch (LogicException $e) {
             echo 'refused: ', $e->getMessage();
         }

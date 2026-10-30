@@ -12,8 +12,10 @@
         "ext-pcntl": "*",
         "ext-posix": "*",
         "ext-sockets": "*",
-        "phasync/net": "^2.0.2",
-        "phasync/serializor": "^2.1.2"
+        "phasync/net": "^2.0.2"
+    },
+    "suggest": {
+        "phasync/serializor": "Swerve::upgrade() with a bootstrap file moves a closure to the WebSocket worker"
     },
     "bin": [
         "bin/swerve"
@@ -34,7 +36,8 @@
     "prefer-stable": true,
     "require-dev": {
         "friendsofphp/php-cs-fixer": "dev-master",
-        "pestphp/pest": "^3.0 || ^4.0"
+        "pestphp/pest": "^3.0 || ^4.0",
+        "phasync/serializor": "^2.1.2"
     },
     "config": {
         "allow-plugins": {

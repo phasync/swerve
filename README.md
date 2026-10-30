@@ -82,10 +82,11 @@ goes through it step by step.
 
 ## What a request can do
 
-- **Stay open.** `Swerve::upgrade()` takes the connection off the request for a closure that keeps
-  it as long as it likes: a `Swerve\WebSocket`, a `Swerve\ServerSentEvents` stream, or the raw
-  `Swerve\ClientRequest`. The worker serves other requests meanwhile. A PSR-7 handler's `101`
-  response does the same. See [Realtime](docs/realtime.md).
+- **Stay open.** `Swerve::upgrade()` takes the connection off the request for a handler that keeps
+  it as long as it likes, in the request: a `Swerve\WebSocket`, a `Swerve\ServerSentEvents`
+  stream, or the raw `Swerve\ClientRequest`. A `swerve.php` that loops serves other requests
+  meanwhile; given a bootstrap file, a WebSocket moves to WebSocket workers that loaded it. A
+  PSR-7 handler's `101` response stays open too. See [Realtime](docs/realtime.md).
 - **Finish early.** The response is complete at its `Content-Length`, or at
   `Swerve::finishRequest()`, which `fastcgi_finish_request()` calls: the connection takes its next
   request while the request's code runs on.

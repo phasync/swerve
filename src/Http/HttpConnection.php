@@ -301,29 +301,18 @@ final class HttpConnection
         return $this->after($request);
     }
 
-    /**
-     * After $request's response: whether the connection is kept alive. When its handler set an
-     * upgrade, that runs here, in a Scope of its own, as in another process.
-     */
+    /** After $request's response: whether the connection is kept alive. */
     private function after(HttpClientRequest $request): bool
     {
-        if (null === $upgrade = $request->upgrade) {
-            $keepAlive = $request->responded;
-            $request->recycle();
+        $keepAlive = $request->responded;
+        $request->recycle();
 
-            return $keepAlive;
-        }
-        $request->upgrade = null;
-        try {
-            return (new \Scope())->run(fn () => phasync::run($this->runRequest(...), $request, $upgrade));
-        } finally {
-            $request->recycle();
-        }
+        return $keepAlive;
     }
 
     /**
-     * A request, or the upgrade it ended with, in its Scope and frame. A coroutine of it that
-     * fails with nobody awaiting it is logged, and the request goes on.
+     * A request in its Scope and frame. A coroutine of it that fails with nobody awaiting it is
+     * logged, and the request goes on.
      */
     private function runRequest(HttpClientRequest $request, \Closure $handler): bool
     {

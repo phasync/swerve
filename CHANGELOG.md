@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `Swerve::upgrade($handler)` runs the handler in the request, which waits for it: the handler has the request's code, objects, `Scope` and state for as long as the connection is open, `upgrade()` returns once it closed, and code after the call runs then. Any callable will do, a closure capturing what it likes. This reverses RC2's run after the handler returned, in a `Scope` of its own (#8): an open WebSocket keeps its request's state. A `swerve.php` that accepts one request per run, as WordPress's, is busy for as long as an inline WebSocket stays open, and so is a PSR-7 `101` there, which used to be refused.
+- `Swerve::upgrade($handler, $bootstrap)` moves a WebSocket to swerve's WebSocket workers for that bootstrap file: they load it once as they start, in the global scope, with pub/sub, the cache and the container's limits shared with every worker. Each file has its own, up to one per worker, and every WebSocket a worker moves with a file goes to the same one. The handler is the name of a function or `[class, static method]`, or a static closure when phasync/serializor is installed. What decided before was the `swerve.php`: one that accepted once moved every WebSocket, with only the Composer autoload in the WebSocket worker.
+- A bootstrap file that fails is logged as critical; its WebSockets are closed, and it is tried again a second later. A handler the file doesn't define closes its WebSocket, logged as critical, and the others go on.
+- phasync/serializor is no longer required, only suggested.
+
 ## 0.2.0-RC2 (2026-10-30)
 
 Needs only stable releases: phasync 2.0.7 (with ext-phasync 2.0.7, ext-scope 0.6.0 and fiber-interop/scope 0.5.0) and phasync/net 2.0.2. A request runs in its connection's coroutine, and nothing that serves requests is started inside one.

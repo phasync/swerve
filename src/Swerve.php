@@ -384,28 +384,32 @@ final class Swerve
     }
 
     /**
-     * Take the connection off the request being served, for $upgrade: a WebSocket, a stream of
-     * server-sent events, or any response written to the ClientRequest. The type of $upgrade's
-     * parameter says which. The request goes on to its end, and $upgrade runs on the connection
-     * once it ended, as long as it likes, while the worker serves other requests.
+     * Take the connection off the request being served, for $handler: a WebSocket, a stream of
+     * server-sent events, or any response written to the ClientRequest. The type of $handler's
+     * parameter says which.
      *
-     * From the call on, the request has no connection: connection_aborted() is true, header()
-     * has no effect, and output throws.
+     * Without $bootstrap, $handler runs here, in the request, which waits for it: its code, its
+     * Scope and its state (superglobals, session, globals, the application's objects) are the
+     * handler's for as long as the connection is open, and upgrade() returns once it closed. From
+     * the call on, the request has no connection: connection_aborted() is true, header() has no
+     * effect, and output throws. $handler is any callable, a closure capturing what it likes.
      *
-     * A swerve.php that has called accept() only once may end with this request (WordPress's
-     * serves one request per lifecycle), and its connections with it. A WebSocket opened there
-     * moves on to one of swerve's WebSocket workers, started as they are needed: its `101` is sent
-     * here, and the closure, serialized with phasync/serializor along with what it captures, runs
-     * in that process. It has the application's Composer autoload (vendor/autoload.php: its
-     * classes, and the files listed in composer.json's `autoload.files`) and nothing else of the
-     * application: a class or function the closure needs must come from there. One that doesn't
-     * is fatal, a deployment broken: a critical error in the log says what was missing, and the
-     * WebSocket worker exits with its sockets (the next WebSocket that moves starts another).
+     * A swerve.php that accepts one request per run (WordPress's) is busy for as long as an
+     * inline WebSocket stays open: a worker serves one at a time. With $bootstrap, the WebSocket
+     * moves instead, its `101` sent here, to one of swerve's WebSocket workers: processes that
+     * loaded $bootstrap once, as they started, and then serve many WebSockets each. Each file has
+     * its own WebSocket workers, up to one per worker, and every WebSocket a worker moves with
+     * that file goes to the same one, started the first time it needs to. They take part in
+     * {@see Swerve::publish()}, {@see Swerve::subscribe()}, {@see Swerve::cache()} and
+     * {@see Swerve::container()} as the workers do: $bootstrap adds the services they need to the
+     * container, and limits count across every process.
      *
-     * Either way the closure runs in a Scope of its own, seeded with the request's state as it was
-     * at this call: $_GET, $_POST, $_COOKIE, $_FILES, $_REQUEST, $_SERVER, $_SESSION (the data; the
-     * session itself was written and closed with the request), the default timezone and the intl
-     * locale. setlocale() is process-wide, not Scope state.
+     * What moves is $handler and the request's state as it was at this call: $_GET, $_POST,
+     * $_COOKIE, $_FILES, $_REQUEST, $_SERVER, $_SESSION (the data; the session itself was written
+     * and closed with the request), the default timezone and the intl locale. $handler runs in a
+     * Scope of its own, seeded with it. A moving $handler is the name of a function, or a class
+     * and a static method, which $bootstrap or the Composer autoload defines; a static closure
+     * moves too when phasync/serializor is installed, serialized with what it captures.
      *
      * ```php
      * while (Swerve::accept(null, function () {
@@ -423,49 +427,80 @@ final class Swerve
      * }
      * ```
      *
-     * @param \Closure(WebSocket|ServerSentEvents|ClientRequest): void $upgrade a static closure: it
-     *                                                                may run in another worker, with copies of what it captures
+     * @param \Closure|string|array{0: class-string, 1: string} $handler   given a WebSocket, a
+     *                                                                     ServerSentEvents or the ClientRequest; moving, a WebSocket
+     * @param string|null                                       $bootstrap the file the WebSocket workers load as they start: given,
+     *                                                                     the WebSocket moves to one of them
      *
-     * @throws \TypeError        for a closure that is not static, or takes something else
-     * @throws UpgradeException  when the request can't be upgraded so: a WebSocket closure for a
+     * @throws \TypeError        for a handler that is not callable, or takes something else; a
+     *                           moving one that is not a function's or static method's name, or a static closure
+     * @throws UpgradeException  when the request can't be upgraded so: a WebSocket handler for a
      *                           request that is no valid WebSocket handshake
      * @throws \LogicException   outside a request, a second time, once output began (also into
-     *                           an output buffer), or for a closure that has to move and can't
-     *                           be serialized with what it captures
+     *                           an output buffer), for a $bootstrap that is no file, or for a moving
+     *                           closure without phasync/serializor, or whose state can't be serialized
      */
-    public static function upgrade(\Closure $upgrade): void
+    public static function upgrade(\Closure|string|array $handler, ?string $bootstrap = null): void
     {
-        $function = new \ReflectionFunction($upgrade);
-        if (null !== $function->getClosureThis()) {
-            throw new \TypeError('Swerve::upgrade() takes a static closure: it may run in another worker');
-        }
-        $type = $function->getParameters()[0] ?? null;
-        $type = $type?->getType();
-        if (!$type instanceof \ReflectionNamedType || !\in_array($type->getName(), [WebSocket::class, ServerSentEvents::class, ClientRequest::class], true)) {
-            throw new \TypeError('Swerve::upgrade() takes a closure whose parameter is a ' . WebSocket::class . ', a ' . ServerSentEvents::class . ' or a ' . ClientRequest::class);
-        }
-        $client = SapiRequest::client();
-        if (WebSocket::class === $type->getName()) {
-            $handshake = WebSocket::handshake($client->getMethod(), $client->getProtocolVersion(), $client->getRequestHeaders(), !$client->eof());
-            if (!$handshake->accepted()) {
-                throw new UpgradeException("Not a WebSocket handshake: $handshake->body", $handshake->status, $handshake->headers, $handshake->body);
+        if (null === $bootstrap) {
+            $handler = \Closure::fromCallable($handler);
+            $type    = (new \ReflectionFunction($handler))->getParameters()[0] ?? null;
+            $type    = $type?->getType();
+            if (!$type instanceof \ReflectionNamedType || !\in_array($type->getName(), [WebSocket::class, ServerSentEvents::class, ClientRequest::class], true)) {
+                throw new \TypeError('Swerve::upgrade() takes a handler whose parameter is a ' . WebSocket::class . ', a ' . ServerSentEvents::class . ' or a ' . ClientRequest::class);
             }
-            if (LotClient::get()->shortLived()) {
-                // It moves to a WebSocket worker as the request ends, with the request's state:
-                // serialized now, so a closure that can't go fails here
-                $moving = [$upgrade, SapiRequest::state(), $handshake->headers['sec-websocket-extensions'] ?? null];
-                try {
-                    $closure = (new Codec())->serialize($moving);
-                } catch (\Throwable $e) {
-                    throw new \LogicException('Swerve::upgrade(): the closure moves to the WebSocket worker, and what it captures can\'t be serialized: ' . $e->getMessage(), 0, $e);
-                }
-                if (\strlen($closure) > LotClient::MAX_MOVE) {
-                    throw new \LogicException('Swerve::upgrade(): the closure moves to the WebSocket worker, and serialized with what it captures it is ' . \strlen($closure) . ' bytes, more than ' . LotClient::MAX_MOVE);
-                }
-                $upgrade = static fn (ClientRequest $client) => self::moveWebSocket($client, $closure);
+            $client = SapiRequest::client();
+            if (WebSocket::class === $type->getName()) {
+                self::handshake($client);
             }
+            SapiRequest::upgrade();
+            if ($client instanceof HttpClientRequest) {
+                ($client->onUpgrade)?->__invoke();
+            }
+            self::upgraded($client, $handler);
+
+            return;
         }
-        SapiRequest::upgrade($upgrade, SapiRequest::state());
+        if ($handler instanceof \Closure) {
+            if (!\class_exists(Codec::class)) {
+                throw new \LogicException('Swerve::upgrade(): a closure moves to the WebSocket worker with phasync/serializor (composer require phasync/serializor); or pass the name of a function, or [class, static method]');
+            }
+            if (null !== (new \ReflectionFunction($handler))->getClosureThis()) {
+                throw new \TypeError('Swerve::upgrade() moves a static closure, without $this');
+            }
+        } elseif (!\is_string($handler) && !(\array_is_list($handler) && 2 === \count($handler) && \is_string($handler[0]) && \is_string($handler[1]))) {
+            throw new \TypeError('Swerve::upgrade() moves the name of a function, [class, static method], or a static closure');
+        }
+        $file = \realpath($bootstrap);
+        if (false === $file || !\is_file($file)) {
+            throw new \LogicException("Swerve::upgrade(): the bootstrap file $bootstrap does not exist");
+        }
+        $client    = SapiRequest::client();
+        $handshake = self::handshake($client);
+        $moving    = [$handler, SapiRequest::state(), $handshake->headers['sec-websocket-extensions'] ?? null];
+        try {
+            $state = $handler instanceof \Closure ? 'c' . (new Codec())->serialize($moving) : 's' . \serialize($moving);
+        } catch (\Throwable $e) {
+            throw new \LogicException('Swerve::upgrade(): the WebSocket moves to the WebSocket worker, and what goes with it can\'t be serialized: ' . $e->getMessage(), 0, $e);
+        }
+        if (\strlen($state) > LotClient::MAX_MOVE) {
+            throw new \LogicException('Swerve::upgrade(): the WebSocket moves to the WebSocket worker, and serialized with what goes with it, it is ' . \strlen($state) . ' bytes, more than ' . LotClient::MAX_MOVE);
+        }
+        SapiRequest::upgrade();
+        if (null !== WebSocket::answer($client)) {
+            LotClient::get()->moveWebSocket($client, $file, $state);
+        }
+    }
+
+    /** The request's WebSocket handshake, accepted, or an UpgradeException. */
+    private static function handshake(ClientRequest $client): WebSocketHandshake
+    {
+        $handshake = WebSocket::handshake($client->getMethod(), $client->getProtocolVersion(), $client->getRequestHeaders(), !$client->eof());
+        if (!$handshake->accepted()) {
+            throw new UpgradeException("Not a WebSocket handshake: $handshake->body", $handshake->status, $handshake->headers, $handshake->body);
+        }
+
+        return $handshake;
     }
 
     /**
@@ -532,22 +567,14 @@ final class Swerve
         return false !== $file && \str_starts_with($file, "$root/") && \is_file($file) ? [$file, $name, $info] : null;
     }
 
-    /** The request ended with its connection taken off it: $upgrade gets the connection. */
-    private static function upgraded(ClientRequest $client, \Closure $upgrade): void
+    /** The connection, taken off the request, for $handler. */
+    private static function upgraded(ClientRequest $client, \Closure $handler): void
     {
-        match ((new \ReflectionFunction($upgrade))->getParameters()[0]->getType()->getName()) {
-            WebSocket::class        => WebSocket::from($client, $upgrade),
-            ServerSentEvents::class => $upgrade(new ServerSentEvents($client)),
-            default                 => $upgrade($client),
+        match ((new \ReflectionFunction($handler))->getParameters()[0]->getType()->getName()) {
+            WebSocket::class        => WebSocket::from($client, $handler),
+            ServerSentEvents::class => $handler(new ServerSentEvents($client)),
+            default                 => $handler($client),
         };
-    }
-
-    /** Answer the handshake here, and move the connection and $closure (serialized) to the WebSocket worker. */
-    private static function moveWebSocket(HttpClientRequest $client, string $closure): void
-    {
-        if (null !== WebSocket::answer($client)) {
-            LotClient::get()->moveWebSocket($client, $closure);
-        }
     }
 
     /**
@@ -569,15 +596,7 @@ final class Swerve
                 return;
             }
             [$file, $name, $info] = $routed;
-            $upgrade = SapiRequest::run($client, self::serverVariables($client, $root, $file, $name, $info), static fn () => $code($client, $file));
-            if (null !== $upgrade) {
-                // The connection runs it once this returned, in a Scope of its own, as in the
-                // WebSocket worker: seeded with the request's state as it was at upgrade()
-                $client->upgrade = static function (ClientRequest $client) use ($upgrade): void {
-                    SapiRequest::seed($upgrade[1]);
-                    self::upgraded($client, $upgrade[0]);
-                };
-            }
+            SapiRequest::run($client, self::serverVariables($client, $root, $file, $name, $info), static fn () => $code($client, $file));
         };
     }
 

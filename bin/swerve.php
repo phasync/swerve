@@ -196,10 +196,7 @@ require $autoload;
         exit(1);
     }
 
-    // The WebSockets of short-lived lifecycles move to the WebSocket workers over this pair: the
-    // workers write to one end (their fd 4), the WebSocket workers read the other (their fd 3)
-    [$toWebSockets, $webSockets] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
-    $supervisor                  = new Supervisor(new Lot($listener, $logger), $logger, $workers, \dirname(__DIR__) . '/inc', $out, $workDir, $toWebSockets, $webSockets, $grace, $watch ? $workDir : null);
+    $supervisor = new Supervisor(new Lot($listener, $logger), $logger, $workers, \dirname(__DIR__) . '/inc', $out, $workDir, $grace, $watch ? $workDir : null);
     try {
         phasync::run($supervisor->run(...));
     } finally {

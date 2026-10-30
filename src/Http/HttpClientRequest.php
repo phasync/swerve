@@ -134,7 +134,7 @@ final class HttpClientRequest implements ClientRequest
         $r->reusable   = false;
         $r->holders    = 1;
         $r->onEnd      = null;
-        $r->upgrade    = null;
+        $r->onUpgrade  = null;
         $r->responded  = null;
         $r->carriedOn  = false;
         $r->detached   = false;
@@ -156,13 +156,8 @@ final class HttpClientRequest implements ClientRequest
     /** Told when the request ended: its handler, and the coroutines it started (tail work). */
     public ?\Closure $onEnd = null;
 
-    /**
-     * Set by the handler to take the connection once it returned: the connection's coroutine
-     * then runs it with run(), in a Scope of its own (Swerve::upgrade()).
-     *
-     * @var ?\Closure(\Swerve\ClientRequest): void
-     */
-    public ?\Closure $upgrade = null;
+    /** Told when its handler runs an upgrade (Swerve::upgrade()) for as long as the connection is open. */
+    public ?\Closure $onUpgrade = null;
 
     /** The response ended: whether the connection is kept alive; null until then. */
     public ?bool $responded = null;
@@ -487,8 +482,7 @@ final class HttpClientRequest implements ClientRequest
 
     /**
      * Run $handler and finish the exchange: end the response if the handler did not, and skip
-     * the request body's unread rest, or close. Returns whether the connection stays open. A
-     * handler that set $upgrade leaves the exchange open, for run() with that closure.
+     * the request body's unread rest, or close. Returns whether the connection stays open.
      */
     public function run(\Closure $handler): bool
     {
@@ -498,9 +492,6 @@ final class HttpClientRequest implements ClientRequest
         $status      = 500;
         try {
             $handler($this);
-            if (null !== $this->upgrade) {
-                return false;
-            }
             $keepAlive = $this->complete();
             $status    = $this->status;
         } catch (HttpError $e) {
@@ -534,10 +525,8 @@ final class HttpClientRequest implements ClientRequest
             }
             $status = $this->wire ? $this->status : 500;
         } finally {
-            if (null === $this->upgrade) {
-                $this->finished = $this->ended = true;
-                $c->access?->request($this->method, $this->target, $status, (\hrtime(true) - $this->start) / 1e9);
-            }
+            $this->finished = $this->ended = true;
+            $c->access?->request($this->method, $this->target, $status, (\hrtime(true) - $this->start) / 1e9);
         }
 
         // A failure after finish() completed the response leaves the connection as that said

@@ -20,6 +20,12 @@ final class Accepted implements SelectableInterface
     /** What the request threw, for await() to throw. */
     private ?\Throwable $failure = null;
 
+    /** Its handler took the connection, for as long as that is open (Swerve::upgrade()). */
+    private bool $upgraded = false;
+
+    /** Raised when it is done or upgraded: what a worker's drain waits for. */
+    private ?object $settled = null;
+
     /**
      * @param \Closure(ClientRequest): void $handler the application's, for a request that is not a file
      * @param ?StaticFiles                  $files   the files served without the application
@@ -60,5 +66,24 @@ final class Accepted implements SelectableInterface
     {
         $this->done = true;
         phasync::raiseFlag($this);
+        null === $this->settled || phasync::raiseFlag($this->settled);
+    }
+
+    /** @internal its handler runs an upgrade, as long as the connection is open */
+    public function upgraded(): void
+    {
+        $this->upgraded = true;
+        null === $this->settled || phasync::raiseFlag($this->settled);
+    }
+
+    /**
+     * @internal for a worker's drain: wait until the request is done, or runs an upgrade, which
+     * the stop then closes
+     */
+    public function awaitSettled(): void
+    {
+        while (!$this->done && !$this->upgraded) {
+            phasync::awaitFlag($this->settled ??= new \stdClass());
+        }
     }
 }

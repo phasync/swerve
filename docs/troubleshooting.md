@@ -28,10 +28,15 @@ work.
 go to different workers. Keep shared state in `Swerve::cache()`, a database or Redis, and use
 [publish and subscribe](publish-subscribe.md) to notify the other workers.
 
-**`Swerve::upgrade(): the closure moves to the WebSocket worker, and what it captures can't be
-serialized`.** In a `swerve.php` that accepts once per run, a WebSocket's closure runs in a
-WebSocket worker, with copies of what it captures: capture plain data, not connections or
-services. See [WebSockets](realtime.md#websockets).
+**`Swerve::upgrade(): the WebSocket moves to the WebSocket worker, and what goes with it can't be
+serialized`.** With a bootstrap file, the handler and the request's state are copied to a
+WebSocket worker: a closure captures plain data, not connections or services, and `$_SESSION`
+holds what `serialize()` takes. See
+[WebSockets](realtime.md#inline-or-moved-to-websocket-workers).
+
+**A worker stops answering while WebSockets are open.** In a `swerve.php` that accepts one request
+per run (WordPress's), `Swerve::upgrade()` keeps the worker for as long as its WebSocket is open.
+Pass a bootstrap file to move WebSockets to WebSocket workers.
 
 **`Swerve\HeadersSentException`.** The final head was committed already: by an earlier
 `sendResponseHeaders()`, or by a `write()`, `flush()`, `end()` or `sendFile()` that sent the implicit

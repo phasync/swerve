@@ -84,11 +84,53 @@ Swerve::upgrade(static function (Swerve\WebSocket $ws): void {
 `upgrade()` checks the handshake first, and throws `Swerve\UpgradeException` (answered with its
 status) for a request that is not a valid one.
 
-A `swerve.php` that accepts once per run ends with its request, and its connections with it. A
-WebSocket opened there moves on to one of swerve's WebSocket workers, started as they are needed:
-its `101` is sent here, and the closure, serialized along with what it captures, runs in that
-process. It has the application's Composer autoload and nothing else of the application: a class
-or function the closure needs must come from there.
+### Inline, or moved to WebSocket workers
+
+The handler runs in the request, which waits for it: it has the request's objects, superglobals
+and session data for as long as the WebSocket is open, and `upgrade()` returns once it closed. In a
+`swerve.php` that loops, other requests run meanwhile. One that accepts one request per run, as
+WordPress's, has its worker busy for as long as the WebSocket is open: a few WebSockets are fine,
+a chat for every visitor is not.
+
+Given a bootstrap file, the WebSocket moves instead. Its `101` is sent by the worker, and the
+connection goes on to a WebSocket worker that loaded the file once, as it started, in the global
+scope:
+
+```php
+// in the request
+Swerve::upgrade('chat_socket', __DIR__ . '/chat-bootstrap.php');
+```
+
+```php
+// chat-bootstrap.php: what chat_socket() needs, and nothing per user (the Composer autoload is
+// loaded already)
+function chat_socket(Swerve\WebSocket $ws): void
+{
+    $room = $_GET['room'] ?? 'lobby';                 // the request's state moves along
+    foreach ($ws as $message) {
+        $ws->send("$room: $message");
+    }
+}
+```
+
+- Each bootstrap file has its own WebSocket workers, up to one per worker, started as they are
+  first needed. Every WebSocket a worker moves with a file goes to the same one; there is no
+  rebalancing.
+- The handler is the name of a function or `[class, static method]` that the file or the Composer
+  autoload defines. A static closure moves too when phasync/serializor is installed, serialized
+  with what it captures.
+- It runs in a `Scope` of its own, seeded with the request's `$_GET`, `$_POST`, `$_COOKIE`,
+  `$_FILES`, `$_REQUEST`, `$_SERVER`, `$_SESSION` data, timezone and intl locale as they were at
+  the call.
+- WebSocket workers take part in `Swerve::publish()`, `subscribe()`, `cache()` and `container()`
+  as the workers do: the bootstrap file adds the services its handlers need, and a limit counts
+  across every process.
+- One WebSocket worker serves many WebSockets at once, which share its globals. In WordPress,
+  `$wpdb`, the current user and the object cache are such globals: keep what is per user in the
+  handler, and give WebSockets a database connection each (a limited container service), or
+  talk to the request side with `Swerve::publish()`.
+- A bootstrap file that throws is logged as critical: its WebSockets are closed, and it is tried
+  again a second later. A handler it doesn't define closes its WebSocket, logged as critical.
 
 ## Raw connections
 

@@ -40,26 +40,19 @@ final class SapiRequest
     /** finish() completed the response (or its body reached its content-length): output goes nowhere. */
     private bool $finished;
 
-    /** upgrade()'s closure and the request's state() it runs with, for the connection once the request ended. */
-    private ?array $upgrade;
-
     private function __construct()
     {
     }
 
     /**
      * Run $code as a request of $client under sapi(), with $server as its $_SERVER entries.
-     *
-     * @return array{0: \Closure, 1: array}|null upgrade()'s closure and its state(), to run on the
-     *                                         connection now that the request ended
      */
-    public static function run(ClientRequest $client, array $server, \Closure $code): ?array
+    public static function run(ClientRequest $client, array $server, \Closure $code): void
     {
         $sapi           = self::popInstance() ?? new self();
         $sapi->client   = $client;
         $sapi->server   = $server;
         $sapi->gone     = $sapi->upgraded = $sapi->finished = false;
-        $sapi->upgrade  = null;
         $scope          = \Scope::getCurrent();
         self::$requests ??= new \WeakMap();
         self::$requests[$scope] = $sapi;
@@ -67,21 +60,19 @@ final class SapiRequest
             \phasync\ext\sapi($code, $sapi);
         } finally {
             unset(self::$requests[$scope]);
-            $upgrade = $sapi->upgrade;
+            $upgraded = $sapi->upgraded;
             $sapi->returnToPool();
         }
-        // Unless upgrade() hands it on, the code under sapi() never had $client, and SapiRequest let go of it
-        if (null === $upgrade && $client instanceof HttpClientRequest) {
+        // Unless upgrade() gave it to a handler (which may keep its WebSocket, say), the code under
+        // sapi() never had $client, and SapiRequest let go of it
+        if (!$upgraded && $client instanceof HttpClientRequest) {
             $client->reusable();
         }
-
-        return $upgrade;
     }
 
     public function returnToPool(): void
     {
         unset($this->client, $this->server);
-        $this->upgrade = null;
         $this->pushInstance();
     }
 
@@ -98,12 +89,11 @@ final class SapiRequest
     }
 
     /**
-     * Take the connection off the request running in this scope, for $upgrade with $state once
-     * the request ended (see {@see \Swerve\Swerve::upgrade()}).
+     * Take the connection off the request running in this scope (see {@see \Swerve\Swerve::upgrade()}).
      *
      * @throws \LogicException outside a request, a second time, or once the response has begun
      */
-    public static function upgrade(\Closure $upgrade, array $state): void
+    public static function upgrade(): void
     {
         $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
         if (null === $sapi) {
@@ -120,7 +110,6 @@ final class SapiRequest
             throw new \LogicException('Swerve::upgrade() is called before the response begins; there is output in an output buffer');
         }
         $sapi->upgraded = true;
-        $sapi->upgrade  = [$upgrade, $state];
     }
 
     /**

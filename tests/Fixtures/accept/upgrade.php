@@ -5,7 +5,7 @@ use Swerve\Swerve;
 use Swerve\UpgradeException;
 use Swerve\WebSocket;
 
-/** What the request saw after upgrade(), for the closure to tell the client (it runs after the request). */
+/** What the request saw after upgrade(), for a later request to tell the client. */
 final class Seen
 {
     public static string $note = '';
@@ -14,7 +14,7 @@ final class Seen
     public static ?WeakReference $request = null;
 }
 
-// Swerve::upgrade(): the connection goes on to a closure once the request ended
+// Swerve::upgrade(): the request runs the handler, and goes on once it closed
 while (Swerve::accept(null, function () {
     switch (strtok($_SERVER['REQUEST_URI'], '?')) {
         case '/ws-state':
@@ -28,6 +28,10 @@ while (Swerve::accept(null, function () {
             $_GET['changed'] = $_SERVER['QUERY_STRING'] = 'after upgrade()';
 
             return;
+        case '/seen':
+            echo Seen::$note;
+
+            return;
         case '/tz':
             echo json_encode([$_GET, date_default_timezone_get()]);
 
@@ -35,7 +39,7 @@ while (Swerve::accept(null, function () {
         case '/raw':
             Swerve::upgrade(static function (ClientRequest $client): void {
                 $client->sendResponseHeaders(200, ['x-raw' => 'yes']);
-                $client->write('written to the ClientRequest: ' . Seen::$note);
+                $client->write('written to the ClientRequest');
                 $client->end();
             });
             header('X-Ignored: yes'); // the request has no connection any more

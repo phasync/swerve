@@ -1,8 +1,9 @@
 <?php
 
 /*
- * A swerve WebSocket worker, forked from the master as WebSockets need one: it serves those that
- * short-lived lifecycles moved here (Swerve\Lot\WebSocketWorker), until the master says stop.
+ * A swerve WebSocket worker, forked from the master as WebSockets need one: it loads its bootstrap
+ * file, then serves the WebSockets that Swerve::upgrade() moved here with that
+ * file (Swerve\Lot\WebSocketWorker), until the master says stop.
  */
 
 (static function (): void {

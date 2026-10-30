@@ -119,11 +119,15 @@ it('upgrades on a PSR-7 101 response: the request body is what the client sends 
     expect(native_closed($conn))->toBeTrue();
 });
 
-it('refuses a PSR-7 101 response in a swerve.php that accepts once: the connection could not outlive its run', function () {
+it('upgrades on a PSR-7 101 response in a swerve.php that accepts once, the run going on with the connection', function () {
     [, $addr] = accept_start('psr7once.php', 1);
     $conn     = native_connect($addr);
-    fwrite($conn, "GET / HTTP/1.1\r\nHost: test\r\nConnection: Upgrade\r\nUpgrade: shout\r\n\r\n");
-    expect(native_read_head($conn)['status'])->toBe(500);
+    fwrite($conn, "GET / HTTP/1.1\r\nHost: test\r\nConnection: Upgrade\r\nUpgrade: shout\r\n\r\nhello");
+    expect(native_read_head($conn)['status'])->toBe(101)
+        ->and(read_exactly($conn, 5))->toBe('HELLO');
+    stream_socket_shutdown($conn, STREAM_SHUT_WR);
+    expect(native_closed($conn))->toBeTrue()
+        ->and(accept_request(native_connect($addr), '/')['body'])->toBe('Hello');
 });
 
 it('runs a PSR-7 closure under sapi(): PHP_SAPI, header(), and a form as getParsedBody() and $_POST', function () {
@@ -209,16 +213,17 @@ it('sends the status and headers of a request that dies before any output', func
         ->and($response['complete'])->toBeTrue();
 });
 
-it('gives the connection to Swerve::upgrade()\'s closure once the request ended', function () {
+it('runs Swerve::upgrade()\'s handler in the request, which goes on without its connection once it returned', function () {
     [, $addr] = accept_start('upgrade.php', 1);
     $conn     = native_connect($addr);
     $raw      = accept_request($conn, '/raw');
     expect($raw['headers']['x-raw'])->toBe('yes')
         ->and($raw['headers'])->not->toHaveKey('x-ignored')
-        ->and($raw['body'])->toBe('written to the ClientRequest: echo refused, aborted')
+        ->and($raw['body'])->toBe('written to the ClientRequest')
         ->and($raw['complete'])->toBeTrue();
-    // The connection goes on with the next request
-    expect(accept_request($conn, '/late')['body'])->toBe('begun, upgrade refused');
+    // The connection goes on with the next request; the request went on after the handler
+    expect(accept_request($conn, '/seen')['body'])->toBe('echo refused, aborted')
+        ->and(accept_request($conn, '/late')['body'])->toBe('begun, upgrade refused');
     $sse = accept_request($conn, '/sse');
     expect($sse['headers']['content-type'])->toStartWith('text/event-stream')
         ->and($sse['body'])->toBe("data: one\n\ndata: two\n\n");
@@ -231,14 +236,14 @@ it('serves a WebSocket on an upgraded request', function () {
     expect(ws_read($ws))->toBe([0x1, 'echo hi']);
 });
 
-it('runs a WebSocket in a Scope of its own, and frees the request that upgraded while the WebSocket is open', function () {
+it('runs an inline WebSocket in the Scope of the request that upgraded', function () {
     [, $addr] = accept_start('upgrade.php', 1);
     $ws       = ws_connect($addr, '/ws-scope');
     ws_send($ws, 0x1, 'hi');
-    expect(ws_read($ws))->toBe([0x1, '[false,true]']); // [in the request's Scope, the request's Scope freed]
+    expect(ws_read($ws))->toBe([0x1, '[true,false]']); // [in the request's Scope, the request's Scope freed]
 });
 
-it('agrees permessage-deflate for an upgrade closure, in place and moved to a WebSocket worker', function (string $script) {
+it('agrees permessage-deflate for a WebSocket, inline and moved to a WebSocket worker', function (string $script) {
     [, $addr] = accept_start($script, 1);
     $conn     = native_connect($addr);
     fwrite($conn, "GET /ws HTTP/1.1\r\nHost: t\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " . base64_encode(random_bytes(16)) . "\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n\r\n");
@@ -253,10 +258,10 @@ it('agrees permessage-deflate for an upgrade closure, in place and moved to a We
     $length  = 126 === $length ? unpack('n', fread($conn, 2))[1] : $length;
     $payload = stream_get_contents($conn, $length);
     expect(ord($b[0]) & 0x40)->toBe(0x40);
-    expect(inflate_add(inflate_init(ZLIB_ENCODING_RAW), $payload . "\x00\x00\xff\xff", ZLIB_SYNC_FLUSH))->toContain(" $text"); // upgrade.php: "echo …", short-lived.php: "hello … from <pid>"
+    expect(inflate_add(inflate_init(ZLIB_ENCODING_RAW), $payload . "\x00\x00\xff\xff", ZLIB_SYNC_FLUSH))->toContain(" $text"); // upgrade.php: "echo …", short-lived.php: "echo … from <pid>"
 })->with(['upgrade.php', 'short-lived.php']);
 
-it('runs an upgrade closure with the request\'s superglobals, session data and timezone, in place and moved to a WebSocket worker', function (string $script) {
+it('runs a WebSocket with the request\'s superglobals, session data and timezone, inline and moved to a WebSocket worker', function (string $script) {
     [, $addr] = accept_start($script, 1);
     $ws       = ws_connect($addr, '/ws-state?n=1');
     ws_send($ws, 0x1, 'hi');
@@ -318,27 +323,99 @@ it('gives what a handler threw to the swerve.php that awaits the request; the cl
     unlink($caught[0]);
 });
 
-it('serves the next request while an upgraded connection goes on, also when swerve.php awaits each request', function () {
+it('holds up the next request of a swerve.php that awaits each until an inline WebSocket closed; a moved one does not', function () {
     [, $addr] = accept_start('upgrade-await.php', 1);
-    $ws       = ws_connect($addr, '/ws');
+    $moved    = ws_connect($addr, '/ws-moved');
     expect(accept_request(native_connect($addr), '/')['body'])->toBe('hello');
+    $ws   = ws_connect($addr, '/ws');
+    $next = native_connect($addr);
+    fwrite($next, "GET / HTTP/1.1\r\nHost: test\r\n\r\n");
+    stream_set_timeout($next, 0, 300000);
+    expect((string) fread($next, 8192))->toBe('');
     ws_send($ws, 0x1, 'still here');
     expect(ws_read($ws))->toBe([0x1, 'echo still here']);
+    ws_send($ws, 0x8, "\x03\xe8");
+    ws_read($ws);
+    stream_set_timeout($next, 5);
+    expect(native_read_head($next)['status'])->toBe(200);
+    ws_send($moved, 0x1, 'moved');
+    expect(ws_read($moved)[1])->toStartWith('echo moved from ');
 });
 
-it('moves a WebSocket out of a lifecycle that serves one request, with what its closure captured', function () {
+it('runs an inline WebSocket in the worker of a lifecycle that serves one request, any closure, the request waiting for it', function () {
     [, $addr] = accept_start('short-lived.php', 1);
-    $ws       = ws_connect($addr, '/ws');
+    $id       = uniqid();
+    $ws       = ws_connect($addr, "/ws-inline?id=$id");
+    ws_send($ws, 0x1, 'hi');
+    expect(ws_read($ws)[1])->toStartWith('inline hi from ');
+    ws_send($ws, 0x8, "\x03\xe8");
+    ws_read($ws);
+    $worker = accept_request(native_connect($addr), '/')['body'];
+    expect(file_get_contents(sys_get_temp_dir() . "/swerve-inline-$id"))->toBe('aborted');
+    unlink(sys_get_temp_dir() . "/swerve-inline-$id");
+    $ws = ws_connect($addr, "/ws-inline?id=$id");
+    ws_send($ws, 0x1, 'hi');
+    expect(ws_read($ws)[1])->toBe("inline hi from $worker");
+    @unlink(sys_get_temp_dir() . "/swerve-inline-$id");
+});
+
+it('closes an inline WebSocket of a lifecycle that serves one request when the worker stops: the master tells it, though it does not ask', function (int $signal, int $code) {
+    [$process, $addr] = accept_start('short-lived.php', 1);
+    $ws               = ws_connect($addr, '/ws-inline?id=' . uniqid());
+    ws_send($ws, 0x1, 'hi');
+    ws_read($ws);
+    posix_kill(proc_get_status($process)['pid'], $signal);
+    expect(ws_read($ws))->toBe([0x8, pack('n', $code)]);
+    if (SIGTERM === $signal) {
+        for ($deadline = microtime(true) + 5; proc_get_status($process)['running'] && microtime(true) < $deadline;) {
+            usleep(20000);
+        }
+        expect(proc_get_status($process)['running'])->toBeFalse();
+    } else {
+        expect(accept_request(native_connect($addr), '/')['status'])->toBe(200); // the new worker serves
+    }
+})->with([
+    'shutdown' => [SIGTERM, 1001],
+    'reload'   => [SIGHUP, 1012],
+]);
+
+it('moves a WebSocket with a bootstrap file: a function, a static method, or a static closure with what it captured', function (string $path, string $prefix) {
+    [, $addr] = accept_start('short-lived.php', 1);
+    $ws       = ws_connect($addr, $path);
     ws_send($ws, 0x1, 'hi');
     [$type, $reply] = ws_read($ws);
     $worker         = accept_request(native_connect($addr), '/')['body'];
     expect($type)->toBe(0x1)
-        ->and($reply)->toStartWith('echo hi from ')
-        ->and(substr($reply, 13))->not->toBe($worker);
+        ->and($reply)->toStartWith("{$prefix}hi from ")
+        ->and(substr($reply, strlen("{$prefix}hi from ")))->not->toBe($worker);
     // The worker's lifecycles go on; the WebSocket stays open
     accept_request(native_connect($addr), '/');
     ws_send($ws, 0x1, 'again');
-    expect(ws_read($ws)[1])->toStartWith('echo again from ');
+    expect(ws_read($ws)[1])->toStartWith("{$prefix}again from ");
+})->with([
+    'a function'      => ['/ws', 'echo '],
+    'a static method' => ['/ws-busy', ''],
+    'a closure'       => ['/ws-closure', 'closure '],
+]);
+
+it('loads a bootstrap file once per WebSocket worker, in the global scope; each file has its own', function () {
+    [$process, $addr] = accept_start('short-lived.php', 1);
+    $children         = static fn () => count(array_filter(explode("\n", (string) shell_exec('pgrep -P ' . proc_get_status($process)['pid']))));
+    expect($children())->toBe(1); // the worker, no WebSocket worker yet
+    $boots = [];
+    foreach ([1, 2] as $_) {
+        $ws = ws_connect($addr, '/ws-boots');
+        ws_send($ws, 0x1, 'hi');
+        $boots[] = json_decode(ws_read($ws)[1], true);
+    }
+    expect($boots[0])->toBe([1, $boots[1][1]])
+        ->and($boots[1][0])->toBe(1);
+    $admin = ws_connect($addr, '/ws-admin');
+    ws_send($admin, 0x1, 'hi');
+    $reply = ws_read($admin)[1];
+    expect($reply)->toStartWith('admin hi from ')
+        ->and(substr($reply, 14))->not->toBe((string) $boots[0][1])
+        ->and($children())->toBe(3);
 });
 
 it('stops a request whose client is gone at its next output, and only that request', function () {
@@ -370,10 +447,11 @@ it('refuses Swerve::upgrade() at the call when the request can\'t be upgraded so
         ->and(accept_request(native_connect($addr), '/')['body'])->toBe('hello');
 });
 
-it('refuses at the call a WebSocket closure that must move and captures what can\'t be serialized', function () {
+it('refuses at the call a moving closure that captures what can\'t be serialized, and a bootstrap file that does not exist', function () {
     [, $addr] = accept_start('short-lived.php', 1);
     $handshake = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n";
-    expect(accept_request(native_connect($addr), '/ws-resource', $handshake)['body'])->toStartWith('refused: Swerve::upgrade(): the closure moves');
+    expect(accept_request(native_connect($addr), '/ws-resource', $handshake)['body'])->toStartWith('refused: Swerve::upgrade(): the WebSocket moves')
+        ->and(accept_request(native_connect($addr), '/ws-nofile', $handshake)['body'])->toStartWith('refused: Swerve::upgrade(): the bootstrap file ');
 });
 
 it('runs the PHP file a request names below the static directory, index.php for a directory, and the script for the rest', function () {
@@ -396,38 +474,62 @@ it('parses cookies as PHP does: names as sent, values rawurldecoded, the first o
         ->toBe('{"a_b":"1","c":{"d":"2"},"e%20f":"3","g":"x y+z","h":"","i":""}');
 });
 
-it('starts a WebSocket worker when the first WebSocket moves, and another when those running are busy', function () {
-    [$process, $addr] = accept_start('short-lived.php', 2);
-    $children         = static fn () => count(array_filter(explode("\n", (string) shell_exec('pgrep -P ' . proc_get_status($process)['pid']))));
-    expect($children())->toBe(2); // the two workers, no WebSocket worker yet
-
-    $first = ws_connect($addr, '/ws-busy');
+it('moves every WebSocket of a worker with one bootstrap file to the same WebSocket worker, busy or not', function () {
+    [, $addr] = accept_start('short-lived.php', 1);
+    $first    = ws_connect($addr, '/ws-busy');
     ws_send($first, 0x1, 'hi');
-    [, $reply] = ws_read($first);
-    expect($children())->toBe(3);
-    $busy = substr($reply, strlen('hi from '));
-
-    // While that one is busy, a second WebSocket waits unread: the master starts another for it
+    $pid = substr(ws_read($first)[1], strlen('hi from '));
     ws_send($first, 0x1, 'block');
     usleep(100000);
     $second = ws_connect($addr, '/ws-busy');
     ws_send($second, 0x1, 'hi');
-    $started = microtime(true);
-    [, $other] = ws_read($second);
-    expect(substr($other, strlen('hi from ')))->not->toBe($busy)
-        ->and(microtime(true) - $started)->toBeLessThan(1.5)
-        ->and($children())->toBe(4)
-        ->and(ws_read($first)[1])->toBe("block from $busy");
+    expect(ws_read($second)[1])->toBe("hi from $pid")
+        ->and(ws_read($first)[1])->toBe("block from $pid");
 });
 
-it('a moved WebSocket that needs code the application does not autoload is fatal: logged, and the WebSocket worker exits; the next starts another', function (string $path) {
+it('closes a moved WebSocket whose handler the bootstrap file does not define, and the others go on', function () {
+    [, $addr, $log] = accept_start('short-lived.php', 1);
+    $ws             = ws_connect($addr, '/ws');
+    ws_send($ws, 0x1, 'hi');
+    $pid     = substr(ws_read($ws)[1], strlen('echo hi from '));
+    $missing = ws_connect($addr, '/ws-missing');
+    expect(ws_read($missing))->toBeNull();
+    log_wait($log, '/critical .*ws_no_such_handler, which neither the bootstrap file nor the Composer autoload defines/s', 5);
+    ws_send($ws, 0x1, 'again');
+    expect(ws_read($ws)[1])->toBe("echo again from $pid");
+});
+
+it('logs a bootstrap file that fails, closes its WebSockets, and tries it again a second later', function () {
+    [$process, $addr, $log] = accept_start('short-lived.php', 1);
+    $ws                     = ws_connect($addr, '/ws-broken');
+    expect(ws_read($ws))->toBeNull();
+    log_wait($log, '/critical .*bootstrap file .*ws-boot-broken\.php failed: .*the database is down/s', 5);
+    log_wait($log, '/exited \(exit 78\)/', 5);
+    // Within the second: closed without starting another
+    $ws = ws_connect($addr, '/ws-broken');
+    expect(ws_read($ws))->toBeNull();
+    log_wait($log, '/WebSocket for .*ws-boot-broken\.php is closed: its WebSocket worker failed to start a moment ago/', 5);
+    usleep(1100000);
+    $ws = ws_connect($addr, '/ws-broken');
+    expect(ws_read($ws))->toBeNull()
+        ->and(count(log_wait($log, '/ws-boot-broken\.php failed/', 5)))->toBe(2)
+        // The other files are not held up
+        ->and(ws_read((static function () use ($addr) {
+            $ws = ws_connect($addr, '/ws');
+            ws_send($ws, 0x1, 'hi');
+
+            return $ws;
+        })())[1])->toStartWith('echo hi from ');
+});
+
+it('a moved WebSocket that needs code neither its bootstrap file nor the autoload has is fatal: logged, and the WebSocket worker exits; the next starts another', function (string $path) {
     [, $addr, $log] = accept_start('short-lived.php', 1);
     $ws = ws_connect($addr, $path);
     ws_send($ws, 0x1, 'hi');
     do {
         $frame = ws_read($ws); // a 1011, if the callback got to run
     } while (null !== $frame);
-    log_wait($log, '/critical .*has the application\'s Composer autoload/s', 5);
+    log_wait($log, '/critical .*has what its bootstrap file loads/s', 5);
     // The next WebSocket that moves gets a new WebSocket worker
     $ws = ws_connect($addr, '/ws');
     ws_send($ws, 0x1, 'hi');

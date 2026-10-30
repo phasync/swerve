@@ -36,10 +36,14 @@ use Swerve\Util\ObjectPoolTrait;
  *   this worker): the worker stops, see {@see LotClient::stop()}.
  * - worker 'R' + connection: back, kept alive, with its next request waiting.
  * - worker 'B' + connection: back, kept alive and idle: the lifecycle ended before its next request.
+ * - worker 'U': a request of this lifecycle runs an upgrade, and may hold the worker (one accept()
+ *   per run) without asking: the master sends it 'S' or 'L' at once when it is to stop.
  *
- * And to the WebSocket worker, over the socket on file descriptor 4 (see {@see WebSocketWorker}):
+ * And to the master, over the socket on file descriptor 4, which belongs to the worker's slot (see
+ * {@see Supervisor}): the master hands it to the slot's WebSocket worker for the bootstrap file.
  *
- * - worker 'W' + the serialized closure + connection: an open WebSocket, its `101` sent.
+ * - worker 'W' + the bootstrap file + "\0" + what moves (see {@see WebSocketWorker}) + connection:
+ *   an open WebSocket, its `101` sent.
  *
  * @internal
  */
@@ -47,10 +51,10 @@ final class LotClient
 {
     private const FD = 3;
 
-    /** The socket to the WebSocket worker. */
+    /** The socket the slot's WebSockets move over. */
     private const WEBSOCKETS_FD = 4;
 
-    /** The largest serialized closure that moves to the WebSocket worker: one packet. */
+    /** The largest handler and state that move to a WebSocket worker, serialized: one packet. */
     public const MAX_MOVE = 131072;
 
     /** Requests in a row this worker serves on a connection; then it goes back to the master. */
@@ -65,6 +69,15 @@ final class LotClient
     private $channel;
 
     private \Socket $socket;
+
+    /** @var \WeakMap<Accepted, \Fiber> the requests whose handler runs an upgrade, and the coroutine it runs in */
+    private \WeakMap $upgraded;
+
+    /** The master knows ('U') that a request of this lifecycle runs an upgrade. */
+    private bool $toldUpgrading = false;
+
+    /** @var resource|null the slot's socket WebSockets move over */
+    private $moves;
 
     /** @var list<resource> from the master, with a request waiting, not yet served here */
     private array $stash = [];
@@ -83,9 +96,6 @@ final class LotClient
 
     /** @var array<int, resource> kept alive, waiting for their next request, by resource id */
     private array $idle = [];
-
-    /** accept() calls in this lifecycle. */
-    private int $accepts = 0;
 
     /** accept() calls waiting for a connection. */
     private int $accepting = 0;
@@ -130,10 +140,14 @@ final class LotClient
         if (false === $socket) {
             throw new \LogicException('Swerve::accept() serves requests in a worker that swerve started: run the application with `swerve`');
         }
-        $this->channel = $channel;
-        $this->socket  = $socket;
-        $this->started = new \WeakMap();
-        $this->max     = Lot::connectionLimit();
+        $this->channel  = $channel;
+        $this->socket   = $socket;
+        // Opened here, outside any request: php://fd is the CLI SAPI's, not sapi()'s
+        $moves          = @\fopen('php://fd/' . self::WEBSOCKETS_FD, 'r+');
+        $this->moves    = false === $moves ? null : $moves;
+        $this->started  = new \WeakMap();
+        $this->upgraded = new \WeakMap();
+        $this->max      = Lot::connectionLimit();
     }
 
     /**
@@ -188,7 +202,6 @@ final class LotClient
      */
     public function accept(\Closure $handler, ?StaticFiles $files): Accepted
     {
-        ++$this->accepts;
         $request = new Accepted($handler, $files);
         if (!$this->assign($request)) {
             throw new WorkerStoppingException($this->stopping);
@@ -198,19 +211,10 @@ final class LotClient
     }
 
     /**
-     * accept() was called once so far: the lifecycle may be one that ends after each request
-     * (WordPress's), which a connection can't outlive.
+     * Move $client's connection, its `101` sent, to the WebSocket worker for $bootstrap, with
+     * $moving (serialized); the request ends here, without closing it.
      */
-    public function shortLived(): bool
-    {
-        return 1 === $this->accepts;
-    }
-
-    /**
-     * Move $client's connection, its `101` sent, to the WebSocket worker, with $closure
-     * (serialized); the request ends here, without closing it.
-     */
-    public function moveWebSocket(HttpClientRequest $client, string $closure): void
+    public function moveWebSocket(HttpClientRequest $client, string $bootstrap, string $moving): void
     {
         foreach ($this->connections as $id => [$http]) {
             if ($http->current() === $client) {
@@ -220,16 +224,13 @@ final class LotClient
         // The client waits for the 101 before it writes (RFC 6455, 4.1): bytes read already broke
         // that, and can't go along: the connection closes
         if ($http->bufferEmpty()) {
-            $stream = @\fopen('php://fd/' . self::WEBSOCKETS_FD, 'r+');
-            if (false === $stream) {
+            if (null === $this->moves) {
                 throw new \LogicException('No WebSocket worker to move the connection to: run the application with `swerve`');
             }
             try {
-                self::send(\socket_import_stream($stream), "W$closure", $this->busy[$id]);
+                self::send(\socket_import_stream($this->moves), "W$bootstrap\0$moving", $this->busy[$id]);
             } catch (\RuntimeException $e) {
                 throw new \RuntimeException('Moving a WebSocket to the WebSocket worker failed', 0, $e);
-            } finally {
-                \fclose($stream);
             }
         }
         $client->moved();
@@ -330,10 +331,12 @@ final class LotClient
             if ($for !== $request) {
                 // The application's handler, which notes that the request was not a file; the
                 // request is done when its code ended, tail work included
-                $http->handler = static function (ClientRequest $client) use ($request, &$application): void {
+                $lot           = $this;
+                $http->handler = static function (ClientRequest $client) use ($request, &$application, $lot): void {
                     $application = true;
                     if ($client instanceof HttpClientRequest) {
-                        $client->onEnd = $request->done(...);
+                        $client->onEnd     = $request->done(...);
+                        $client->onUpgrade = static fn () => $lot->upgrading($request);
                     }
                     try {
                         ($request->handler)($client);
@@ -484,14 +487,13 @@ final class LotClient
         if (null === $this->stopping) {
             return;
         }
+        // Requests that upgraded run on until the stop closes their connections
         foreach ($this->started as $request => $_) {
-            try {
-                $request->await();
-            } catch (\Throwable) {
-                // its client got its answer; the application's await() has it
-            }
+            $request->awaitSettled();
         }
-        Topics::drain($this->stopping);
+        if (!Topics::$closed) {
+            Topics::drain($this->stopping);
+        }
         if (phasync::shutdown(self::STOP_WINDOW, new WorkerStoppingException($this->stopping)) > 0) {
             exit(0); // what did not end is dropped
         }
@@ -554,6 +556,43 @@ final class LotClient
             $this->giveBack($conn, 'R');
         }
         $this->idle = $this->ready = $this->stash = [];
+        if (0 < \count($this->upgraded)) {
+            phasync::go($this->stopUpgrades(...));
+        }
+    }
+
+    /**
+     * $request's handler runs an upgrade in this coroutine, for as long as its connection is open:
+     * the master is told once per lifecycle, so it tells this worker to stop although it does not ask.
+     */
+    public function upgrading(Accepted $request): void
+    {
+        $request->upgraded();
+        $this->upgraded[$request] = \Fiber::getCurrent();
+        if (!$this->toldUpgrading) {
+            $this->toldUpgrading = true;
+            self::send($this->socket, 'U');
+        }
+    }
+
+    /**
+     * The worker stops with requests that run an upgrade, which may be what swerve.php awaits (one
+     * accept() per run): once the others are done, the drain begins, and their connections get
+     * the WorkerStoppingException, as in drain().
+     */
+    private function stopUpgrades(): void
+    {
+        foreach ($this->started as $request => $_) {
+            $request->awaitSettled();
+        }
+        if (!Topics::$closed) {
+            Topics::drain($this->stopping);
+        }
+        foreach ($this->upgraded as $request => $fiber) {
+            if (!$request->isReady() && !$fiber->isTerminated()) {
+                phasync::cancel($fiber, new WorkerStoppingException($this->stopping));
+            }
+        }
     }
 
     /**

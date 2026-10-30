@@ -53,9 +53,11 @@ ended too, so your `swerve.php` decides what waits for it: one `accept()` per ru
 request, serves the next only after it; a `while (Swerve::accept(...))` loop serves the next at
 once, the connection's next request too.
 
-After `Swerve::upgrade()`, the connection's coroutine runs the closure once the handler returned,
-in a `Scope` of its own seeded with the request's state, as it would in a WebSocket worker; the
-request is freed while the WebSocket stays open.
+`Swerve::upgrade()` runs its handler in the request, which waits for it, so code after the call
+runs once the connection closed. Given a bootstrap file, a WebSocket moves to a WebSocket worker
+instead: one process per worker and bootstrap file, which loaded that file as it started, and
+serves the WebSockets in a `Scope` each, seeded with the request's state
+([Realtime](realtime.md#inline-or-moved-to-websocket-workers)).
 
 ```php
 echo json_encode(['queued' => true]);

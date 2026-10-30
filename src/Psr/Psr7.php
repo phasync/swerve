@@ -11,7 +11,6 @@ use phasync\Psr\UploadedFile;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\ClientRequest;
-use Swerve\Lot\LotClient;
 use Swerve\Swerve;
 
 /**
@@ -44,9 +43,6 @@ final class Psr7
         if (101 === $response->getStatusCode()) {
             if (null === $upgrade) {
                 throw new \LogicException('A PSR-7 handler answered 101 to a request without an Upgrade header');
-            }
-            if (LotClient::get()->shortLived()) {
-                throw new \LogicException('A PSR-7 101 response needs a swerve.php that keeps calling Swerve::accept(): one that accepts once per run ends with the request, and the connection with it');
             }
             self::upgrade($response, $upgrade);
 

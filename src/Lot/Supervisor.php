@@ -26,6 +26,13 @@ use Swerve\Util\SharedLog;
  *   fails to start leaves the old one serving until a later one starts. The WebSocket workers
  *   stop with Reload; new ones start as WebSockets need them.
  *
+ * WebSocket workers: each slot has a socket of its own that its workers move WebSockets over
+ * (their fd 4, see {@see LotClient::moveWebSocket()}), and the slot has a WebSocket worker for
+ * each bootstrap file, started when it first gets one. So every WebSocket a slot moves with a
+ * file goes to the same process, and a file has at most one per slot. One that exits is
+ * replaced as the next WebSocket arrives; one whose bootstrap file failed, not before a second
+ * passed (the WebSockets meanwhile are closed).
+ *
  * With `$watch`, a change to a PHP file below that directory reloads (vendor/ and dot-names
  * left out; vendor/composer/installed.php tells when Composer ran).
  *
@@ -42,8 +49,18 @@ final class Supervisor
     /** @var array<int, resource> the channel to each worker process, by pid */
     private array $channels = [];
 
-    /** @var array<int, resource> the control socket of each WebSocket worker that is not stopping, by pid */
+    /** @var array<int, array{0: resource, 1: resource}> each slot's socket WebSockets move over: [its workers' end, the master's] */
+    private array $moves = [];
+
+    /**
+     * @var array<string, array<int, array{0: resource, 1: resource}>> the WebSocket workers that
+     *                                                                  are not stopping, by bootstrap file and slot: [the socket to
+     *                                                                  them, their control socket]
+     */
     private array $webSocketWorkers = [];
+
+    /** @var array<string, float> when a WebSocket worker whose bootstrap file failed exited, by slot and file */
+    private array $failed = [];
 
     /** @var array<int, true> every child process, by pid */
     private array $children = [];
@@ -54,9 +71,7 @@ final class Supervisor
     private object $exited;
 
     /**
-     * @param resource $out          stdout and stderr of the children
-     * @param resource $toWebSockets the end the workers write moved WebSockets to (their fd 4)
-     * @param resource $webSockets   the end the WebSocket workers read them from (their fd 3)
+     * @param resource $out stdout and stderr of the children
      */
     public function __construct(
         private readonly Lot $lot,
@@ -65,8 +80,6 @@ final class Supervisor
         private readonly string $inc,
         private $out,
         private readonly string $workDir,
-        private $toWebSockets,
-        private $webSockets,
         private readonly float $grace,
         private readonly ?string $watch,
     ) {
@@ -77,8 +90,9 @@ final class Supervisor
     public function run(): void
     {
         phasync::go($this->lot->run(...));
-        phasync::service($this->webSocketWorkersOnDemand(...));
         for ($n = 0; $n < $this->workers; ++$n) {
+            $this->moves[$n] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
+            phasync::service(fn () => $this->moved($n));
             $this->startWorker($n);
         }
         if (null !== $this->watch) {
@@ -99,10 +113,7 @@ final class Supervisor
     {
         $this->stopping = true;
         $this->lot->shutdown();
-        foreach ($this->webSocketWorkers as $control) {
-            $this->tell($control, 'S');
-        }
-        $this->webSocketWorkers = [];
+        $this->tellWebSocketWorkers('S');
         $kill = phasync::go(function (): void {
             try {
                 phasync::signal([\SIGTERM, \SIGINT], $this->grace);
@@ -129,10 +140,7 @@ final class Supervisor
                 \opcache_invalidate($path, true);
             }
         }
-        foreach ($this->webSocketWorkers as $control) {
-            $this->tell($control, 'L');
-        }
-        $this->webSocketWorkers = [];
+        $this->tellWebSocketWorkers('L');
         $started = \microtime(true);
         $waiting = \count($this->slots);
         foreach ($this->slots as $n => $old) {
@@ -154,7 +162,7 @@ final class Supervisor
     private function startWorker(int $n, ?\Closure $onReady = null): void
     {
         [$master, $channel] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
-        $pid                = $this->fork("$this->inc/worker.php", [$channel, $this->toWebSockets]);
+        $pid                = $this->fork("$this->inc/worker.php", [$channel, $this->moves[$n][0]]);
         \fclose($channel);
         $this->slots[$n]      = $pid;
         $this->channels[$pid] = $master;
@@ -179,42 +187,102 @@ final class Supervisor
         });
     }
 
-    /**
-     * WebSocket workers on demand, which read the moved WebSockets in turn: the first when a
-     * WebSocket first waits there, another whenever one waits there unread for 10 ms (those
-     * running are busy), up to one per worker. Only watches the end; never reads it.
-     */
-    private function webSocketWorkersOnDemand(): void
+    /** Hand the WebSockets slot $n moves to its WebSocket worker for their bootstrap file. */
+    private function moved(int $n): void
     {
-        while (!$this->stopping) {
-            phasync::readable($this->webSockets);
-            if ([] !== $this->webSocketWorkers) {
-                phasync::sleep(0.01);
-                $waiting = [$this->webSockets];
-                $none    = null;
-                if (0 === \stream_select($waiting, $none, $none, 0)) {
-                    continue; // taken meanwhile
+        $from   = $this->moves[$n][1];
+        $socket = \socket_import_stream($from);
+        while (null !== $packet = LotClient::receive($from, $socket, 1 + \PHP_MAXPATHLEN + 1 + LotClient::MAX_MOVE)) {
+            [$bytes, $conn] = $packet;
+            unset($packet);
+            try {
+                $this->handOn($n, $bytes, $conn);
+            } finally {
+                if (null !== $conn) {
+                    \socket_close($conn); // the master's copy: the WebSocket worker has its own, or it closes
                 }
             }
-            if ($this->stopping || \count($this->webSocketWorkers) >= $this->workers) {
-                phasync::sleep(0.5);
-
-                continue;
-            }
-            [$master, $control] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
-            $pid                = $this->fork("$this->inc/websocket-worker.php", [$this->webSockets, $control]);
-            \fclose($control);
-            $this->webSocketWorkers[$pid] = $master;
-            phasync::go(function () use ($pid, $master): void {
-                $status = $this->waitFor($pid);
-                \fclose($master);
-                if (isset($this->webSocketWorkers[$pid])) {
-                    unset($this->webSocketWorkers[$pid]);
-                    $this->logger->warning('A WebSocket worker exited ({status})', ['status' => $status]);
-                }
-            });
-            phasync::sleep(0.5); // its start: until it reads, what waits is no sign of busy ones
         }
+    }
+
+    /** Hand one WebSocket slot $n moved to the WebSocket worker for its file, starting that one if need be. */
+    private function handOn(int $n, string $bytes, ?\Socket $conn): void
+    {
+        $end = \strpos($bytes, "\0");
+        if ('W' !== $bytes[0] || null === $conn || false === $end) {
+            $this->logger->error('Slot {n} moved a packet that is no WebSocket', ['n' => $n]);
+
+            return;
+        }
+        $file = \substr($bytes, 1, $end - 1);
+        if ($this->stopping) {
+            return;
+        }
+        $to = $this->webSocketWorkers[$file][$n][0] ?? $this->startWebSocketWorker($file, $n);
+        if (null === $to) {
+            $this->logger->warning('A WebSocket for {file} is closed: its WebSocket worker failed to start a moment ago', ['file' => $file]);
+
+            return;
+        }
+        try {
+            LotClient::send(\socket_import_stream($to), 'W' . \substr($bytes, $end + 1), $conn);
+        } catch (\RuntimeException) {
+            // It is exiting (it shut its socket first): this one goes to the next
+            if ($to === ($this->webSocketWorkers[$file][$n][0] ?? null)) {
+                unset($this->webSocketWorkers[$file][$n]);
+            }
+            $to = $this->startWebSocketWorker($file, $n);
+            try {
+                null === $to || LotClient::send(\socket_import_stream($to), 'W' . \substr($bytes, $end + 1), $conn);
+            } catch (\RuntimeException $e) {
+                $this->logger->warning('A WebSocket could not move to the WebSocket worker for {file}: {exception}', ['file' => $file, 'exception' => $e]);
+            }
+        }
+    }
+
+    /**
+     * Start slot $n's WebSocket worker for $file: the socket to it, or null when the file failed
+     * in one less than a second ago.
+     *
+     * @return resource|null
+     */
+    private function startWebSocketWorker(string $file, int $n)
+    {
+        if (\microtime(true) - ($this->failed["$n:$file"] ?? 0) < 1) {
+            return null;
+        }
+        [$to, $from]        = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
+        [$master, $control] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_SEQPACKET, 0);
+        $pid                = $this->fork("$this->inc/websocket-worker.php", [$from, $control]);
+        \fclose($from);
+        \fclose($control);
+        $this->tell($to, "B$file"); // its first packet: the file to load
+        $this->webSocketWorkers[$file][$n] = [$to, $master];
+        phasync::go(function () use ($file, $n, $pid, $to, $master): void {
+            $status = $this->waitFor($pid);
+            if ($to === ($this->webSocketWorkers[$file][$n][0] ?? null)) {
+                unset($this->webSocketWorkers[$file][$n]);
+                $this->logger->warning('The WebSocket worker for {file} of slot {n} exited ({status})', ['file' => $file, 'n' => $n, 'status' => $status]);
+                if ('exit ' . WebSocketWorker::BOOTSTRAP_FAILED === $status) {
+                    $this->failed["$n:$file"] = \microtime(true);
+                }
+            }
+            \fclose($to);
+            \fclose($master);
+        });
+
+        return $to;
+    }
+
+    /** Tell every WebSocket worker to stop ($letter 'S') or that a reload replaces it ('L'). */
+    private function tellWebSocketWorkers(string $letter): void
+    {
+        foreach ($this->webSocketWorkers as $slots) {
+            foreach ($slots as [, $control]) {
+                $this->tell($control, $letter);
+            }
+        }
+        $this->webSocketWorkers = [];
     }
 
     /** Reload when a PHP file below $watch changes, and stays so for a scan. */

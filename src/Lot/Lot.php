@@ -15,7 +15,8 @@ use Psr\Log\LoggerInterface;
  * the line, or idle when the worker's lifecycle ended first, to wait here again.
  *
  * A worker told to stop ({@see Lot::stop()}) gets its stop letter for its next ask: 'S' (the
- * server shuts down) or 'L' (a reload replaces it); at its next lifecycle's hello, 's': exit. On
+ * server shuts down) or 'L' (a reload replaces it), at once when its lifecycle runs an upgrade
+ * ('U'); at its next lifecycle's hello, 's': exit. On
  * {@see Lot::shutdown()} the listener closes, connections without a request are closed, and
  * every worker's ask is answered with 'S' once no request waits in line.
  *
@@ -64,6 +65,9 @@ final class Lot
     /** @var \SplQueue<\Socket> workers waiting for a connection, oldest first */
     private \SplQueue $asking;
 
+    /** @var \WeakMap<\Socket, true> the workers whose lifecycle runs an upgrade ('U'), not told to stop yet */
+    private \WeakMap $upgrading;
+
     /** @var \WeakMap<\Socket, string> workers told to stop, with their stop letter */
     private \WeakMap $stopping;
 
@@ -85,12 +89,13 @@ final class Lot
     /** @param resource $listener a listening stream socket */
     public function __construct(private $listener, private readonly LoggerInterface $logger)
     {
-        $this->ready    = new \SplQueue();
-        $this->asking   = new \SplQueue();
-        $this->stopping = new \WeakMap();
-        $this->onReady  = new \WeakMap();
-        $this->room     = new \stdClass();
-        $this->max      = self::connectionLimit();
+        $this->ready     = new \SplQueue();
+        $this->asking    = new \SplQueue();
+        $this->upgrading = new \WeakMap();
+        $this->stopping  = new \WeakMap();
+        $this->onReady   = new \WeakMap();
+        $this->room      = new \stdClass();
+        $this->max       = self::connectionLimit();
         \stream_set_blocking($listener, false);
         // A response leaves in more than one write: without TCP_NODELAY, Nagle holds the last
         // one until the client's delayed ACK (40 ms) on every kept-alive request. Linux gives
@@ -219,6 +224,7 @@ final class Lot
                     'R'     => $this->ready(\socket_export_stream($conn)),
                     'B'     => phasync::go(fn () => $this->wait(\socket_export_stream($conn), self::KEPT_ALIVE_TIMEOUT)),
                     'H'     => $this->hello($socket),
+                    'U'     => $this->upgrading[$socket] = true,
                     default => throw new \UnexpectedValueException("A worker sent '$type'"),
                 };
             }
@@ -291,9 +297,22 @@ final class Lot
         }
     }
 
-    /** Answer the workers that ask and are to stop, or all of them once shut down. */
+    /**
+     * Answer the workers that ask and are to stop, or all of them once shut down; and tell those
+     * whose lifecycle runs an upgrade, which may not ask again before it ends.
+     */
     private function answerAsking(): void
     {
+        foreach ($this->upgrading as $worker => $_) {
+            if (null !== $letter = $this->stopping[$worker] ?? ($this->closed ? 'S' : null)) {
+                unset($this->upgrading[$worker]);
+                try {
+                    LotClient::send($worker, $letter);
+                } catch (\RuntimeException) {
+                    // gone already
+                }
+            }
+        }
         $left = new \SplQueue();
         foreach ($this->asking as $worker) {
             $letter = $this->stopping[$worker] ?? ($this->closed ? 'S' : null);
@@ -317,6 +336,7 @@ final class Lot
     private function hello(\Socket $worker): void
     {
         $this->withdraw($worker);
+        unset($this->upgrading[$worker]);
         LotClient::send($worker, isset($this->stopping[$worker]) || $this->closed ? 's' : 'h');
     }
 
