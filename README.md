@@ -52,7 +52,7 @@ the shared cache, publish/subscribe and the container.
 ext-phasync ships inside phasync, and swerve loads it by itself.
 
 ```bash
-composer require phasync/swerve
+composer require phasync/swerve:^0.2@RC   # 0.2 is a release candidate; without @RC Composer installs 0.1
 vendor/bin/swerve -S public          # serve a directory as php -S does: WordPress, Laravel's public/
 vendor/bin/swerve                    # run ./swerve.php
 vendor/bin/swerve --watch            # during development: reload when a PHP file changes

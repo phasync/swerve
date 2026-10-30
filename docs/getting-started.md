@@ -3,8 +3,10 @@
 ## Install
 
 ```bash
-composer require phasync/swerve
+composer require phasync/swerve:^0.2@RC
 ```
+
+0.2 is a release candidate: without `@RC`, Composer installs 0.1, which works differently.
 
 Swerve runs on the phasync extension, which ships with phasync: `vendor/bin/swerve` loads it by
 itself, or uses one installed with `pie install phasync/ext-phasync`. See

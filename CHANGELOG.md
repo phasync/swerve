@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-RC2 (2026-10-30)
+
+Needs only stable releases: phasync 2.0.7 (with ext-phasync 2.0.7, ext-scope 0.6.0 and fiber-interop/scope 0.5.0) and phasync/net 2.0.2. A request runs in its connection's coroutine, and nothing that serves requests is started inside one.
 
 - A request whose response ended (Content-Length, `fastcgi_finish_request()`, or its handler returned) runs its tail work to the end in its coroutine and `Scope`; once that work waits, a spare coroutine, reused, goes on with the connection. What `Swerve::accept()` returned is ready only once that work ended: one `accept()` per run, or awaiting each request, waits for it; an `accept()` loop serves the connection's next request meanwhile. Static files are answered with no `Scope`. (#102)
 - Nothing that serves the requests is started by a request any more, which kept that request alive (its `Scope`, superglobals, and a container slot it held) for as long as the service ran: pub/sub's reader, the limited services' listener and the WebSocket pings start with the worker's lifecycle and wait until a request needs them; pub/sub hands messages to its subscriptions without a coroutine per topic. A limited `Swerve::container()` service may be added inside a request. (#102)
