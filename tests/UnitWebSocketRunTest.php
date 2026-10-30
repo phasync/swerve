@@ -199,3 +199,28 @@ test('the lifecycle\'s ping service, started before any WebSocket, waits while n
         WebSocket::$pingInterval = $interval;
     }
 });
+
+test('$ws is the app\'s to use as a flag: its messages wake no waiter of the app, and the app raising it disturbs no receive()', function () {
+    $connection = new MemoryDuplex();
+
+    $woken = phasync::run(function () use ($connection) {
+        $woken = null;
+        WebSocket::run($connection, function (WebSocket $ws) use ($connection, &$woken) {
+            $waiter = phasync::go(fn () => phasync::awaitFlag($ws, 0.05, false)); // the app's own wait on $ws
+            phasync::go(function () use ($connection, $ws) {
+                $connection->feed(masked_frame(0x81, 'one'));
+                phasync::sleep(0.08);
+                phasync::raiseFlag($ws); // the app's own raise, while receive() waits for the second
+                phasync::sleep(0.01);
+                $connection->feed(masked_frame(0x81, 'two'));
+            });
+            expect($ws->receive())->toBe('one');
+            expect($ws->receive())->toBe('two');
+            $woken = phasync::await($waiter);
+        });
+
+        return $woken;
+    });
+
+    expect($woken)->toBeFalse(); // it timed out: before, the first message raised $ws and woke it
+});

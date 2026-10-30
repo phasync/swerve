@@ -162,6 +162,9 @@ final class WebSocket implements \IteratorAggregate
     /** The pump saw the connection end: receive() returns null once the inbox is empty. */
     private bool $readerDone = false;
 
+    /** Raised between the pump and the callback as the inbox fills, empties or ends: not $this, which the app may use as a flag of its own. */
+    private readonly object $flag;
+
     /**
      * @param ?int $deflate permessage-deflate was agreed: the window bits its compression may use; null: not
      */
@@ -170,6 +173,7 @@ final class WebSocket implements \IteratorAggregate
         $this->subprotocol = $subprotocol;
         $this->onMessage   = new Event();
         $this->onClose     = new Event();
+        $this->flag        = new \stdClass();
         $this->heard       = \hrtime(true);
     }
 
@@ -484,13 +488,13 @@ final class WebSocket implements \IteratorAggregate
             return $data;
         }
         while (!$this->inbox && !$this->readerDone) {
-            phasync::awaitFlag($this);
+            phasync::awaitFlag($this->flag);
         }
         if (!$this->inbox) {
             return null;
         }
         [$data, $this->binary] = \array_shift($this->inbox);
-        phasync::raiseFlag($this); // the pump may wait for room
+        phasync::raiseFlag($this->flag); // the pump may wait for room
 
         return $data;
     }
@@ -612,7 +616,7 @@ final class WebSocket implements \IteratorAggregate
                 // same wait at the same moment. Nothing more to do; need()'s catch sees it.
             }
         }
-        phasync::raiseFlag($this); // a reader that waits for room in the inbox
+        phasync::raiseFlag($this->flag); // a reader that waits for room in the inbox
         $this->onClose->trigger($this->code, $this->reason);
     }
 
@@ -659,7 +663,7 @@ final class WebSocket implements \IteratorAggregate
                 $this->end(1011);
                 throw $e;
             } finally {
-                phasync::raiseFlag($this); // the pump may wait for room nobody will make now
+                phasync::raiseFlag($this->flag); // the pump may wait for room nobody will make now
             }
         });
         $failure = null;
@@ -677,16 +681,16 @@ final class WebSocket implements \IteratorAggregate
                     continue;
                 }
                 while (\count($this->inbox) >= self::INBOX && !$this->ended && !$app->isTerminated()) {
-                    phasync::awaitFlag($this); // the client sends faster than the callback receives
+                    phasync::awaitFlag($this->flag); // the client sends faster than the callback receives
                 }
                 $this->inbox[] = $message;
-                phasync::raiseFlag($this);
+                phasync::raiseFlag($this->flag);
             }
         } catch (\Throwable $e) {
             $failure = $e;
         }
         $this->readerDone = true;
-        phasync::raiseFlag($this);
+        phasync::raiseFlag($this->flag);
         if ($failure instanceof ShutdownException) {
             return; // the app's coroutine has it too; the worker exits once both end
         }

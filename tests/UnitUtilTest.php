@@ -37,3 +37,18 @@ test('System makes a connected socket pair', function () {
         fclose($b);
     }
 });
+
+test('an Accepted is the app\'s to use as a flag: raising it does not end an await() of a request that is not done', function () {
+    phasync::run(function () {
+        $request = new Swerve\Accepted(static fn () => null);
+        phasync::go(function () use ($request) {
+            phasync::sleep(0.01);
+            phasync::raiseFlag($request);
+        });
+        expect(fn () => $request->await(0.1))->toThrow(phasync\TimeoutException::class); // before, it returned at the raise
+
+        $request->done();
+        $request->await(0.1);
+        expect($request->isReady())->toBeTrue();
+    });
+});

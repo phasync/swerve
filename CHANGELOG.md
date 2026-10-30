@@ -6,6 +6,7 @@
 - `Swerve::upgrade($handler, $bootstrap)` moves a WebSocket to swerve's WebSocket workers for that bootstrap file: they load it once as they start, in the global scope, with pub/sub, the cache and the container's limits shared with every worker. Each file has its own, up to one per worker, and every WebSocket a worker moves with a file goes to the same one. The handler is the name of a function or `[class, static method]`, or a static closure when phasync/serializor is installed. What decided before was the `swerve.php`: one that accepted once moved every WebSocket, with only the Composer autoload in the WebSocket worker.
 - A bootstrap file that fails is logged as critical; its WebSockets are closed, and it is tried again a second later. A handler the file doesn't define closes its WebSocket, logged as critical, and the others go on.
 - phasync/serializor is no longer required, only suggested.
+- A `WebSocket` and the `Accepted` from `Swerve::accept()` are the app's to use as flags: swerve waited on and raised them itself. Each message raised `$ws`, waking any coroutine of the app waiting on it, and raising a request made `await()` return before the request was done.
 
 ## 0.2.0-RC2 (2026-10-30)
 

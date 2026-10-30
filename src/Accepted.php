@@ -26,12 +26,16 @@ final class Accepted implements SelectableInterface
     /** Raised when it is done or upgraded: what a worker's drain waits for. */
     private ?object $settled = null;
 
+    /** Raised when it is done: not $this, which the app may use as a flag of its own. */
+    private readonly object $flag;
+
     /**
      * @param \Closure(ClientRequest): void $handler the application's, for a request that is not a file
      * @param ?StaticFiles                  $files   the files served without the application
      */
     public function __construct(public readonly \Closure $handler, public readonly ?StaticFiles $files = null)
     {
+        $this->flag = new \stdClass();
     }
 
     public function isReady(): bool
@@ -48,7 +52,7 @@ final class Accepted implements SelectableInterface
     public function await(float $timeout = \PHP_FLOAT_MAX): void
     {
         if (!$this->done) {
-            phasync::awaitFlag($this, $timeout);
+            phasync::awaitFlag($this->flag, $timeout);
         }
         if (null !== $this->failure) {
             throw $this->failure;
@@ -65,7 +69,7 @@ final class Accepted implements SelectableInterface
     public function done(): void
     {
         $this->done = true;
-        phasync::raiseFlag($this);
+        phasync::raiseFlag($this->flag);
         null === $this->settled || phasync::raiseFlag($this->settled);
     }
 
