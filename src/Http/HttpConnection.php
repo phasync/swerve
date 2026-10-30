@@ -15,11 +15,11 @@ use Swerve\Util\Logger;
  * One HTTP/1.1 client connection: reads a request head, runs the application's handler on
  * an {@see HttpClientRequest}, and repeats while the connection is kept alive.
  *
- * The connection's coroutine does the connection's I/O between requests and answers static
- * files itself. An application request runs in a coroutine of the {@see RequestPool}, in a
- * Scope and frame of its own; the connection goes on to its next request (pipelined requests
- * wait in the read buffer) once the response ended, while the request's code may run on (tail
- * work). The request body is read by the handler through its ClientRequest; what it leaves
+ * The connection's coroutine answers static files itself, and runs an application request in a
+ * Scope and frame of its own. The connection goes on to its next request (pipelined requests
+ * wait in the read buffer) once the response ended: in this coroutine when the request's code
+ * ended too, else in a spare of the {@see RequestPool} while that code runs on (tail work).
+ * The request body is read by the handler through its ClientRequest; what it leaves
  * unread is skipped afterwards, or the connection closes (see HttpClientRequest::run()).
  *
  * Requests are parsed strictly, since this is meant to face the internet: anything that could
@@ -164,8 +164,19 @@ final class HttpConnection
     /** Answered from here without the application, in this connection's coroutine; may be replaced between requests. */
     public ?StaticFiles $files = null;
 
-    /** The pooled coroutine running the current request, until its response ended. */
-    public ?\Fiber $runner = null;
+    /**
+     * Goes on with the connection in another coroutine, from the response end of the request
+     * given, while that request's code runs on (see responded()); null: serve() does.
+     *
+     * @var ?\Closure(HttpClientRequest): void
+     */
+    public ?\Closure $onMove = null;
+
+    /** Connections gone on in a spare coroutine so far, for the tests. */
+    public static int $moves = 0;
+
+    /** Reserved for the current application request, until its response ended. */
+    private ?RequestPool $spare = null;
 
     /**
      * @param \Closure(\Swerve\ClientRequest): void $handler     the application's; may be replaced between requests
@@ -193,30 +204,40 @@ final class HttpConnection
     /**
      * Serve the connection's requests until it closes. With $one, serve a single request: then
      * true when the connection is kept alive (left open, see pending() for its next request),
-     * false when it is closed.
+     * false when it is closed. Null when the connection went on in another coroutine (see
+     * $onMove), while a request ran on here. With $resume, go on from that request's response.
      */
-    public function serve(bool $one = false): bool
+    public function serve(bool $one = false, ?HttpClientRequest $resume = null): ?bool
     {
-        $idle = false;
+        $idle = $moved = false;
         try {
-            $first     = !$this->keptAlive;
+            $first     = !$this->keptAlive && null === $resume;
             $pipelined = 0;
             $keepAlive = false;
             do {
-                $request = $this->readRequest($first);
-                if (null === $request) {
-                    break;
-                }
-                $first         = false;
-                $this->current = $request;
-                $file          = $this->files?->route($request);
-                if (null !== $file) {
-                    // A static file touches no state of the application: no Scope, no pooled coroutine
-                    $keepAlive = $request->run($file);
-                    $request->reusable();
-                    $request->recycle();
+                if (null !== $resume) {
+                    $request   = $resume;
+                    $resume    = null;
+                    $keepAlive = $this->after($request);
                 } else {
-                    $keepAlive = $this->application($request);
+                    $request = $this->readRequest($first);
+                    if (null === $request) {
+                        break;
+                    }
+                    $first         = false;
+                    $this->current = $request;
+                    $file          = $this->files?->route($request);
+                    if (null !== $file) {
+                        // A static file touches no state of the application: no Scope
+                        $keepAlive = $request->run($file);
+                        $request->reusable();
+                        $request->recycle();
+                    } elseif (null === $keepAlive = $this->application($request)) {
+                        // Another coroutine has the connection: nothing here is ours any more
+                        $moved = true;
+
+                        return null;
+                    }
                 }
                 $this->current   = null;
                 $this->keptAlive = $keepAlive;
@@ -237,7 +258,7 @@ final class HttpConnection
         } catch (\Throwable $e) {
             $this->logger->error('A connection failed: {exception}', ['exception' => $e]);
         } finally {
-            if (!$idle) {
+            if (!$idle && !$moved) {
                 $this->end();
             }
         }
@@ -246,44 +267,52 @@ final class HttpConnection
     }
 
     /**
-     * Run an application request in a pooled coroutine, and wait for its response to end:
-     * returns whether the connection is kept alive. The request runs on there to its end, tail
-     * work included. When its handler set an upgrade, that runs here once the handler returned,
-     * while the request's own coroutines may run on.
+     * Run an application request here, to its end, tail work included: returns whether the
+     * connection is kept alive, or null when the connection went on in a spare coroutine while
+     * the request ran on (see responded()).
      */
-    private function application(HttpClientRequest $request): bool
+    private function application(HttpClientRequest $request): ?bool
     {
-        $request->hold(); // by the pooled coroutine too: whichever lets go last recycles it
-        RequestPool::run(function () use ($request): void {
-            $this->runner = \Fiber::getCurrent();
-            try {
-                // Each request is a Scope of its own, its identity: state kept per request hangs on a
-                // WeakMap keyed by Scope::getCurrent(), and phasync::onScopeChange() hooks swap process
-                // state (a locale) as the event loop moves between requests. And a frame of its own,
-                // which waits for the coroutines the request starts
-                (new \Scope())->run(fn () => phasync::run($this->runRequest(...), $request, $this->handler));
-            } catch (\Throwable $e) {
-                // Its coroutines failed or were stopped after the response
-                if (!$e instanceof ShutdownException) {
-                    $this->logger->error('A coroutine of {request} failed: {exception}', ['request' => $request->getMethod() . ' ' . $request->getTarget(), 'exception' => $e]);
-                }
-            } finally {
-                $this->responded($request, false); // when it failed before it responded
-                ($request->onEnd)?->__invoke();
-                $request->recycle();
+        $request->hold(); // by this coroutine too: the connection may go on, and let go, first
+        $this->spare = RequestPool::reserve();
+        try {
+            // Each request is a Scope of its own, its identity: state kept per request hangs on a
+            // WeakMap keyed by Scope::getCurrent(), and phasync::onScopeChange() hooks swap process
+            // state (a locale) as the event loop moves between requests. And a frame of its own,
+            // which waits for the coroutines the request starts
+            (new \Scope())->run(fn () => phasync::run($this->runRequest(...), $request, $this->handler));
+        } catch (\Throwable $e) {
+            // Its coroutines failed or were stopped after the response
+            if (!$e instanceof ShutdownException) {
+                $this->logger->error('A coroutine of {request} failed: {exception}', ['request' => $request->getMethod() . ' ' . $request->getTarget(), 'exception' => $e]);
             }
-        });
-        while (null === $request->responded) {
-            phasync::awaitFlag($request);
+        } finally {
+            $this->responded($request, false, false); // when it failed before it responded
+            ($request->onEnd)?->__invoke();
         }
+        if ($request->carriedOn) {
+            $request->recycle();
+
+            return null;
+        }
+        $request->carriedOn = true;
+        $request->recycle();
+
+        return $this->after($request);
+    }
+
+    /**
+     * After $request's response: whether the connection is kept alive. When its handler set an
+     * upgrade, that runs here, in a Scope of its own, as in another process.
+     */
+    private function after(HttpClientRequest $request): bool
+    {
         if (null === $upgrade = $request->upgrade) {
             $keepAlive = $request->responded;
             $request->recycle();
 
             return $keepAlive;
         }
-        // The handler returned, taking the connection on: in this coroutine, which has nothing
-        // else to do with it, in a Scope of its own, as in another process
         $request->upgrade = null;
         try {
             return (new \Scope())->run(fn () => phasync::run($this->runRequest(...), $request, $upgrade));
@@ -300,19 +329,38 @@ final class HttpConnection
     {
         phasync::frame()->setExceptionHandler(fn (\Throwable $e) => $this->logger->error('A coroutine of {request} failed: {exception}', ['request' => $request->getMethod() . ' ' . $request->getTarget(), 'exception' => $e]));
         $keepAlive = $request->run($handler);
-        $this->responded($request, $keepAlive);
+        // Its own coroutines may run on (tail work)
+        $this->responded($request, $keepAlive, \count(phasync::frame()) > 1);
 
         return $keepAlive;
     }
 
-    /** $request's response ended: the connection goes on, see application(). */
-    private function responded(HttpClientRequest $request, bool $keepAlive): void
+    /**
+     * $request's response ended. When its code runs on, the spare goes on with the connection
+     * if this coroutine suspends first; else this one does, once the request's code ended.
+     */
+    private function responded(HttpClientRequest $request, bool $keepAlive, bool $runsOn): void
     {
-        if (null === $request->responded) {
-            $request->responded = $keepAlive;
-            $this->runner       = null;
-            phasync::raiseFlag($request);
+        if (null !== $request->responded) {
+            return;
         }
+        $request->responded = $keepAlive;
+        $spare              = $this->spare;
+        $this->spare        = null;
+        if (!$runsOn || null === $spare) { // null: a static file, answered here
+            $spare?->release();
+
+            return;
+        }
+        $request->hold();
+        $spare->give(function () use ($request): void {
+            if (!$request->carriedOn) {
+                $request->carriedOn = true;
+                ++self::$moves;
+                ($this->onMove ?? fn (HttpClientRequest $request) => $this->serve(resume: $request))($request);
+            }
+            $request->recycle();
+        });
     }
 
     /**
@@ -325,7 +373,7 @@ final class HttpConnection
     {
         if (!$this->upgraded && $this->current === $request) {
             $request->detach();
-            $this->responded($request, $keepAlive);
+            $this->responded($request, $keepAlive, true);
         }
     }
 

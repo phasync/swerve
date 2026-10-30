@@ -533,11 +533,32 @@ it('ends a response that has no length and no finish with its script, while a co
     expect(json_decode(file_get_contents($file)))->toBe(['mine', 1]);
 });
 
-it('runs requests one after another in one reused coroutine, not one coroutine each', function () {
+it('runs requests one after another in their connection\'s coroutine, with one spare reused, not one coroutine each', function () {
     [, $addr] = accept_start('tail-async.php', 1);
     $conn     = native_connect($addr);
     for ($i = 0; $i < 1000; ++$i) {
         expect(accept_request($conn, '/hello')['body'])->toBe("hello\n");
     }
     expect(accept_request($conn, '/pool')['body'])->toBe('1');
+});
+
+it('goes on with the connection in its coroutine after tail work that never suspends, and in a spare one after tail work that does', function () {
+    [, $addr] = accept_start('tail-async.php', 1);
+    $conn     = native_connect($addr);
+    $first    = accept_request($conn, '/busy')['body'];
+    expect(accept_request($conn, '/coroutine')['body'])->toBe($first)
+        ->and(accept_request($conn, '/moved')['body'])->toBe('0');
+
+    $moves = accept_request($conn, '/moves')['body'];
+    expect($moves)->toBe($first);
+    $start = microtime(true);
+    $next  = accept_request($conn, '/coroutine')['body'];
+    expect(microtime(true) - $start)->toBeLessThan(0.15) // not after the 0.2 s tail work
+        ->and($next)->not->toBe($moves)
+        ->and(accept_request($conn, '/moved')['body'])->toBe('1');
+
+    // Preempted is suspended: the connection doesn't wait for the rest of a long computation
+    $busy = accept_request($conn, '/busy?ms=60')['body'];
+    expect($busy)->toBe($next)
+        ->and(accept_request($conn, '/coroutine')['body'])->not->toBe($busy);
 });

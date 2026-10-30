@@ -5,15 +5,15 @@ namespace Swerve\Http;
 use phasync;
 
 /**
- * The coroutines that run application requests, reused: a request's code runs in one of them,
- * not in its connection's coroutine, so it may go on after its response (tail work) while the
- * connection serves its next request, and starting a coroutine costs nothing per request.
+ * Spare coroutines, reused, to go on with a connection while its request's code runs on after
+ * the response (tail work). A request runs in its connection's coroutine; before it starts,
+ * outside the request, the connection reserves a spare. When the request's coroutine suspends
+ * with its response ended and its code still running, the spare takes the connection (one
+ * transfer); tail work that never suspends just finishes in the connection's coroutine, which
+ * goes on itself, and the spare goes back unused.
  *
- * A pooled coroutine is a service, started by a connection's coroutine, never by a request: it
- * belongs to no request, and each job it runs is a request of its own (sapi()'s rule: a
- * coroutine belongs to the request of the coroutine that starts it).
- *
- * A job that exit() unwinds takes its coroutine with it: it never comes back to the pool.
+ * A spare is started outside requests only, so it belongs to none (sapi()'s rule: a coroutine
+ * belongs to the request of the coroutine that starts it); a request only signals it.
  *
  * @internal
  */
@@ -22,68 +22,80 @@ final class RequestPool
     /** Idle coroutines kept for the next requests; one more ends after its job. */
     private const IDLE_MAX = 16;
 
-    /** @var list<self> waiting for a job */
+    /** @var list<self> waiting, not reserved */
     private static array $idle = [];
 
     /** Coroutines started so far, for the tests. */
     public static int $started = 0;
 
-    private ?\Closure $job;
+    private ?\Closure $job = null;
 
-    private function __construct(\Closure $job)
+    private function __construct()
     {
-        $this->job = $job;
     }
 
     /**
-     * Run $job in an idle pooled coroutine, or a new one: up to its first suspension when new,
-     * else once the event loop gets to it. $job handles its own failures.
+     * An idle coroutine, or a new one, kept for one job: give() it, or release() it.
      *
      * @throws \LogicException inside a request
      */
-    public static function run(\Closure $job): void
+    public static function reserve(): self
     {
         if ('swerve' === \php_sapi_name()) {
             throw new \LogicException('Swerve BUG: a request coroutine is started inside a request');
         }
-        $worker = \array_pop(self::$idle);
-        if (null === $worker) {
+        $spare = \array_pop(self::$idle);
+        if (null === $spare) {
             ++self::$started;
-            phasync::service((new self($job))->loop(...));
-
-            return;
+            $spare = new self();
+            phasync::service($spare->loop(...)); // until it waits for its job
         }
-        $worker->job = $job;
-        phasync::raiseFlag($worker);
+
+        return $spare;
+    }
+
+    /** Run $job in this coroutine once the event loop gets to it. $job handles its own failures. */
+    public function give(\Closure $job): void
+    {
+        $this->job = $job;
+        phasync::raiseFlag($this);
+    }
+
+    /** Not needed after all: back to the idle ones, or ended above IDLE_MAX. */
+    public function release(): void
+    {
+        if (\count(self::$idle) < self::IDLE_MAX) {
+            self::$idle[] = $this;
+        } else {
+            $this->give(static function (): void {});
+        }
     }
 
     private function loop(): void
     {
-        while (true) {
-            $job       = $this->job;
-            $this->job = null;
-            try {
-                $job();
-            } catch (\Throwable) {
-                // a job handles its own failures: one that gets here was cancelled with its run()
-            }
-            unset($job);
-            if (\count(self::$idle) >= self::IDLE_MAX) {
-                return;
-            }
-            self::$idle[] = $this;
-            try {
+        try {
+            while (true) {
                 while (null === $this->job) {
                     phasync::awaitFlag($this);
                 }
-            } catch (\Throwable) {
-                // the run() ends (services are cancelled), or the worker stops
-                $i = \array_search($this, self::$idle, true);
-                if (false !== $i) {
-                    \array_splice(self::$idle, $i, 1);
+                $job       = $this->job;
+                $this->job = null;
+                try {
+                    $job();
+                } catch (\Throwable) {
+                    // a job handles its own failures: one that gets here was cancelled with its run()
                 }
-
-                return;
+                unset($job);
+                if (\count(self::$idle) >= self::IDLE_MAX) {
+                    return;
+                }
+                self::$idle[] = $this;
+            }
+        } catch (\Throwable) {
+            // the run() ends (services are cancelled), or the worker stops
+            $i = \array_search($this, self::$idle, true);
+            if (false !== $i) {
+                \array_splice(self::$idle, $i, 1);
             }
         }
     }

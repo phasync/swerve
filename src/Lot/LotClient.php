@@ -291,36 +291,41 @@ final class LotClient
      * static files for as long as the client has its next request written, and the first other
      * request with the accept()'s application; static files don't use up the accept(), which
      * goes on with another connection when this one goes idle or closes after files only. Once
-     * the application's response ended (its request may run on, see RequestPool) it waits for
-     * the next request, and serves that too when an accept() waits for one; else the connection
-     * goes back to the master with its request waiting.
+     * the application's response ended it waits for the next request, and serves that too when
+     * an accept() waits for one; else the connection goes back to the master with its request
+     * waiting. When the request's code runs on (tail work) and suspends, a spare coroutine goes
+     * on with the connection from there ($resume), and this one ends with the request.
      *
      * @param resource $stream
      */
-    private function connection($stream, Accepted $request): void
+    private function connection($stream, Accepted $request, ?HttpConnection $http = null, ?HttpClientRequest $resume = null, int $served = 0): void
     {
         $id                     = (int) $stream;
-        $http                   = new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
+        $http                 ??= new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
         $this->connections[$id] = [$http, \Fiber::getCurrent()];
+        $moved                  = false;
         try {
-            $this->serveConnection($stream, $http, $request);
+            $moved = $this->serveConnection($stream, $http, $request, $resume, $served);
         } finally {
-            unset($this->connections[$id]);
-            if (!HttpConnection::$exiting) {
-                phasync::raiseFlag($this); // room for an accept() at the limit
+            if (!$moved) {
+                unset($this->connections[$id]);
+                if (!HttpConnection::$exiting) {
+                    phasync::raiseFlag($this); // room for an accept() at the limit
+                }
             }
         }
     }
 
     /**
+     * True when the connection went on in another coroutine.
+     *
      * @param resource $stream
      */
-    private function serveConnection($stream, HttpConnection $http, Accepted $request): void
+    private function serveConnection($stream, HttpConnection $http, Accepted $request, ?HttpClientRequest $resume, int $served): bool
     {
         $id          = (int) $stream;
         $for         = null;
         $application = false;
-        $served      = 0;
         while (true) {
             if ($for !== $request) {
                 // The application's handler, which notes that the request was not a file; the
@@ -339,11 +344,18 @@ final class LotClient
                         throw $e;
                     }
                 };
-                $http->files = $request->files;
-                $for         = $request;
+                $http->files  = $request->files;
+                $http->onMove = function (HttpClientRequest $client) use ($stream, $request, $http, &$served): void {
+                    $this->connection($stream, $request, $http, $client, $served);
+                };
+                $for          = $request;
             }
-            $application = false;
-            $open        = $http->serve(one: true);
+            $application = null !== $resume;
+            $open        = $http->serve(one: true, resume: $resume);
+            $resume      = null;
+            if (null === $open) {
+                return true;
+            }
             unset($this->busy[$id]);
             if (!$application) {
                 // A static file doesn't use up the accept(): it goes on with this connection's next
@@ -358,10 +370,10 @@ final class LotClient
                 }
                 $this->assign($request);
 
-                return;
+                return false;
             }
             if (!$open) {
-                return; // closed
+                return false; // closed
             }
             if (!$http->bufferEmpty()) {
                 // The next request is read already (pipelined): only this worker can serve it
@@ -370,7 +382,7 @@ final class LotClient
                 try {
                     phasync::awaitFlag($offer);
                 } catch (CancelledException) {
-                    return; // the lifecycle ends: shutdown() closes it
+                    return false; // the lifecycle ends: shutdown() closes it
                 }
                 $request = $offer->request;
                 $offer->returnToPool();
@@ -386,30 +398,30 @@ final class LotClient
                     \fclose($stream);
                 }
 
-                return; // else the lifecycle ends: shutdown() hands it back
+                return false; // else the lifecycle ends: shutdown() hands it back
             } catch (IOException|TimeoutException) {
                 unset($this->idle[$id]);
                 \fclose($stream);
 
-                return;
+                return false;
             }
             unset($this->idle[$id]);
             if ('' === \stream_socket_recvfrom($stream, 1, \STREAM_PEEK)) {
                 \fclose($stream); // readable because the client closed it
 
-                return;
+                return false;
             }
             if (++$served >= self::KEEP_LIMIT || 0 === $this->accepting) {
                 $this->giveBack($stream, 'R');
 
-                return;
+                return false;
             }
             $this->ready[] = $offer = Offer::take($stream, false);
             phasync::raiseFlag($this);
             try {
                 phasync::awaitFlag($offer);
             } catch (CancelledException) {
-                return; // the lifecycle ends: shutdown() hands it back
+                return false; // the lifecycle ends: shutdown() hands it back
             }
             $request = $offer->request;
             $offer->returnToPool();
@@ -555,9 +567,9 @@ final class LotClient
         foreach ($this->busy as $id => $conn) {
             $http    = $this->connections[$id][0] ?? null;
             $request = $http?->current();
-            // exit() unwound the pooled coroutine of the request it ended, before its response
-            // ended; the others are suspended
-            if (null === $request || !($http->runner?->isTerminated() ?? false)) {
+            // exit() unwound the connection's coroutine, in the request it ended, before its
+            // response ended; the others are suspended
+            if (null === $request || !$this->connections[$id][1]->isTerminated()) {
                 continue;
             }
             try {

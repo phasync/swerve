@@ -13,8 +13,8 @@ use Swerve\HeadersSentException;
 
 /**
  * One HTTP exchange on an {@see HttpConnection}: the request body to read, and the response
- * to frame and write. A handler runs on it with run(): the connection's coroutine runs a static
- * file's, a pooled coroutine the application's (see HttpConnection::serve()).
+ * to frame and write. A handler runs on it with run(), in the connection's coroutine (see
+ * HttpConnection::serve()).
  *
  * The final response head is built when sendResponseHeaders() commits it, and held until the
  * body starts: it goes out in front of the first body bytes in one write, so a small response
@@ -136,6 +136,7 @@ final class HttpClientRequest implements ClientRequest
         $r->onEnd      = null;
         $r->upgrade    = null;
         $r->responded  = null;
+        $r->carriedOn  = false;
         $r->detached   = false;
         $r->concluded  = null;
         $r->start      = 0;
@@ -157,7 +158,7 @@ final class HttpClientRequest implements ClientRequest
 
     /**
      * Set by the handler to take the connection once it returned: the connection's coroutine
-     * then runs it with run(), in a Scope of the closure's own (Swerve::upgrade()).
+     * then runs it with run(), in a Scope of its own (Swerve::upgrade()).
      *
      * @var ?\Closure(\Swerve\ClientRequest): void
      */
@@ -165,6 +166,9 @@ final class HttpClientRequest implements ClientRequest
 
     /** The response ended: whether the connection is kept alive; null until then. */
     public ?bool $responded = null;
+
+    /** A coroutine went on with the connection after the response, see HttpConnection::responded(). */
+    public bool $carriedOn = false;
 
     /** See detach(). */
     public bool $detached = false;

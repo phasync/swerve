@@ -32,9 +32,8 @@ phasync::go(function () {
 });
 ```
 
-Each connection has a coroutine of its own for its I/O, which answers static files itself.
-Your handler runs in a request coroutine taken from a pool (so starting one costs nothing per
-request), in a `Scope` of its own, which the coroutines the request starts share:
+Each connection has a coroutine of its own, which answers static files itself and runs your
+handler, in a `Scope` of its own, which the coroutines the request starts share:
 request-scoped state belongs in a `WeakMap` keyed by `Scope::getCurrent()`, and is freed with
 the request. The request is also a nested `phasync::run()`, whose frame (`phasync::frame()`) its
 coroutines join: a coroutine that fails with nobody awaiting it is logged with the request, and
@@ -42,7 +41,9 @@ the request goes on.
 
 Once the response is complete, the connection goes on without the request: it closes
 (`Connection: close`) or takes the client's next request, while the request's code and the
-coroutines it started run on (tail work) in its coroutine and `Scope` until they end. A response
+coroutines it started run on (tail work) in its coroutine and `Scope` until they end. Tail work
+that never waits just finishes first; once it waits (or phasync preempts it), a spare coroutine,
+reused, goes on with the connection. A response
 is complete when its body has reached the `Content-Length` it declared, at
 `Swerve::finishRequest()`, which `fastcgi_finish_request()` and `litespeed_finish_request()` call
 in a worker (Symfony's and Laravel's terminate step uses them), or when the handler returns. From

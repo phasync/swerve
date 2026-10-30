@@ -19,7 +19,7 @@ function services_get(string $addr, string $path): ?string
 
 test('phasync::service() is called only where no request runs, and swerve starts no Fiber itself', function () {
     $allowed = [
-        'Swerve\Http\RequestPool::run',          // from a connection's coroutine, never inside a request (it throws)
+        'Swerve\Http\RequestPool::reserve',      // from a connection's coroutine, never inside a request (it throws)
         'Swerve\Lot\LotClient::assign',          // accept() and the connections' coroutines
         'Swerve\Lot\LotClient::startServices',
         'Swerve\Util\SharedLog::service',        // the lifecycle's start
