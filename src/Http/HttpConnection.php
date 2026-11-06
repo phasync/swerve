@@ -146,6 +146,9 @@ final class HttpConnection
      */
     public int $reclaimable = 0;
 
+    /** Its server closes ({@see \Swerve\Server::close()}): no request after the current one. */
+    public bool $closing = false;
+
     /** A 101 was sent: the connection carries the application's protocol, to which no HTTP limit or timeout applies. */
     public bool $upgraded = false;
 
@@ -248,7 +251,7 @@ final class HttpConnection
                 if ($keepAlive && \strlen($this->buffer) !== $this->offset && 0 === ++$pipelined % self::BURST) {
                     phasync::sleep();
                 }
-            } while ($keepAlive && !$one);
+            } while ($keepAlive && !$one && !$this->closing);
             // Only what this worker has read is lost by a handover: the kernel's bytes go with the socket
             $idle = $one && $keepAlive;
         } catch (HttpError $e) {
@@ -403,7 +406,6 @@ final class HttpConnection
         return true;
     }
 
-    /** No request bytes are buffered. */
     /** The request being served, until its handler returns: still set when exit() cut it short. */
     public function current(): ?HttpClientRequest
     {
@@ -416,6 +418,7 @@ final class HttpConnection
         return !$this->bufferEmpty() || $this->io->pending();
     }
 
+    /** No request bytes are buffered. */
     public function bufferEmpty(): bool
     {
         return \strlen($this->buffer) === $this->offset;

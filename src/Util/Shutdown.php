@@ -8,7 +8,9 @@ use phasync\TimeoutException;
 use Swerve\Swerve;
 
 /**
- * Tells the application that this worker must now close its connections, see Swerve::onShutdown().
+ * Tells the application that its server must now close its connections, see Swerve::onShutdown(): this
+ * process's when it is a swerve worker, or, for a request a {@see \Swerve\Server} serves, that
+ * server's ({@see Shutdown::current()}).
  *
  * The callbacks are kept in a WeakMap by the Scope that registered them (a request's, as the
  * connection gives each request its own; outside any request the root scope, which lasts as
@@ -22,19 +24,47 @@ use Swerve\Swerve;
 final class Shutdown
 {
     /** @var \WeakMap<\Scope, list<\Closure>>|null the callbacks by the scope that registered them */
-    private static ?\WeakMap $listeners = null;
+    private ?\WeakMap $listeners = null;
+
     /** Raised at the shutdown, for awaitShutdown(). */
-    private static ?object $flag = null;
+    private ?object $flag = null;
+
+    /** The shutdown has begun: Swerve::draining(). */
+    public bool $fired = false;
+
+    /** This process's, as a swerve worker: fired by Topics::drain(). */
+    private static ?self $process = null;
+
+    /** @var \WeakMap<\Scope, self>|null the Server's of each request it serves */
+    private static ?\WeakMap $serving = null;
+
+    public static function process(): self
+    {
+        return self::$process ??= new self();
+    }
+
+    /** The current request's: its Server's, or else this process's. */
+    public static function current(): self
+    {
+        return self::$serving[\Scope::getCurrent()] ?? self::process();
+    }
+
+    /** The current scope is a request of the Server that $shutdown belongs to. */
+    public static function serving(self $shutdown): void
+    {
+        self::$serving                         ??= new \WeakMap();
+        self::$serving[\Scope::getCurrent()]    = $shutdown;
+    }
 
     /** Run $callback at the shutdown, or at once in a coroutine of its own when that has begun; in the current scope either way. */
-    public static function listen(\Closure $callback): void
+    public function listen(\Closure $callback): void
     {
-        if (Topics::$closed) {
+        if ($this->fired) {
             self::run($callback);
 
             return;
         }
-        $listeners         = self::$listeners ??= new \WeakMap();
+        $listeners         = $this->listeners ??= new \WeakMap();
         $scope             = \Scope::getCurrent();
         $list              = $listeners[$scope] ?? [];
         $list[]            = $callback;
@@ -42,11 +72,11 @@ final class Shutdown
     }
 
     /** Wait for the shutdown; false when $timeout seconds passed first. */
-    public static function await(?float $timeout): bool
+    public function await(?float $timeout): bool
     {
-        if (!Topics::$closed) {
+        if (!$this->fired) {
             try {
-                phasync::awaitFlag(self::$flag ??= new \stdClass(), $timeout ?? \PHP_FLOAT_MAX);
+                phasync::awaitFlag($this->flag ??= new \stdClass(), $timeout ?? \PHP_FLOAT_MAX);
             } catch (TimeoutException) {
                 return false;
             }
@@ -56,12 +86,13 @@ final class Shutdown
     }
 
     /** The shutdown begins: wake the waiters and run the callbacks of the scopes still alive, each in its scope. */
-    public static function fire(): void
+    public function fire(): void
     {
-        $listeners       = self::$listeners;
-        self::$listeners = null;
-        if (null !== self::$flag) {
-            phasync::raiseFlag(self::$flag);
+        $this->fired     = true;
+        $listeners       = $this->listeners;
+        $this->listeners = null;
+        if (null !== $this->flag) {
+            phasync::raiseFlag($this->flag);
         }
         foreach ($listeners ?? [] as $scope => $callbacks) {
             foreach ($callbacks as $callback) {

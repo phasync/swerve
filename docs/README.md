@@ -25,6 +25,9 @@ Read in this order when you build an application on swerve:
    reloads, limits.
 9. [Troubleshooting and reporting bugs](troubleshooting.md).
 
+[A server in your own program](embedding.md): `Swerve\Server` serves HTTP from a program that
+swerve does not start, such as a CLI tool with a terminal UI.
+
 The examples in [`examples/`](../examples) run as they are, and swerve's test suite runs
 them: [`sse-chat`](../examples/sse-chat) and
 [`memcached`](../examples/memcached), a memcached server in every worker on top of the shared

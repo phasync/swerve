@@ -190,3 +190,18 @@ runs: never between a request's own coroutines. It runs in the event loop and mu
 
 [Command line](docs/command-line.md) has every option, and [Production](docs/production.md) sizing,
 systemd, Docker, nginx and TLS.
+
+## A server in your own program
+
+A program that swerve does not start, such as a CLI tool with a terminal UI, serves HTTP itself
+with `Swerve\Server`, in its own process, with the handlers `Swerve::accept()` takes:
+
+```php
+phasync::run(function () use ($app, $tui) {
+    $web = new Swerve\Server('127.0.0.1:8080', $app->handle(...), __DIR__ . '/public');
+    $tui->run();
+    $web->close();
+});
+```
+
+One process, no workers: see [A server in your own program](docs/embedding.md).

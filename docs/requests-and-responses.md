@@ -8,11 +8,12 @@ without the application; the rest goes to `$handler`:
 | a script's path | a fresh main script, its variables globals | `header()`, `echo` |
 | a closure without parameters | superglobals, `php://input` | `header()`, `echo` |
 | a closure taking a PSR-7 `ServerRequestInterface` | built from the superglobals, its body `php://input` | the `ResponseInterface` it returns |
+| a closure taking the `Swerve\ClientRequest` | the [`ClientRequest`](#the-clientrequest) itself; no superglobals | written to the `ClientRequest` |
 | `null` | | `404`, or the PHP file under `$staticPath` that the path names |
 
 A script's path also runs the PHP files under `$staticPath` that a request names, as php-fpm
-behind nginx does. Every request runs under the phasync extension's `sapi()` (`PHP_SAPI` is
-`swerve`), in a `Scope` of its own: `Scope::getCurrent()` is per request, and the coroutines it
+behind nginx does. Every request but a `ClientRequest` closure's runs under the phasync extension's
+`sapi()` (`PHP_SAPI` is `swerve`). Each runs in a `Scope` of its own: `Scope::getCurrent()` is per request, and the coroutines it
 starts share it.
 
 ## The request
@@ -86,6 +87,8 @@ with the connection's next request.
 
 ## The ClientRequest
 
+A handler closure that takes the `ClientRequest` gets the exchange itself: the fastest form, with no
+superglobals, and `echo` is not the response. Inside any other request,
 `Swerve::upgrade(static function (Swerve\ClientRequest $client) { ... })` takes the connection off
 the request, for a closure that writes the response itself, as long as it likes: see
 [Realtime](realtime.md). `ClientRequest` is a `phasync\Net\Duplex`: `read()` is the request body,

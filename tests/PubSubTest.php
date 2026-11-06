@@ -332,7 +332,7 @@ test('a drain ends every subscription\'s loop with a WorkerStoppingException, an
 
         return [$ended, Swerve::draining(), Topics::active()];
     });
-    Topics::$draining = Topics::$closed = false; // this test process goes on
+    Topics::$closed = \Swerve\Util\Shutdown::process()->fired = false; // this test process goes on
     Topics::$stopping = null;
 
     expect($got)->toBe([['a', 'b', 'new one ended'], true, []]);

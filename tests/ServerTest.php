@@ -41,7 +41,7 @@ it('serves each handler form Swerve::accept() takes, and closes', function () {
 
         $conn = native_connect($addr['sapi']);
         fwrite($conn, "GET /h HTTP/1.1\r\nHost: t\r\n\r\n");
-        expect(native_read_response($conn)['headers']['x-form'] ?? null)->toBe(['sapi']);
+        expect(native_read_response($conn)['headers']['x-form'] ?? null)->toBe('sapi');
     } finally {
         $out = server_close($process, $stdin, $stdout);
     }

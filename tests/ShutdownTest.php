@@ -12,7 +12,7 @@ use Swerve\WorkerStoppingException;
 /** The process goes on after a test that drained it. */
 function shutdown_reset(): void
 {
-    Topics::$draining = false;
+    \Swerve\Util\Shutdown::process()->fired = false;
     Topics::$closed   = false;
     Topics::$stopping = null;
 }

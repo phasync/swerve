@@ -25,8 +25,6 @@ final class Topics
     /** Largest message. */
     public const MAX_MESSAGE = 1 << 17;
 
-    /** The process stops: the early hint of Swerve::draining(). */
-    public static bool $draining = false;
     /** The process must now close its connections: subscriptions have ended, see drain(). */
     public static bool $closed = false;
 
@@ -179,7 +177,7 @@ final class Topics
      */
     public static function drain(StopReason $reason): void
     {
-        self::$draining = self::$closed = true;
+        self::$closed = true;
         self::$stopping = $reason;
         foreach (self::$inboxes as $inboxes) {
             foreach ($inboxes as $inbox) {
@@ -188,7 +186,7 @@ final class Topics
         }
         self::$inboxes = [];
         SharedLog::stop();
-        Shutdown::fire();
+        Shutdown::process()->fire();
     }
 
     /** @return string[] the topics with subscribers in this process */
