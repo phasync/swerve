@@ -664,3 +664,8 @@ it('goes on with the connection in its coroutine after tail work that never susp
     expect($busy)->toBe($next)
         ->and(accept_request($conn, '/coroutine')['body'])->not->toBe($busy);
 });
+
+it('serves a closure taking the ClientRequest, which writes the response itself', function () {
+    [, $addr] = accept_start('client-request.php', 1);
+    expect(probe($addr, '/x'))->toBe('client /x');
+});
