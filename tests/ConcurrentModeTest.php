@@ -12,5 +12,7 @@ it('reading $_SESSION after phasync::sleep() does not crash the worker', functio
     // or without a wait, $_SESSION survives; sapi() alone in a Scope does not reproduce it.
     [, $addr] = native_start(__DIR__ . '/Fixtures/concurrent-mode/session-sleep.php', workers: 1);
 
-    expect(http_get($addr, '/?n=5'))->toBe("ok 5\n");
+    $conn = native_connect($addr);
+    fwrite($conn, "GET /?n=5 HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+    expect(native_read_response($conn)['body'] ?? null)->toBe("ok 5\n");
 });
