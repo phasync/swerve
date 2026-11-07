@@ -40,7 +40,9 @@ function parity_start(string $mode): array
     }
 
     return [$addr, static function () use ($process, $pipes) {
-        fwrite($pipes[0], "close\n");
+        if (proc_get_status($process)['running']) { // exit() in a request ends it
+            fwrite($pipes[0], "close\n");
+        }
         stream_get_contents($pipes[1]);
         proc_close($process);
     }];

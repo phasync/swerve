@@ -24,8 +24,8 @@ use Psr\Log\LoggerInterface;
  * closes the oldest connection still waiting for its request before it accepts another, and
  * accepts none while every one it holds has a request in line.
  *
- * Messages with the workers are packets on a SEQPACKET socket pair, one letter each, a
- * connection riding along as SCM_RIGHTS: see {@see LotClient}.
+ * Messages with the workers are packets on a SEQPACKET socket pair, a letter each (and what was
+ * read of a request, see 'P'), a connection riding along as SCM_RIGHTS: see {@see LotClient}.
  *
  * @internal
  */
@@ -61,6 +61,9 @@ final class Lot
 
     /** @var \SplQueue<resource> connections with a request waiting, oldest first */
     private \SplQueue $ready;
+
+    /** @var array<int, string> what a worker read of a connection's next request already, by resource id: given along with it */
+    private array $read = [];
 
     /** @var \SplQueue<\Socket> workers waiting for a connection, oldest first */
     private \SplQueue $asking;
@@ -217,15 +220,16 @@ final class Lot
             $this->onReady[$socket] = $onReady;
         }
         try {
-            while (null !== $msg = LotClient::receive($channel, $socket)) {
+            while (null !== $msg = LotClient::receive($channel, $socket, LotClient::MAX_MOVE)) {
                 [$type, $conn] = $msg;
-                match ($type) {
+                match ($type[0]) {
                     'N'     => $this->asked($socket),
                     'R'     => $this->ready(\socket_export_stream($conn)),
+                    'P'     => $this->ready(\socket_export_stream($conn), \substr($type, 1)),
                     'B'     => phasync::go(fn () => $this->wait(\socket_export_stream($conn), self::KEPT_ALIVE_TIMEOUT)),
                     'H'     => $this->hello($socket),
                     'U'     => $this->upgrading[$socket] = true,
-                    default => throw new \UnexpectedValueException("A worker sent '$type'"),
+                    default => throw new \UnexpectedValueException("A worker sent '$type[0]'"),
                 };
             }
         } finally {
@@ -267,12 +271,16 @@ final class Lot
     }
 
     /**
-     * $conn has a request waiting: to the worker that asked first, or in line.
+     * $conn has a request waiting: to the worker that asked first, or in line. $read is what a
+     * worker read of it already, which goes along.
      *
      * @param resource $conn
      */
-    private function ready($conn): void
+    private function ready($conn, string $read = ''): void
     {
+        if ('' !== $read) {
+            $this->read[(int) $conn] = $read;
+        }
         if ($this->asking->isEmpty()) {
             $this->ready->enqueue($conn);
         } else {
@@ -355,7 +363,7 @@ final class Lot
     private function give(\Socket $worker, $conn): void
     {
         try {
-            LotClient::send($worker, 'C', $conn);
+            LotClient::send($worker, 'C' . ($this->read[(int) $conn] ?? ''), $conn);
         } catch (\RuntimeException $e) {
             // The worker is gone: the connection waits for the next one
             $this->logger->warning('Handing a connection to a worker failed: {error}', ['error' => $e->getMessage()]);
@@ -364,6 +372,7 @@ final class Lot
 
             return;
         }
+        unset($this->read[(int) $conn]);
         \fclose($conn);
         phasync::raiseFlag($this->room);
     }

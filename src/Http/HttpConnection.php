@@ -418,6 +418,19 @@ final class HttpConnection
         return !$this->bufferEmpty() || $this->io->pending();
     }
 
+    /** The bytes read but not consumed: the start of the client's next request (pipelined). */
+    public function unread(): string
+    {
+        return \substr($this->buffer, $this->offset);
+    }
+
+    /** Begin with $bytes, read from this connection by another process. */
+    public function prepend(string $bytes): void
+    {
+        $this->buffer = $bytes . \substr($this->buffer, $this->offset);
+        $this->offset = 0;
+    }
+
     /** No request bytes are buffered. */
     public function bufferEmpty(): bool
     {

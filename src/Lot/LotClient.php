@@ -23,7 +23,7 @@ use Swerve\Util\ObjectPoolTrait;
  * A worker's side of the master's {@see Lot}, over the SEQPACKET socket the master passed as
  * file descriptor 3, which stays open across the worker's lifecycles (run_next()).
  *
- * Packets, one letter, a connection riding along as SCM_RIGHTS:
+ * Packets, a letter each (and bytes, see 'P'), a connection riding along as SCM_RIGHTS:
  *
  * - worker 'H': a lifecycle starts. The master forgets the ask of the one before and answers
  *   'h', after any connection it sent to that one: those are this lifecycle's to serve; or 's'
@@ -32,6 +32,8 @@ use Swerve\Util\ObjectPoolTrait;
  *   waiting, as soon as it has one; or 'S' (the server shuts down) or 'L' (a reload replaces
  *   this worker): the worker stops, see {@see LotClient::stop()}.
  * - worker 'R' + connection: back, kept alive, with its next request waiting.
+ * - worker 'P' + the bytes read of its next request + connection: back, its next request read
+ *   here already (pipelined): the master gives the bytes along with it, after its 'C'.
  * - worker 'B' + connection: back, kept alive and idle: the lifecycle ended before its next request.
  * - worker 'U': a request of this lifecycle runs an upgrade, and may hold the worker (one accept()
  *   per run) without asking: the master sends it 'S' or 'L' at once when it is to stop.
@@ -76,7 +78,7 @@ final class LotClient
     /** @var resource|null the slot's socket WebSockets move over */
     private $moves;
 
-    /** @var list<resource> from the master, with a request waiting, not yet served here */
+    /** @var list<array{0: resource, 1: string}> from the master, with a request waiting, not yet served here, and what was read of it already */
     private array $stash = [];
 
     /** @var list<Offer> served here, with their next request waiting, for the next accept() */
@@ -157,13 +159,13 @@ final class LotClient
         // Before the answer: what the master sent the lifecycle before, a connection to serve, or
         // the stop that its ask got
         while (!\in_array([$type, $conn] = $this->receiveOrFail(), [['h', null], ['s', null]], true)) {
-            if ('C' === $type) {
-                $this->stash[] = \socket_export_stream($conn);
+            if ('C' === $type[0]) {
+                $this->stash[] = [\socket_export_stream($conn), \substr($type, 1)];
             }
         }
         if ('s' === $type) {
-            foreach ($this->stash as $conn) {
-                $this->giveBack($conn, 'R');
+            foreach ($this->stash as [$conn, $read]) {
+                $this->giveBack($conn, '' === $read ? 'R' : "P$read");
             }
             $this->stash = [];
 
@@ -242,10 +244,10 @@ final class LotClient
                     return true;
                 }
                 if ([] !== $this->stash) {
-                    $stream                     = \array_shift($this->stash);
+                    [$stream, $read]            = \array_shift($this->stash);
                     $this->busy[(int) $stream]  = $stream;
                     $this->started[$request]    = true;
-                    phasync::service($this->connection(...), $stream, $request);
+                    phasync::service($this->connection(...), $stream, $request, null, null, 0, $read);
 
                     return true;
                 }
@@ -280,10 +282,13 @@ final class LotClient
      *
      * @param resource $stream
      */
-    private function connection($stream, Accepted $request, ?HttpConnection $http = null, ?HttpClientRequest $resume = null, int $served = 0): void
+    private function connection($stream, Accepted $request, ?HttpConnection $http = null, ?HttpClientRequest $resume = null, int $served = 0, string $read = ''): void
     {
-        $id                     = (int) $stream;
-        $http                 ??= new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
+        $id = (int) $stream;
+        if (null === $http) {
+            $http = new HttpConnection(new StreamDuplex($stream), $request->handler, Swerve::log(), null);
+            $http->prepend($read); // what another worker read of its request
+        }
         $this->connections[$id] = [$http, \Fiber::getCurrent()];
         $moved                  = false;
         try {
@@ -361,7 +366,7 @@ final class LotClient
             }
             if (!$http->bufferEmpty()) {
                 // The next request is read already (pipelined): only this worker can serve it
-                $this->ready[] = $offer = Offer::take($stream, true);
+                $this->ready[] = $offer = Offer::take($stream, $http);
                 phasync::raiseFlag($this);
                 try {
                     phasync::awaitFlag($offer);
@@ -400,7 +405,7 @@ final class LotClient
 
                 return false;
             }
-            $this->ready[] = $offer = Offer::take($stream, false);
+            $this->ready[] = $offer = Offer::take($stream, null);
             phasync::raiseFlag($this);
             try {
                 phasync::awaitFlag($offer);
@@ -485,7 +490,7 @@ final class LotClient
     {
         try {
             while (true) {
-                $msg = self::receive($this->channel, $this->socket);
+                $msg = self::receive($this->channel, $this->socket, self::MAX_MOVE);
                 if (null === $msg) {
                     $this->stop(StopReason::Shutdown); // the master is gone
 
@@ -498,10 +503,10 @@ final class LotClient
 
                     return;
                 }
-                if ('C' !== $type || null === $conn) {
-                    throw new \UnexpectedValueException("The master answered '$type' to a worker's ask");
+                if ('C' !== $type[0] || null === $conn) {
+                    throw new \UnexpectedValueException("The master answered '$type[0]' to a worker's ask");
                 }
-                $this->stash[] = \socket_export_stream($conn);
+                $this->stash[] = [\socket_export_stream($conn), \substr($type, 1)];
                 phasync::raiseFlag($this);
             }
         } finally {
@@ -527,14 +532,10 @@ final class LotClient
         }
         foreach ($this->ready as $offer) {
             phasync::cancel($this->connections[(int) $offer->stream][1]);
-            if ($offer->buffered) {
-                \fclose($offer->stream); // what was read here can't go with the socket
-            } else {
-                $this->giveBack($offer->stream, 'R');
-            }
+            $this->offerBack($offer);
         }
-        foreach ($this->stash as $conn) {
-            $this->giveBack($conn, 'R');
+        foreach ($this->stash as [$conn, $read]) {
+            $this->giveBack($conn, '' === $read ? 'R' : "P$read");
         }
         $this->idle = $this->ready = $this->stash = [];
         if (0 < \count($this->upgraded)) {
@@ -608,14 +609,10 @@ final class LotClient
             $this->giveBack($conn, 'B');
         }
         foreach ($this->ready as $offer) {
-            if ($offer->buffered) {
-                \fclose($offer->stream); // what was read here can't go with the socket
-            } else {
-                $this->giveBack($offer->stream, 'R');
-            }
+            $this->offerBack($offer);
         }
-        foreach ($this->stash as $conn) {
-            $this->giveBack($conn, 'R');
+        foreach ($this->stash as [$conn, $read]) {
+            $this->giveBack($conn, '' === $read ? 'R' : "P$read");
         }
         foreach ($this->busy as $conn) {
             \fclose($conn);
@@ -625,35 +622,48 @@ final class LotClient
 
     /**
      * Hand a kept-alive connection back to the master: 'R' with its next request waiting, 'B'
-     * idle, for the master to wait on.
+     * idle, for the master to wait on, 'P' + what was read of its next request.
      *
      * @param resource $conn
      */
-    private function giveBack($conn, string $type): void
+    private function giveBack($conn, string $message): void
     {
-        self::send($this->socket, $type, $conn);
+        self::send($this->socket, $message, $conn);
         \fclose($conn);
     }
 
     /**
      * A kept-alive connection leaves this worker: back to the master, 'R' with its next request
-     * waiting or 'B' idle; closed when its next request is read already, as that can't go along.
+     * waiting, 'B' idle, or 'P' with what was read of its next request here (pipelined); closed
+     * when that is more than a packet carries.
      *
      * @param resource $conn
      */
     private function handBack(HttpConnection $http, $conn): void
     {
-        if (!$http->bufferEmpty()) {
-            \fclose($conn);
-        } else {
+        if ($http->bufferEmpty()) {
             $this->giveBack($conn, $http->io->pending() ? 'R' : 'B');
+        } elseif (\strlen($read = $http->unread()) < self::MAX_MOVE) {
+            $this->giveBack($conn, "P$read");
+        } else {
+            \fclose($conn);
+        }
+    }
+
+    /** A connection waiting for an accept() goes back to the master, with what was read of it. */
+    private function offerBack(Offer $offer): void
+    {
+        if (null === $offer->buffered) {
+            $this->giveBack($offer->stream, 'R');
+        } else {
+            $this->handBack($offer->buffered, $offer->stream);
         }
     }
 
     /** @return array{0: string, 1: ?\Socket} */
     private function receiveOrFail(): array
     {
-        return self::receive($this->channel, $this->socket) ?? throw new \RuntimeException('The swerve master is gone');
+        return self::receive($this->channel, $this->socket, self::MAX_MOVE) ?? throw new \RuntimeException('The swerve master is gone');
     }
 
     /** @param resource|\Socket|null $conn */
@@ -717,15 +727,15 @@ final class Offer
     /** @var resource */
     public mixed $stream;
 
-    /** Its next request is read already: it can't go back to the master. */
-    public bool $buffered;
+    /** The connection whose next request is read already, here: it goes back with those bytes. */
+    public ?HttpConnection $buffered;
 
     private function __construct()
     {
     }
 
     /** @param resource $stream */
-    public static function take($stream, bool $buffered): self
+    public static function take($stream, ?HttpConnection $buffered): self
     {
         $offer           = self::popInstance() ?? new self();
         $offer->stream   = $stream;
@@ -737,7 +747,8 @@ final class Offer
     /** accept() took it. */
     public function returnToPool(): void
     {
-        $this->request = null;
+        $this->request  = null;
+        $this->buffered = null;
         unset($this->stream);
         $this->pushInstance();
     }
