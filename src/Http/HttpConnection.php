@@ -406,6 +406,17 @@ final class HttpConnection
         return true;
     }
 
+    /**
+     * A 101 went out: the connection carries the application's protocol, and has no next request
+     * for a spare coroutine to go on with (#8: a fiber held for the connection's life).
+     */
+    public function upgrade(): void
+    {
+        $this->upgraded = true;
+        $this->spare?->release();
+        $this->spare = null;
+    }
+
     /** The request being served, until its handler returns: still set when exit() cut it short. */
     public function current(): ?HttpClientRequest
     {

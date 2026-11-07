@@ -261,7 +261,7 @@ final class HttpClientRequest implements ClientRequest
                 $this->committed = $this->wire = $this->raw = true;
                 $this->status    = 101;
                 $this->keepAlive = false;
-                $this->connection->upgraded = true;
+                $this->connection->upgrade();
                 $this->put($head);
             } elseif ('1.1' === $this->version) {
                 $this->continue = false; // the client has its go-ahead

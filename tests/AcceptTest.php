@@ -356,7 +356,7 @@ it('runs an inline WebSocket in the worker of a lifecycle that serves one reques
     $ws = ws_connect($addr, "/ws-inline?id=$id");
     ws_send($ws, 0x1, 'hi');
     expect(ws_read($ws)[1])->toBe("inline hi from $worker");
-    @unlink(sys_get_temp_dir() . "/swerve-inline-$id");
+    is_file($f = sys_get_temp_dir() . "/swerve-inline-$id") && unlink($f);
 });
 
 it('closes an inline WebSocket of a lifecycle that serves one request when the worker stops: the master tells it, though it does not ask', function (int $signal, int $code) {
