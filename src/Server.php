@@ -44,10 +44,10 @@ use Swerve\Util\Shutdown;
 final class Server
 {
     /**
-     * Seconds the requests have after close() to end by themselves; then their coroutines get a
-     * {@see WorkerStoppingException} (a ShutdownException).
+     * Seconds the requests in flight have after close() to end, as `swerve --grace` gives a
+     * worker's; then the drain begins regardless.
      */
-    private const CLOSE_GRACE = 5.0;
+    private const CLOSE_GRACE = 10.0;
 
     /** Where the server listens: `host:port` (the port chosen when 0 was asked), or `unix:/path`. */
     public readonly string $address;
@@ -130,11 +130,13 @@ final class Server
     }
 
     /**
-     * Stop serving: no new connection is accepted, those waiting for a request close, the
-     * {@see Swerve::onShutdown()} callbacks of this server's requests run and its
-     * {@see Swerve::awaitShutdown()} calls return. The requests have a few seconds to end
-     * (a WebSocket says goodbye); then their coroutines are cancelled. Returns once every
-     * connection ended. Once closed, a server stays closed: start a new one to serve again.
+     * Stop serving, as a swerve worker stops: no new connection is accepted, those waiting for a
+     * request close, and the requests in flight have up to 10 seconds to end. Then the drain:
+     * this server's requests see {@see Swerve::draining()} true, their
+     * {@see Swerve::onShutdown()} callbacks run, their {@see Swerve::awaitShutdown()} returns, and
+     * every wait of their coroutines throws a {@see WorkerStoppingException}: a goodbye is
+     * written inside `phasync::shielded()`. Returns once every connection ended. Once closed, a
+     * server stays closed: start a new one to serve again.
      *
      * @throws \LogicException outside a coroutine
      */
@@ -154,15 +156,34 @@ final class Server
                 }
             }
         }
-        try {
-            phasync::await($this->runner, self::CLOSE_GRACE);
-        } catch (TimeoutException) {
-            $this->frame->cancel(new WorkerStoppingException(StopReason::Shutdown));
+        // As a worker stops: the requests in flight end first; then the drain, in which every
+        // wait of this server's coroutines throws (a goodbye is written inside phasync::shielded())
+        $deadline = \microtime(true) + self::CLOSE_GRACE;
+        while ($this->inFlight() && ($left = $deadline - \microtime(true)) > 0) {
             try {
-                phasync::await($this->runner);
-            } catch (ShutdownException) {
+                phasync::awaitFlag($this->ended, $left);
+            } catch (TimeoutException) {
+                break;
             }
         }
+        $this->shutdown->fire();
+        $this->frame->cancel(new WorkerStoppingException(StopReason::Shutdown));
+        try {
+            phasync::await($this->runner);
+        } catch (ShutdownException) {
+        }
+    }
+
+    /** A connection serves a request that was not upgraded. */
+    private function inFlight(): bool
+    {
+        foreach ($this->connections as $http) {
+            if (!$http->upgraded) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Accept connections, each served in a coroutine of this frame, until close(). */

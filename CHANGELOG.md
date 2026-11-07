@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `Swerve\Server` serves HTTP from a program that swerve does not start, such as a CLI tool with a terminal UI, in its own process, next to what it already does: `new Swerve\Server('127.0.0.1:8080', $app->handle(...), 'public/')` listens at once and serves until `close()`. It takes the handlers `Swerve::accept()` takes; the requests have `Swerve::upgrade()`, WebSockets, Server-Sent Events and pub/sub, and `close()` drives their `Swerve::onShutdown()`, `awaitShutdown()` and `draining()`. See docs/embedding.md.
+- `Swerve::awaitShutdown()` in an upgraded request returns `true` when the worker stops: it threw the `WorkerStoppingException` of the drain, which cancels the request's coroutines as it begins (#109).
 - `Swerve::accept()` takes a closure whose parameter is the `Swerve\ClientRequest`: it gets the exchange itself, without superglobals or `sapi()`, and writes the response to it.
 - Pub/sub's reader, the limited services' listener and the WebSocket pings start on first use again, which may be inside a request, instead of with every worker's lifecycle: phasync 2.0.7's `phasync::service()` is started by the event loop, so it belongs to no request and keeps none alive (#102). A worker that never uses them starts none.
 

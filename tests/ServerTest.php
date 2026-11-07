@@ -63,5 +63,5 @@ it('ends its requests with close(): onShutdown() runs, awaitShutdown() returns, 
 it('stops accepting once closed', function () {
     [$process, $stdin, $stdout, $addr] = server_start();
     server_close($process, $stdin, $stdout);
-    expect(@stream_socket_client('tcp://' . $addr['psr7'], $errno, $errstr, 1))->toBeFalse();
+    expect(probe($addr['psr7'], '/a'))->toBeNull();
 });

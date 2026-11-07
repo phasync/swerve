@@ -79,6 +79,12 @@ final class Shutdown
                 phasync::awaitFlag($this->flag ??= new \stdClass(), $timeout ?? \PHP_FLOAT_MAX);
             } catch (TimeoutException) {
                 return false;
+            } catch (ShutdownException $e) {
+                // The drain cancels the waiting coroutines as it fires: woken by that, this still
+                // returns true (#109); the coroutine's next wait throws
+                if (!$this->fired) {
+                    throw $e;
+                }
             }
         }
 

@@ -26,11 +26,16 @@ worker, and `Swerve::upgrade()`, WebSockets, Server-Sent Events, `Swerve::finish
 `Swerve::publish()` and `Swerve::subscribe()` work as they do there. `$server->address` is where
 it listens: ask for `127.0.0.1:0` and read the port there. `unix:/path` listens on a socket file.
 
-`close()` stops accepting and closes the connections that wait for a request. The requests of
-this server see `Swerve::draining()` true, their `Swerve::onShutdown()` callbacks run and their
-`Swerve::awaitShutdown()` returns, so a WebSocket can say goodbye. They have 5 seconds to end;
-then their coroutines get a `WorkerStoppingException`. `close()` returns once every connection
-ended. A program may run several servers, and start a new one after closing another.
+`close()` stops the server as `swerve` stops a worker: it accepts no new connection, closes
+those that wait for a request, and gives the requests in flight up to 10 seconds to end. Then the
+drain: the requests of this server see `Swerve::draining()` true, their `Swerve::onShutdown()`
+callbacks run, their `Swerve::awaitShutdown()` returns, and every wait of their coroutines throws a
+`WorkerStoppingException`, so a WebSocket writes its goodbye inside `phasync::shielded()`.
+`close()` returns once every connection ended. A program may run several servers, and start a new
+one after closing another.
+
+`exit()` in a request finishes its response and ends the program, as in any CLI script; under
+`swerve` it ends the worker's run of `swerve.php`, which the master starts again.
 
 What one process does not have:
 
