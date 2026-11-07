@@ -14,7 +14,7 @@ $files = array_values(array_filter(
 function run_symbol_example(string $file): array
 {
     $process = proc_open(
-        [PHP_BINARY, '-d', 'display_errors=1', '-d', 'error_reporting=-1', '-d', 'auto_prepend_file=' . dirname(__DIR__) . '/vendor/autoload.php', $file],
+        [PHP_BINARY, '-d', 'display_errors=1', '-d', 'error_reporting=-1', '-d', 'apc.enable_cli=1', '-d', 'auto_prepend_file=' . dirname(__DIR__) . '/vendor/autoload.php', $file],
         [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]],
         $pipes,
         dirname(__DIR__),
