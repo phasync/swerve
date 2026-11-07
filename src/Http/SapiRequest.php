@@ -40,6 +40,12 @@ final class SapiRequest
     /** finish() completed the response (or its body reached its content-length): output goes nowhere. */
     private bool $finished;
 
+    /**
+     * A PSR-7 handler's request (see psr()): its response is the ResponseInterface, written to
+     * the ClientRequest; PHP's own head and flush() are not, and output throws.
+     */
+    private bool $psr;
+
     private function __construct()
     {
     }
@@ -52,7 +58,7 @@ final class SapiRequest
         $sapi           = self::popInstance() ?? new self();
         $sapi->client   = $client;
         $sapi->server   = $server;
-        $sapi->gone     = $sapi->upgraded = $sapi->finished = false;
+        $sapi->gone     = $sapi->upgraded = $sapi->finished = $sapi->psr = false;
         $scope          = \Scope::getCurrent();
         self::$requests ??= new \WeakMap();
         self::$requests[$scope] = $sapi;
@@ -86,6 +92,20 @@ final class SapiRequest
         $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
 
         return $sapi?->client ?? throw new \LogicException('Swerve::upgrade() is called inside a request that Swerve::accept() serves');
+    }
+
+    /**
+     * The request running in this scope is a PSR-7 handler's: its ResponseInterface is the
+     * response, which Psr7 writes to the ClientRequest. A flush() of its code before that (a
+     * coroutine streaming the body) commits no head of PHP's (#107), and its output throws.
+     */
+    public static function psr(): void
+    {
+        $sapi = isset(self::$requests) ? self::$requests[\Scope::getCurrent()] ?? null : null;
+        if (null === $sapi) {
+            throw new \LogicException('A PSR-7 handler runs inside a request that Swerve serves');
+        }
+        $sapi->psr = true;
     }
 
     /**
@@ -168,6 +188,9 @@ final class SapiRequest
         if ($this->upgraded) {
             throw new \LogicException('Output after Swerve::upgrade(): the connection left the request');
         }
+        if ($this->psr && '' !== $data) {
+            throw new \LogicException('Output in a PSR-7 handler: its response is the ResponseInterface it returns; write to the response body');
+        }
         if ($this->finished) {
             return true; // dropped, as php-fpm does after fastcgi_finish_request(): not a client that left mid-response
         }
@@ -200,8 +223,8 @@ final class SapiRequest
      */
     public function send_headers(int $status, ?string $statusLine, array $headers): void
     {
-        if ($this->upgraded) {
-            return; // PHP's own headers, at the request's end: the application answers itself
+        if ($this->upgraded || $this->psr) {
+            return; // PHP's own headers: the application answers itself
         }
         // A name as the script first wrote it, as php-fpm sends it; its later lines join it
         $map = $names = [];
@@ -216,7 +239,7 @@ final class SapiRequest
 
     public function flush(): void
     {
-        if ($this->upgraded) {
+        if ($this->upgraded || $this->psr) {
             return;
         }
         $this->client->flush();

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A PSR-7 handler's response is written to the connection with its own headers, and those PHP was told that it does not name (`setcookie()`, a session's cookie). A coroutine filling the body that calls `flush()`, as Symfony's `StreamedResponse` does, committed PHP's default head before the response's; `flush()` now commits nothing in a PSR-7 handler, and output with `echo` there throws a `LogicException` (#107).
 - A request pipelined behind another on a keep-alive connection is answered when the worker's run of `swerve.php` ends first (one `accept()` per run, `swerve -S`): what the worker read of it goes back to the master with the connection, and on to the next worker. It was dropped, the connection closed (#106).
 - `Swerve\Server` serves HTTP from a program that swerve does not start, such as a CLI tool with a terminal UI, in its own process, next to what it already does: `new Swerve\Server('127.0.0.1:8080', $app->handle(...), 'public/')` listens at once and serves until `close()`. It takes the handlers `Swerve::accept()` takes; the requests have `Swerve::upgrade()`, WebSockets, Server-Sent Events and pub/sub, and `close()` drives their `Swerve::onShutdown()`, `awaitShutdown()` and `draining()`. See docs/embedding.md.
 - `Swerve::awaitShutdown()` in an upgraded request returns `true` when the worker stops: it threw the `WorkerStoppingException` of the drain, which cancels the request's coroutines as it begins (#109).

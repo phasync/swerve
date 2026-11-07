@@ -669,3 +669,21 @@ it('serves a closure taking the ClientRequest, which writes the response itself'
     [, $addr] = accept_start('client-request.php', 1);
     expect(probe($addr, '/x'))->toBe('client /x');
 });
+
+it('sends a PSR-7 response with the headers PHP was told that it does not name, its own winning', function () {
+    [, $addr] = accept_start('psr7-output.php', 1);
+    $conn = native_connect($addr);
+    fwrite($conn, "GET /cookie HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+    $response = native_read_response($conn);
+    expect([$response['status'], $response['headers']['set-cookie'] ?? null, $response['headers']['content-type'] ?? null, $response['body']])
+        ->toBe([202, 'php=set', 'text/plain', 'body']);
+});
+
+it('refuses output with echo in a PSR-7 handler: a 500, and the worker goes on', function () {
+    [, $addr, $log] = accept_start('psr7-output.php', 1);
+    $conn = native_connect($addr);
+    fwrite($conn, "GET /echo HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+    expect(native_read_response($conn)['status'])->toBe(500);
+    expect(log_wait($log, '/Output in a PSR-7 handler/')[0] ?? null)->not->toBeNull();
+    expect(probe($addr, '/hello'))->toBe('hello');
+});

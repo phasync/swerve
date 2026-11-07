@@ -11,13 +11,16 @@ use phasync\Psr\UploadedFile;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\ClientRequest;
+use Swerve\Http\SapiRequest;
 use Swerve\Swerve;
 
 /**
  * Serves an exchange under sapi() with a closure taking a PSR-7 ServerRequestInterface and
  * returning a ResponseInterface, as a PSR-7 application runs under php-fpm: the request is made
- * from the superglobals, its body is php://input, and the response goes out through header() and
- * echo.
+ * from the superglobals, its body is php://input, and the response is written to the
+ * ClientRequest, with the headers PHP set itself (a session's cookie) that the response does not
+ * name. PHP's own head and flush() are not the response: a coroutine of the handler that fills
+ * the body and calls flush() commits nothing early (#107); output with echo throws.
  *
  * A `101 Switching Protocols` response to a request with an Upgrade header takes the connection,
  * as {@see Swerve::upgrade()} does: the 101 goes out with the response's headers, the response
@@ -34,6 +37,7 @@ final class Psr7
     /** @param \Closure(ServerRequestInterface): ResponseInterface $app */
     public static function serve(ClientRequest $client, \Closure $app): void
     {
+        SapiRequest::psr();
         $headers  = $client->getRequestHeaders();
         $upgrade  = isset($headers['upgrade']) ? new UnbufferedStream() : null;
         $response = $app(self::request($client, $headers, $upgrade));
@@ -48,7 +52,7 @@ final class Psr7
 
             return;
         }
-        self::send($response);
+        self::send($client, $response);
     }
 
     /** @param array<string, list<string>> $headers */
@@ -119,27 +123,31 @@ final class Psr7
         });
     }
 
-    private static function send(ResponseInterface $response): void
+    private static function send(ClientRequest $client, ResponseInterface $response): void
     {
-        \http_response_code($response->getStatusCode());
-        foreach ($response->getHeaders() as $name => $values) {
-            foreach ($values as $value) {
-                \header("$name: $value", false);
+        $headers = $response->getHeaders();
+        $named   = \array_change_key_case(\array_fill_keys(\array_keys($headers), true));
+        // What PHP was told (session_start()'s cookie, setcookie(), X-Powered-By), unless the response names it
+        foreach (\headers_list() as $line) {
+            [$name, $value] = \explode(':', $line, 2) + [1 => ''];
+            if (!isset($named[\strtolower($name = \trim($name))])) {
+                $headers[$name][] = \ltrim($value);
             }
         }
         $body = $response->getBody();
         $size = $body->getSize();
         if (null !== $size && $size > 0 && !$response->hasHeader('Content-Length')) {
-            \header("Content-Length: $size");
+            $headers['Content-Length'] = [(string) $size];
         }
-        if ('HEAD' === $_SERVER['REQUEST_METHOD']) {
+        $client->sendResponseHeaders($response->getStatusCode(), $headers, '' === $response->getReasonPhrase() ? null : $response->getReasonPhrase());
+        if ('HEAD' === $client->getMethod()) {
             return;
         }
         if ($body->isSeekable()) {
             $body->rewind(); // a response is built by writing to its body, which leaves it at the end
         }
         while (!$body->eof()) {
-            echo $body->read(self::CHUNK);
+            $client->write($body->read(self::CHUNK));
         }
     }
 }

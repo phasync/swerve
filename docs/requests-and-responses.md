@@ -64,7 +64,9 @@ while (Swerve::accept('public/', function (ServerRequestInterface $request) use 
 The request is made from the superglobals as a PSR-7 application's front controller makes it
 under php-fpm: query, cookies, uploaded files, the parsed form, and `php://input` as its body.
 The response body is copied out until its end, so a body that a coroutine writes after the
-handler returned (a `phasync\Psr\UnbufferedStream`) streams through PSR-15 middleware.
+handler returned (a `phasync\Psr\UnbufferedStream`) streams through PSR-15 middleware. The
+response is the `ResponseInterface`: the headers PHP was told (`setcookie()`, a session's cookie)
+join it unless it names them, `flush()` commits nothing, and output with `echo` throws.
 
 A `101 Switching Protocols` response to a request with an `Upgrade` header takes the connection:
 the 101 goes out with the response's headers, the response body is copied to the connection until
