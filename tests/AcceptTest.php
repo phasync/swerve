@@ -129,6 +129,20 @@ it('runs the app a symfony/runtime front controller returns, with the runtime an
         ->and(probe($addr, '/other?x=1'))->toBe('hello from runtime, at /other');
 });
 
+it('gives $_SERVER the entries php-fpm behind nginx has', function () {
+    [, $addr] = accept_start('hello.php', 1);
+    $server   = json_decode(probe($addr, '/server'), true);
+    ksort($server);
+    expect($server)->toBe([
+        'DOCUMENT_URI'      => $server['SCRIPT_NAME'], // no PATH_INFO here
+        'GATEWAY_INTERFACE' => 'CGI/1.1',
+        'REDIRECT_STATUS'   => '200',
+        'REQUEST_SCHEME'    => 'http',
+        'SCRIPT_NAME'       => $server['SCRIPT_NAME'],
+        'SERVER_SOFTWARE'   => 'swerve/' . Swerve\Swerve::getVersion(),
+    ]);
+});
+
 it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', function () {
     [, $addr] = accept_start('psr7.php', 1);
     $conn     = native_connect($addr);

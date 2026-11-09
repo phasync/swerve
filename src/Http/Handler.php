@@ -5,6 +5,7 @@ namespace Swerve\Http;
 use phasync\CancelledException;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\ClientRequest;
+use Swerve\Swerve;
 use Swerve\Psr\Psr7;
 
 /**
@@ -173,6 +174,11 @@ final class Handler
             'SCRIPT_NAME'        => $name,
             'PHP_SELF'           => $name . $info,
             'DOCUMENT_ROOT'      => $root,
+            'DOCUMENT_URI'       => $name . $info,
+            'REQUEST_SCHEME'     => $client->getScheme(),
+            'GATEWAY_INTERFACE'  => 'CGI/1.1',
+            'SERVER_SOFTWARE'    => 'swerve/' . Swerve::getVersion(),
+            'REDIRECT_STATUS'    => '200',
         ];
         if (null !== $info) {
             $server['PATH_INFO']       = $info;
