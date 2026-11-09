@@ -88,9 +88,8 @@ goes through it step by step.
   meanwhile; given a bootstrap file, a WebSocket moves to WebSocket workers that loaded it. A
   PSR-7 handler's `101` response stays open too. See [Realtime](docs/realtime.md).
 - **Finish early.** The response is complete at its `Content-Length` (once out of PHP's output
-  buffers), or at
-  `Swerve::finishRequest()`, which `fastcgi_finish_request()` calls: the connection takes its next
-  request while the request's code runs on.
+  buffers), or at `Swerve::finishRequest()`, which `fastcgi_finish_request()` calls: the
+  connection takes its next request while the request's code runs on.
 - **Wait cheaply.** `phasync::sleep()`, `phasync::go()` and every phasync primitive work in a
   request; the worker serves others while it waits.
 
