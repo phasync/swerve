@@ -69,7 +69,8 @@ final class Swerve
      */
     public static function log(): LoggerInterface
     {
-        return self::$log ??= new Logger(\STDERR, (string) \getmypid(), LogLevel::NOTICE);
+        // php://stderr, not the CLI's STDERR constant, which a request (as php-fpm's) has not
+        return self::$log ??= new Logger(\fopen('php://stderr', 'w'), (string) \getmypid(), LogLevel::NOTICE);
     }
 
     /**
