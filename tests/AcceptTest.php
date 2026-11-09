@@ -519,6 +519,16 @@ it('runs the PHP file a request names below the static directory, index.php for 
         ->and($get('/style.css'))->toBe("style\n");
 });
 
+it('serves a directory by its index.php before its index.html, as nginx does (#116)', function () {
+    [, $addr] = accept_start('routed.php', 1);
+    $get = static fn (string $path) => accept_request(native_connect($addr), $path);
+    $moved = $get('/wp-admin');
+    expect($get('/')['body'])->toBe('index.php /index.php /index.php - routed routed') // Nextcloud ships an index.html saying PHP is off
+        ->and($get('/wp-admin/')['body'])->toBe('index.php /wp-admin/index.php /wp-admin/index.php - routed wp-admin')
+        ->and([$moved['status'], $moved['headers']['location'] ?? null])->toBe([301, '/wp-admin/'])
+        ->and($get('/docs/')['body'])->toBe("docs\n");
+});
+
 it('parses cookies as PHP does: names as sent, values rawurldecoded, the first of a name winning', function () {
     [, $addr] = accept_start('cookies.php', 1);
     // What php -S (PHP's own parser) makes of the same header

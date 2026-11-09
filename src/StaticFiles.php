@@ -15,7 +15,8 @@ use Swerve\Http\ErrorPage;
  * encoding (`Content-Encoding`, `Vary: Accept-Encoding`); `304 Not
  * Modified` for If-None-Match or If-Modified-Since; a single byte range (`Range: bytes=`) as
  * `206 Partial Content`, or 416 when it lies past the end. A directory is served by its
- * index.html, after a redirect to the path with a trailing slash.
+ * index.html, after a redirect to the path with a trailing slash; one with an index.php goes to
+ * the application, after the same redirect, as nginx tries index.php first.
  *
  * Not served, but passed on to the application: other methods, a path that leaves the
  * directory (`..`, a symlink pointing outside it), a name starting with a dot (`.env`,
@@ -80,7 +81,7 @@ final class StaticFiles
 
     /**
      * The handler that answers $request from the directory, when it names a file there (or a
-     * directory with an index.html); null when the application answers it.
+     * directory with an index.html and no index.php); null when the application answers it.
      *
      * @return ?\Closure(ClientRequest): void
      *
@@ -100,7 +101,8 @@ final class StaticFiles
             return null;
         }
         if (\is_dir($file)) {
-            if (!\is_file("$file/index.html")) {
+            $php = \is_file("$file/index.php");
+            if (!$php && !\is_file("$file/index.html")) {
                 return null;
             }
             if (!\str_ends_with($path, '/')) {
@@ -111,6 +113,9 @@ final class StaticFiles
                     $request->sendResponseHeaders(301, ['Location' => $location]);
                     $request->end();
                 };
+            }
+            if ($php) {
+                return null; // index.php before index.html, as nginx's `index index.php index.html` (#116)
             }
             $file .= '/index.html';
         }
