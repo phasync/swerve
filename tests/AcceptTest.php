@@ -114,6 +114,15 @@ it('gives a request the output buffer of php.ini\'s output_buffering, as php-fpm
     }
 });
 
+it('keeps swerve\'s own warnings from the application\'s error handler (#112)', function () {
+    [, $addr] = accept_start('error-handler.php', 1);
+    for ($i = 0; $i < 20; ++$i) {
+        $last = probe($addr, '/errors');
+        usleep(10_000); // the worker waits for the next connection: its channel is empty
+    }
+    expect($last)->toBe('[]');
+});
+
 it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', function () {
     [, $addr] = accept_start('psr7.php', 1);
     $conn     = native_connect($addr);

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The worker's channel to the master no longer reports `EAGAIN` to the application's error handler: `@` silenced the warning, but a handler set with `set_error_handler()` still got it, and Nextcloud logged it on every request (#112).
 - A request starts in the output buffer of php.ini's `output_buffering`, as under php-fpm: the CLI that runs swerve forces the setting to 0, so a request had none. MediaWiki, which starts its gzip handler only when no buffer is open, sent gzip where php-fpm sends plain HTML, and Laravel's streamed responses failed at `ob_flush()` (#111). A body completes at its `Content-Length` once it has left the buffers; `Swerve::upgrade()` closes the request's empty buffer, so output after it is still refused at once.
 - A script's uncaught exception goes to the handler it set with `set_exception_handler()`, as PHP ends any script: CodeIgniter renders its 404 page there, which swerve answered with a 500 (#110).
 - Requires phasync 2.0.10, whose ext-phasync 2.0.8 keeps `$_SESSION` across a wait: it was unset after one, and reading a key written before it killed the worker (#108).

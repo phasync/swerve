@@ -673,8 +673,15 @@ final class LotClient
         if (null !== $conn) {
             $message['control'] = [['level' => \SOL_SOCKET, 'type' => \SCM_RIGHTS, 'data' => [$conn]]];
         }
-        // MSG_NOSIGNAL: a peer that just died is an error here, not a SIGPIPE killing this process
-        if (false === @\socket_sendmsg($to, $message, \MSG_NOSIGNAL)) {
+        // MSG_NOSIGNAL: a peer that just died is an error here, not a SIGPIPE killing this process.
+        // PHP's own error handler, which @ silences: an application's would get the warning (#112)
+        \set_error_handler(null);
+        try {
+            $sent = @\socket_sendmsg($to, $message, \MSG_NOSIGNAL);
+        } finally {
+            \restore_error_handler();
+        }
+        if (false === $sent) {
             throw new \RuntimeException('Sending to the swerve master or worker failed: ' . \socket_strerror(\socket_last_error($to)));
         }
     }
@@ -692,7 +699,12 @@ final class LotClient
     {
         while (true) {
             $message = ['buffer_size' => $size, 'controllen' => \socket_cmsg_space(\SOL_SOCKET, \SCM_RIGHTS, 1)];
-            $n       = @\socket_recvmsg($socket, $message, \MSG_DONTWAIT);
+            \set_error_handler(null); // see send()
+            try {
+                $n = @\socket_recvmsg($socket, $message, \MSG_DONTWAIT);
+            } finally {
+                \restore_error_handler();
+            }
             if (0 === $n) {
                 return null;
             }
