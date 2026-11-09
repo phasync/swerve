@@ -12,6 +12,11 @@
  */
 
 return static function (): void {
+    // Output goes out as it is written, whatever php.ini's output_buffering: a body still in the
+    // buffer it opens reaches swerve, and its Content-Length, only once flushed (#111)
+    while (\ob_get_level() > 0) {
+        \ob_end_flush();
+    }
     $path = \strtok($_SERVER['REQUEST_URI'], '?');
     $file = $_GET['file'] ?? null;
     switch ($path) {

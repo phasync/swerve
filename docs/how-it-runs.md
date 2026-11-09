@@ -44,7 +44,7 @@ Once the response is complete, the connection goes on without the request: it cl
 coroutines it started run on (tail work) in its coroutine and `Scope` until they end. Tail work
 that never waits just finishes first; once it waits (or phasync preempts it), a spare coroutine,
 reused, goes on with the connection. A response
-is complete when its body has reached the `Content-Length` it declared, at
+is complete when its body has left PHP's output buffers up to the `Content-Length` it declared, at
 `Swerve::finishRequest()`, which `fastcgi_finish_request()` and `litespeed_finish_request()` call
 in a worker (Symfony's and Laravel's terminate step uses them), or when the handler returns. From
 then on the client is gone for that code: `connection_aborted()` is true, and what it writes is

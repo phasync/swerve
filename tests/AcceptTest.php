@@ -4,7 +4,7 @@
 // it back after each kept-alive response; workers loop worker.php through run_next(), each
 // running the app's swerve.php, whose Swerve::accept() calls serve the requests.
 
-function accept_start(string $fixture, int $workers = 2): array
+function accept_start(string $fixture, int $workers = 2, array $env = []): array
 {
     $ext = getenv('PHASYNC_EXT_SO');
     if (!$ext) {
@@ -17,6 +17,7 @@ function accept_start(string $fixture, int $workers = 2): array
         [1 => ['file', '/dev/null', 'w'], 2 => ['file', $log, 'a']],
         $pipes,
         __DIR__ . '/Fixtures/accept',
+        $env ? $env + getenv() : null,
     );
     $GLOBALS['swerve_groups'][] = proc_get_status($process)['pid'];
     $deadline                   = microtime(true) + 10;
@@ -102,6 +103,15 @@ it('gives a script\'s uncaught exception to its set_exception_handler() handler,
     $response = accept_request($conn, '/handled');
     expect([$response['status'], $response['body']])->toBe([404, 'handled: no such page']);
     expect(probe($addr, '/after'))->toMatch('/count=1 uri=\\/after/');
+});
+
+it('gives a request the output buffer of php.ini\'s output_buffering, as php-fpm does (#111)', function () {
+    foreach (['4096' => 'level 1', 'Off' => 'level 0'] as $value => $level) {
+        $ini = temp_path(true);
+        file_put_contents("$ini/zz-buffering.ini", "output_buffering = $value\n");
+        [, $addr] = accept_start('hello.php', 1, ['PHP_INI_SCAN_DIR' => ":$ini"]);
+        expect(probe($addr, '/level'))->toBe($level);
+    }
 });
 
 it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', function () {

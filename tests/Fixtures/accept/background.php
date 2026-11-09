@@ -18,7 +18,10 @@ while (Swerve\Swerve::accept(null, function () {
         $ok = null;
         if ('/length' === $path) {
             header('Content-Length: 5');
-            echo 'early'; // its declared length: the response is complete
+            echo 'early';
+            while (ob_get_level() > 0) { // out of php.ini's output buffer (#111): its declared length, complete
+                ob_end_flush();
+            }
         } else {
             echo 'early';
             $ok = fastcgi_finish_request();

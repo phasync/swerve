@@ -35,11 +35,13 @@ are the request's own, and `php://input` is its body.
 ## The response
 
 `header()`, `setcookie()`, `http_response_code()` and `echo` make it, through PHP's output
-buffers as usual. `flush()` puts what is written on the wire: a stream is output with waits
-between it. Without a `Content-Length` the body is chunked.
+buffers as usual: a request starts in the buffer of php.ini's `output_buffering`, as under
+php-fpm (4096 bytes in php.ini-production). What leaves the buffers (`ob_flush()`, or a full
+buffer) `flush()` puts on the wire: a stream is output with waits between it. Without a
+`Content-Length` the body is chunked.
 
-The response is complete when the handler returns, when its body has reached the
-`Content-Length` it declared, or at `Swerve::finishRequest()` (also `fastcgi_finish_request()` and
+The response is complete when the handler returns, when its body has left PHP's output buffers
+up to the `Content-Length` it declared, or at `Swerve::finishRequest()` (also `fastcgi_finish_request()` and
 `litespeed_finish_request()`). From then on the connection goes on without the request: its
 next request is served while the request's code and the coroutines it started run on. They see
 `connection_aborted()` true, and what they write is dropped.

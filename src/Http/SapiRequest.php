@@ -23,6 +23,9 @@ final class SapiRequest
     /** @var \WeakMap<\Scope, self> the request of each scope, for upgrade() */
     private static \WeakMap $requests;
 
+    /** php.ini's output_buffering, once read: see outputBuffering() */
+    private static int $buffering;
+
     private ClientRequest $client;
 
     /** @var array<string, mixed> the request's $_SERVER entries, for request_info() */
@@ -46,6 +49,9 @@ final class SapiRequest
      */
     private bool $psr;
 
+    /** The request runs in the output buffer of php.ini's output_buffering that run() opened. */
+    private bool $buffered;
+
     private function __construct()
     {
     }
@@ -58,10 +64,22 @@ final class SapiRequest
         $sapi           = self::popInstance() ?? new self();
         $sapi->client   = $client;
         $sapi->server   = $server;
-        $sapi->gone     = $sapi->upgraded = $sapi->finished = $sapi->psr = false;
+        $sapi->gone     = $sapi->upgraded = $sapi->finished = $sapi->psr = $sapi->buffered = false;
         $scope          = \Scope::getCurrent();
         self::$requests ??= new \WeakMap();
         self::$requests[$scope] = $sapi;
+        $size = self::$buffering ??= self::outputBuffering();
+        if (0 !== $size) {
+            $inner = $code;
+            $code  = static function () use ($inner, $size, $sapi): void {
+                // php.ini's default buffer, as php_request_startup() opens it under php-fpm (#111):
+                // the CLI forces output_buffering to 0; unless PHP opened it, given with -d
+                if (0 === \ob_get_level()) {
+                    $sapi->buffered = \ob_start(null, $size > 1 ? $size : 0);
+                }
+                $inner();
+            };
+        }
         try {
             \phasync\ext\sapi($code, $sapi);
         } finally {
@@ -74,6 +92,26 @@ final class SapiRequest
         if (!$upgraded && $client instanceof HttpClientRequest) {
             $client->reusable();
         }
+    }
+
+    /**
+     * php.ini's output_buffering, which the CLI that runs swerve forces to 0 over php.ini, even
+     * for get_cfg_var(): read from the ini files PHP loaded, or from SWERVE_OUTPUT_BUFFERING, in
+     * which the master gives its workers what it read.
+     *
+     * @internal
+     */
+    public static function outputBuffering(): int
+    {
+        $value = \getenv('SWERVE_OUTPUT_BUFFERING');
+        if (false === $value) {
+            $value = '0';
+            foreach (\array_filter([\php_ini_loaded_file(), ...\explode(',', (string) \php_ini_scanned_files())]) as $file) {
+                $value = (\parse_ini_file(\trim($file)) ?: [])['output_buffering'] ?? $value;
+            }
+        }
+
+        return (int) $value;
     }
 
     public function returnToPool(): void
@@ -130,6 +168,9 @@ final class SapiRequest
             throw new \LogicException('Swerve::upgrade() is called before the response begins; there is output in an output buffer');
         }
         $sapi->upgraded = true;
+        if ($sapi->buffered && 1 === \ob_get_level()) {
+            \ob_end_clean(); // empty: output after this reaches write(), which refuses it
+        }
     }
 
     /**

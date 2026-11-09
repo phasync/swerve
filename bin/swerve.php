@@ -158,6 +158,8 @@ require $autoload;
         // The environment, not putenv(): PHP undoes putenv() when a request ends, and the
         // workers' lifecycles are requests
         $env += ['SWERVE_PUBSUB_RING' => (string) $ring, 'SWERVE_MASTER' => '1', 'SWERVE_AUTOLOAD' => \realpath($autoload), 'SWERVE_APP' => $appFile];
+        // Read once, not by every worker lifecycle
+        $env += ['SWERVE_OUTPUT_BUFFERING' => (string) Swerve\Http\SapiRequest::outputBuffering()];
         if (\extension_loaded('grpc') && false === \getenv('GRPC_ENABLE_FORK_SUPPORT')) {
             // The workers are forked: without this, grpc's threads keep a forked worker from exiting
             $env['GRPC_ENABLE_FORK_SUPPORT'] = '1';
