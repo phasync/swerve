@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The script a request names is found with its path's slashes merged, as nginx does: `//index.php` ran with SCRIPT_NAME `//index.php`, and Joomla redirected where php-fpm answers 404 (#117).
 - A directory with an index.php goes to the application, before its index.html, as nginx's `index index.php index.html` does: Nextcloud's front page was its static index.html saying PHP is off (#116).
 - A worker loads the project's Composer class loader as `vendor/autoload.php` makes it, without including that file: an application that keeps the loader from its own `require_once 'vendor/autoload.php'` got `true`, and Nextcloud failed on it (#115).
 - `$_SERVER` has the entries php-fpm behind nginx has that it lacked: `SERVER_SOFTWARE` (`swerve/<version> (nginx-compatible)`: Moodle refuses a server it doesn't know), `GATEWAY_INTERFACE`, `REQUEST_SCHEME`, `DOCUMENT_URI` and `REDIRECT_STATUS`. Drupal's status report showed no web server (#114).

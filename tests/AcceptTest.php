@@ -516,7 +516,9 @@ it('runs the PHP file a request names below the static directory, index.php for 
         ->and($get('/missing.php'))->toBe('index.php /index.php /index.php - routed routed')
         ->and($get('/.hidden/hook.php'))->toBe('index.php /index.php /index.php - routed routed')
         ->and($get('/wp-admin/../wp-login.php'))->toBe('index.php /index.php /index.php - routed routed')
-        ->and($get('/style.css'))->toBe("style\n");
+        ->and($get('/style.css'))->toBe("style\n")
+        ->and($get('//wp-login.php'))->toBe('wp-login.php /wp-login.php /wp-login.php - routed routed') // slashes merged, as nginx does
+        ->and($get('/wp-admin//admin-ajax.php//x'))->toBe('admin-ajax.php /wp-admin/admin-ajax.php /wp-admin/admin-ajax.php/x /x routed wp-admin');
 });
 
 it('serves a directory by its index.php before its index.html, as nginx does (#116)', function () {

@@ -116,7 +116,10 @@ final class Handler
      */
     private static function route(ClientRequest $client, string $root): ?array
     {
-        $path = \rawurldecode((string) \parse_url($client->getTarget(), \PHP_URL_PATH));
+        // Slashes merged, as nginx's merge_slashes does: `//index.php` is /index.php (#117)
+        // (not parse_url(), which reads `//index.php` as a host)
+        $target = $client->getTarget();
+        $path   = \preg_replace('#//+#', '/', \rawurldecode(\str_starts_with($target, '/') ? \explode('?', $target, 2)[0] : (string) \parse_url($target, \PHP_URL_PATH)));
         if (\str_contains($path, '/.') || \str_contains($path, "\0")) {
             return null;
         }

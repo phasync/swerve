@@ -91,7 +91,9 @@ final class StaticFiles
     {
         $method = $request->getMethod();
         $target = $request->getTarget();
-        $path   = \rawurldecode((string) \parse_url($target, \PHP_URL_PATH));
+        // Slashes merged, as nginx does; not parse_url(), which reads `//a.css` as a host
+        $raw    = \preg_replace('#//+#', '/', \str_starts_with($target, '/') ? \explode('?', $target, 2)[0] : (string) \parse_url($target, \PHP_URL_PATH));
+        $path   = \rawurldecode($raw);
         if (('GET' !== $method && 'HEAD' !== $method) || \str_contains($path, "\0") || \preg_match('#/\.(?!well-known/)|\.(?:php\d?|phps|phtml|phar|inc)$#i', $path)) {
             return null;
         }
@@ -107,7 +109,7 @@ final class StaticFiles
             }
             if (!\str_ends_with($path, '/')) {
                 $query    = \parse_url($target, \PHP_URL_QUERY);
-                $location = \parse_url($target, \PHP_URL_PATH) . '/' . (null !== $query && '' !== $query ? "?$query" : '');
+                $location = $raw . '/' . (null !== $query && '' !== $query ? "?$query" : '');
 
                 return static function (ClientRequest $request) use ($location): void {
                     $request->sendResponseHeaders(301, ['Location' => $location]);
