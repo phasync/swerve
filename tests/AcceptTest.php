@@ -123,6 +123,12 @@ it('keeps swerve\'s own warnings from the application\'s error handler (#112)', 
     expect($last)->toBe('[]');
 });
 
+it('runs the app a symfony/runtime front controller returns, with the runtime and options its autoload_runtime.php was generated with (#113)', function () {
+    [, $addr] = accept_start('runtime.php', 1);
+    expect(probe($addr, '/page'))->toBe('hello from runtime, at /page')
+        ->and(probe($addr, '/other?x=1'))->toBe('hello from runtime, at /other');
+});
+
 it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', function () {
     [, $addr] = accept_start('psr7.php', 1);
     $conn     = native_connect($addr);

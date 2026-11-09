@@ -12,7 +12,9 @@ without the application; the rest goes to `$handler`:
 | `null` | | `404`, or the PHP file under `$staticPath` that the path names |
 
 A script's path also runs the PHP files under `$staticPath` that a request names, as php-fpm
-behind nginx does. Every request but a `ClientRequest` closure's runs under the phasync extension's
+behind nginx does. A front controller of symfony/runtime (Symfony 5.3+, Drupal 11) returns its app
+to swerve, which loaded the project's autoloader first, as to any runtime host: swerve runs it as
+the generated `vendor/autoload_runtime.php` runs it under php-fpm. Every request but a `ClientRequest` closure's runs under the phasync extension's
 `sapi()` (`PHP_SAPI` is `swerve`). Each runs in a `Scope` of its own: `Scope::getCurrent()` is per request, and the coroutines it
 starts share it.
 
