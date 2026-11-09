@@ -674,10 +674,11 @@ final class LotClient
             $message['control'] = [['level' => \SOL_SOCKET, 'type' => \SCM_RIGHTS, 'data' => [$conn]]];
         }
         // MSG_NOSIGNAL: a peer that just died is an error here, not a SIGPIPE killing this process.
-        // PHP's own error handler, which @ silences: an application's would get the warning (#112)
-        \set_error_handler(null);
+        // A warning swallowed: @ would still reach an application's error handler, and leave it in
+        // error_get_last(), which Nextcloud logs as its request ends (#112)
+        \set_error_handler(static fn (): bool => true);
         try {
-            $sent = @\socket_sendmsg($to, $message, \MSG_NOSIGNAL);
+            $sent = \socket_sendmsg($to, $message, \MSG_NOSIGNAL);
         } finally {
             \restore_error_handler();
         }
@@ -699,9 +700,9 @@ final class LotClient
     {
         while (true) {
             $message = ['buffer_size' => $size, 'controllen' => \socket_cmsg_space(\SOL_SOCKET, \SCM_RIGHTS, 1)];
-            \set_error_handler(null); // see send()
+            \set_error_handler(static fn (): bool => true); // see send()
             try {
-                $n = @\socket_recvmsg($socket, $message, \MSG_DONTWAIT);
+                $n = \socket_recvmsg($socket, $message, \MSG_DONTWAIT);
             } finally {
                 \restore_error_handler();
             }

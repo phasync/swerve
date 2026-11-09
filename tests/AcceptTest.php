@@ -114,13 +114,13 @@ it('gives a request the output buffer of php.ini\'s output_buffering, as php-fpm
     }
 });
 
-it('keeps swerve\'s own warnings from the application\'s error handler (#112)', function () {
+it('keeps swerve\'s own warnings from the application\'s error handler and error_get_last() (#112)', function () {
     [, $addr] = accept_start('error-handler.php', 1);
     for ($i = 0; $i < 20; ++$i) {
         $last = probe($addr, '/errors');
         usleep(10_000); // the worker waits for the next connection: its channel is empty
     }
-    expect($last)->toBe('[]');
+    expect($last)->toBe('[[],null]'); // nor in error_get_last(), which Nextcloud logs at the end
 });
 
 it('runs the app a symfony/runtime front controller returns, with the runtime and options its autoload_runtime.php was generated with (#113)', function () {

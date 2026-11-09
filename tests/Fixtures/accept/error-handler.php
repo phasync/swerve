@@ -12,6 +12,6 @@ set_error_handler(static function (int $no, string $message): bool {
     return true;
 });
 while (Swerve\Swerve::accept(null, static function (): void {
-    echo json_encode(Caught::$errors);
+    echo json_encode([Caught::$errors, error_get_last()]);
 })) {
 }
