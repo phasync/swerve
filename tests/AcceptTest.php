@@ -96,6 +96,14 @@ it('closes the connection when the application says Connection: close', function
         ->and(native_closed($conn))->toBeTrue();
 });
 
+it('gives a script\'s uncaught exception to its set_exception_handler() handler, as PHP does (#110)', function () {
+    [, $addr] = accept_start('classic.php', 1);
+    $conn     = native_connect($addr);
+    $response = accept_request($conn, '/handled');
+    expect([$response['status'], $response['body']])->toBe([404, 'handled: no such page']);
+    expect(probe($addr, '/after'))->toMatch('/count=1 uri=\\/after/');
+});
+
 it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', function () {
     [, $addr] = accept_start('psr7.php', 1);
     $conn     = native_connect($addr);

@@ -9,6 +9,14 @@ function f(): string
 }
 $site  = 'site-' . getmypid();
 $count = ($count ?? 0) + 1;
+if ('/handled' === $_SERVER['REQUEST_URI']) { // as CodeIgniter renders its 404 page
+    set_exception_handler(static function (Throwable $e): void {
+        http_response_code(404);
+        echo 'handled: ', $e->getMessage();
+    });
+
+    throw new RuntimeException('no such page');
+}
 match ($_SERVER['REQUEST_URI']) {
     '/close' => header('Connection: close'),
     default  => null,

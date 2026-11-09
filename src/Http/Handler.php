@@ -2,6 +2,7 @@
 
 namespace Swerve\Http;
 
+use phasync\CancelledException;
 use Psr\Http\Message\ServerRequestInterface;
 use Swerve\ClientRequest;
 use Swerve\Psr\Psr7;
@@ -37,7 +38,15 @@ final class Handler
 
             return self::sapi($root, static fn (ClientRequest $client) => self::route($client, $root) ?? $fallback, static function (ClientRequest $client, string $file): void {
                 \chdir(\dirname($file));
-                \phasync\ext\include_global($file);
+                try {
+                    \phasync\ext\include_global($file);
+                } catch (CancelledException $e) {
+                    throw $e; // swerve's own: the worker stops, or the client left
+                } catch (\Throwable $e) {
+                    // As PHP ends a script: its uncaught exception goes to the handler it set (#110)
+                    $handler = \set_exception_handler(null) ?? throw $e;
+                    $handler($e);
+                }
             });
         }
         $script = $_SERVER['SCRIPT_FILENAME'] ?? '';
