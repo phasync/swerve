@@ -12,7 +12,7 @@
 
 (static function (): void {
     \pcntl_signal(\SIGINT, \SIG_IGN); // Ctrl+C reaches every process of the terminal's group: the master decides
-    require \getenv('SWERVE_AUTOLOAD');
+    require __DIR__ . '/autoload.php';
     // The lifecycle ends once swerve.php and every coroutine it started have ended
     phasync::run(static function (): void {
         if (!Swerve\Lot\LotClient::get()->hello()) {

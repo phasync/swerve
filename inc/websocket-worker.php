@@ -8,6 +8,6 @@
 
 (static function (): void {
     \pcntl_signal(\SIGINT, \SIG_IGN); // Ctrl+C reaches every process of the terminal's group: the master decides
-    require \getenv('SWERVE_AUTOLOAD');
+    require __DIR__ . '/autoload.php';
     phasync::run(Swerve\Lot\WebSocketWorker::serve(...));
 })();

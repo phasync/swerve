@@ -143,6 +143,11 @@ it('gives $_SERVER the entries php-fpm behind nginx has', function () {
     ]);
 });
 
+it('gives a script that includes the project\'s vendor/autoload.php the class loader, as php-fpm does (#115)', function () {
+    [, $addr] = accept_start('classic.php', 1);
+    expect(probe($addr, '/loader'))->toBe('Composer\\Autoload\\ClassLoader');
+});
+
 it('runs a PSR-7 closure: ServerRequestInterface in, ResponseInterface out', function () {
     [, $addr] = accept_start('psr7.php', 1);
     $conn     = native_connect($addr);

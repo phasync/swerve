@@ -9,6 +9,11 @@ function f(): string
 }
 $site  = 'site-' . getmypid();
 $count = ($count ?? 0) + 1;
+if ('/loader' === $_SERVER['REQUEST_URI']) { // as Nextcloud keeps it (#115)
+    echo get_debug_type(require_once dirname(__DIR__, 4) . '/vendor/autoload.php');
+
+    return;
+}
 if ('/handled' === $_SERVER['REQUEST_URI']) { // as CodeIgniter renders its 404 page
     set_exception_handler(static function (Throwable $e): void {
         http_response_code(404);
