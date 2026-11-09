@@ -177,7 +177,7 @@ final class Handler
             'DOCUMENT_URI'       => $name . $info,
             'REQUEST_SCHEME'     => $client->getScheme(),
             'GATEWAY_INTERFACE'  => 'CGI/1.1',
-            'SERVER_SOFTWARE'    => 'swerve/' . Swerve::getVersion(),
+            'SERVER_SOFTWARE'    => 'swerve/' . Swerve::getVersion() . ' (nginx-compatible)', // routes as nginx before php-fpm does: apps that know their server (Moodle refuses others) take nginx's way
             'REDIRECT_STATUS'    => '200',
         ];
         if (null !== $info) {

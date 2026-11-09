@@ -25,7 +25,8 @@ are the request's own, and `php://input` is its body.
 
 - `$_SERVER` has what php-fpm behind nginx gives a script (`REQUEST_METHOD`, `REQUEST_URI`,
   `QUERY_STRING`, `SCRIPT_NAME`, `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `PATH_INFO`, the `HTTP_*`
-  headers, ...), with `SERVER_SOFTWARE` `swerve/<version>`. As
+  headers, ...), with `SERVER_SOFTWARE` `swerve/<version> (nginx-compatible)`: an application
+  that knows its server takes nginx's way, as swerve routes requests as nginx does. As
   php-fpm's default `clear_env`, it holds no environment variables: `getenv()` reads them.
 - A POST form (`application/x-www-form-urlencoded`, `multipart/form-data`) fills `$_POST` and
   `$_FILES` under `php.ini`'s limits (`post_max_size`, `upload_max_filesize`, `max_file_uploads`,

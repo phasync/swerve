@@ -139,7 +139,7 @@ it('gives $_SERVER the entries php-fpm behind nginx has', function () {
         'REDIRECT_STATUS'   => '200',
         'REQUEST_SCHEME'    => 'http',
         'SCRIPT_NAME'       => $server['SCRIPT_NAME'],
-        'SERVER_SOFTWARE'   => 'swerve/' . Swerve\Swerve::getVersion(),
+        'SERVER_SOFTWARE'   => 'swerve/' . Swerve\Swerve::getVersion() . ' (nginx-compatible)',
     ]);
 });
 
