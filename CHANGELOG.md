@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-16)
+
+Needs only stable releases: phasync 2.0.11 (with ext-phasync 2.0.9, ext-scope 0.6.1 and fiber-interop/scope 0.6.1) and phasync/net 2.0.2. Existing applications run under `swerve -S` as under php-fpm, and Laravel, Symfony and Slim can stay loaded between requests: see docs/applications.md and examples/frameworks.
 
 - A request's `ini_set()` no longer stays in effect for the requests after it in a `swerve.php` that loops: ext-phasync 2.0.9 undoes it once the worker has no request running, as php-fpm undoes it at each request's end; what `swerve.php` set before its requests stays. Requests running at the same time share ini values meanwhile, as they share `setlocale()`.
 - `fastcgi_finish_request()` and `flush()` for a client that already left no longer throw `phasync\IOException: The connection broke` into the script, which ended the worker's run: the response is dropped as for any write to a client that left, and the script goes on, `connection_aborted()` then true, as under php-fpm. Laravel answered such a request with a `Cannot modify header information` error, its handler rendering the exception after the headers had gone.
@@ -12,7 +14,7 @@
 - The worker's channel to the master no longer reports `EAGAIN` to the application's error handler: `@` silenced the warning, but a handler set with `set_error_handler()` still got it, and it stayed in `error_get_last()`, which Nextcloud logs as a request ends (#112).
 - A request starts in the output buffer of php.ini's `output_buffering`, as under php-fpm: the CLI that runs swerve forces the setting to 0, so a request had none. MediaWiki, which starts its gzip handler only when no buffer is open, sent gzip where php-fpm sends plain HTML, and Laravel's streamed responses failed at `ob_flush()` (#111). A body completes at its `Content-Length` once it has left the buffers; `Swerve::upgrade()` closes the request's empty buffer, so output after it is still refused at once.
 - A script's uncaught exception goes to the handler it set with `set_exception_handler()`, as PHP ends any script: CodeIgniter renders its 404 page there, which swerve answered with a 500 (#110).
-- Requires phasync 2.0.10, whose ext-phasync 2.0.8 keeps `$_SESSION` across a wait: it was unset after one, and reading a key written before it killed the worker (#108).
+- `$_SESSION` is kept across a wait: it was unset after one, and reading a key written before it killed the worker (ext-phasync 2.0.8, #108).
 - An upgraded connection (a `101`: a WebSocket, or a raw upgrade) no longer holds a spare coroutine for its life, reserved in case the connection went on to a next request it never has: about 20 KiB less per WebSocket, which is now ~70 KiB in PHP's heap, its two fibers most of it (#8).
 - A PSR-7 handler's response is written to the connection with its own headers, and those PHP was told that it does not name (`setcookie()`, a session's cookie). A coroutine filling the body that calls `flush()`, as Symfony's `StreamedResponse` does, committed PHP's default head before the response's; `flush()` now commits nothing in a PSR-7 handler, and output with `echo` there throws a `LogicException` (#107).
 - A request pipelined behind another on a keep-alive connection is answered when the worker's run of `swerve.php` ends first (one `accept()` per run, `swerve -S`): what the worker read of it goes back to the master with the connection, and on to the next worker. It was dropped, the connection closed (#106).
