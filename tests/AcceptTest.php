@@ -510,6 +510,15 @@ it('completes or flushes a response whose client left without an exception in th
         ->and(file_get_contents($log))->not->toContain('IOException');
 })->with(['finish', 'flush']);
 
+it('undoes a request\'s ini_set() for the next request of a swerve.php that loops, and keeps what swerve.php set before its requests, as php-fpm restores ini at a request\'s end', function () {
+    [, $addr] = accept_start('ini.php', 1);
+    $conn     = native_connect($addr);
+    $before   = accept_request($conn, '/')['body'];
+    expect(accept_request($conn, '/?set=1')['body'])->toBe($before)
+        ->and(accept_request($conn, '/')['body'])->toBe($before)
+        ->and(explode(' ', $before)[1])->toBe('7');
+});
+
 it('refuses Swerve::upgrade() at the call when the request can\'t be upgraded so', function () {
     [, $addr] = accept_start('upgrade.php', 1);
     $uncaught = accept_request(native_connect($addr), '/ws-uncaught');
