@@ -489,6 +489,27 @@ it('stops a request whose client is gone at its next output, and only that reque
     @unlink($marker);
 });
 
+it('completes or flushes a response whose client left without an exception in the script: fastcgi_finish_request() and flush() go on', function (string $how) {
+    [, $addr, $log] = accept_start('gone-finish.php', 1);
+    $id             = uniqid();
+    $marker         = sys_get_temp_dir() . "/swerve-gone-finish-$id";
+    $worker         = accept_request(native_connect($addr), '/')['body'];
+    $stream         = native_connect($addr);
+    fwrite($stream, "GET /late?id=$id&how=$how HTTP/1.1\r\nHost: test\r\n\r\n");
+    fclose($stream);
+    $deadline = microtime(true) + 3;
+    while (!file_exists($marker) && microtime(true) < $deadline) {
+        usleep(20000);
+    }
+    $result = @file_get_contents($marker);
+    @unlink($marker);
+    // after fastcgi_finish_request() connection_aborted() is true; one flush() may still land in
+    // the socket's buffer, so the client's leaving shows at a later write, as under php-fpm
+    expect($result)->toStartWith('finish' === $how ? 'went on 1' : 'went on ')
+        ->and(accept_request(native_connect($addr), '/')['body'])->toBe($worker)
+        ->and(file_get_contents($log))->not->toContain('IOException');
+})->with(['finish', 'flush']);
+
 it('refuses Swerve::upgrade() at the call when the request can\'t be upgraded so', function () {
     [, $addr] = accept_start('upgrade.php', 1);
     $uncaught = accept_request(native_connect($addr), '/ws-uncaught');

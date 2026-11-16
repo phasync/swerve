@@ -189,8 +189,13 @@ final class SapiRequest
         }
         \flush();
         $sapi->finished = true; // what the code writes from now on goes nowhere, and connection_aborted() is true
+        try {
+            return $sapi->client->finish();
+        } catch (IOException|TimeoutException) {
+            $sapi->gone = true; // the client left: as for write(), nothing reaches the script
 
-        return $sapi->client->finish();
+            return false;
+        }
     }
 
     /**
@@ -283,7 +288,11 @@ final class SapiRequest
         if ($this->upgraded || $this->psr) {
             return;
         }
-        $this->client->flush();
+        try {
+            $this->client->flush();
+        } catch (IOException|TimeoutException) {
+            $this->gone = true; // the extension then makes connection_aborted() true
+        }
     }
 
     public function request_info(): array

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `fastcgi_finish_request()` and `flush()` for a client that already left no longer throw `phasync\IOException: The connection broke` into the script, which ended the worker's run: the response is dropped as for any write to a client that left, and the script goes on, `connection_aborted()` then true, as under php-fpm. Laravel answered such a request with a `Cannot modify header information` error, its handler rendering the exception after the headers had gone.
 - A path's doubled slashes are merged, as nginx does: `parse_url()` read `//index.php` as a host name, so the static files saw the root directory and redirected to `/` where php-fpm behind nginx runs index.php; Joomla's feed URLs got a 301 for php-fpm's 404 (#117).
 - A directory with an index.php goes to the application, before its index.html, as nginx's `index index.php index.html` does: Nextcloud's front page was its static index.html saying PHP is off (#116).
 - A worker loads the project's Composer class loader as `vendor/autoload.php` makes it, without including that file: an application that keeps the loader from its own `require_once 'vendor/autoload.php'` got `true`, and Nextcloud failed on it (#115).
