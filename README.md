@@ -52,7 +52,7 @@ the shared cache, publish/subscribe and the container.
 ext-phasync ships inside phasync, and swerve loads it by itself.
 
 ```bash
-composer require phasync/swerve:^0.2@RC   # 0.2 is a release candidate; without @RC Composer installs 0.1
+composer require phasync/swerve
 vendor/bin/swerve -S public          # serve a directory as php -S does: WordPress, Laravel's public/
 vendor/bin/swerve                    # run ./swerve.php
 vendor/bin/swerve --watch            # during development: reload when a PHP file changes
@@ -73,6 +73,11 @@ while ($request = Swerve::accept('public/', $app->handle(...))) {
 // one request per run of swerve.php, which starts over clean for the next (as under php-fpm)
 phasync::await(Swerve::accept('wordpress/', 'wordpress/index.php'));
 ```
+
+Any application that runs under php-fpm runs under `swerve -S` unchanged; Laravel, Symfony and
+Slim can also stay loaded between requests: see
+[Running an existing application](docs/applications.md#boot-once) and
+[`examples/frameworks`](examples/frameworks).
 
 The first argument is a directory of static files, answered without the application. The
 handler is a script's path (run as a fresh main script, its PHP files too), a closure without

@@ -7,6 +7,9 @@ WebSockets, long polling) while the worker goes on serving others.
 Read in this order when you build an application on swerve:
 
 1. [Getting started](getting-started.md): install, a first application, running it.
+   [Running an existing application](applications.md): WordPress, Laravel, Drupal and others
+   as they run under php-fpm, with no adapter, and Laravel, Symfony and Slim booted once per
+   worker ([examples](../examples/frameworks)).
 2. [How swerve runs your application](how-it-runs.md): workers, coroutines, what is shared
    and what is not, and the one rule that matters most: never block a worker.
 3. [swerve.php as bootstrap](bootstrap.md): what `swerve.php` may start besides its requests
